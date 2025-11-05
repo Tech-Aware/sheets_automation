@@ -22,6 +22,50 @@ function normText_(s) {
     .trim();
 }
 
+function makeHeaderResolver_(headers) {
+  const row = Array.isArray(headers[0]) && headers.length === 1 ? headers[0] : headers;
+  const normalized = row.map(normText_);
+  return {
+    headers: row,
+    normalized,
+    colExact(name) {
+      return normalized.findIndex(h => h === normText_(name)) + 1;
+    },
+    colWhere(predicate) {
+      const idx = normalized.findIndex(predicate);
+      return idx >= 0 ? idx + 1 : 0;
+    }
+  };
+}
+
+function extractSkuBase_(sku) {
+  const parts = String(sku || "").trim().split('-');
+  if (parts.length < 2) return "";
+  return parts.slice(0, parts.length - 1).join('-');
+}
+
+function buildBaseToStockDate_(ss) {
+  const achats = ss && ss.getSheetByName('Achats');
+  if (!achats) return Object.create(null);
+
+  const lastA = achats.getLastRow();
+  if (lastA < 2) return Object.create(null);
+
+  const refVals = achats.getRange(2, 6, lastA - 1, 1).getValues();
+  const stampVals = achats.getRange(2, 22, lastA - 1, 1).getValues();
+
+  const map = Object.create(null);
+  for (let i = 0; i < refVals.length; i++) {
+    const base = String(refVals[i][0] || "").trim();
+    const dt = stampVals[i][0];
+    if (!base) continue;
+    if (dt instanceof Date && !isNaN(dt)) {
+      map[base] = dt;
+    }
+  }
+  return map;
+}
+
 // Vérifie le prix, colore la cellule si invalide, retourne true/false
 function ensureValidPriceOrWarn_(sh, row, C_PRIX) {
   if (!C_PRIX) return false;
@@ -94,12 +138,8 @@ function handleAchats(e) {
     if (!stock) return;
 
     const headersS = stock.getRange(1,1,1,stock.getLastColumn()).getValues()[0];
-    const norm = s => String(s||"").toLowerCase().normalize('NFD')
-                      .replace(/[\u0300-\u036f]/g,'').replace(/\s+/g,' ').trim();
-    const nS = headersS.map(norm);
-    const colExactS = name => nS.findIndex(h => h === norm(name)) + 1;
-
-    const C_SKU_STOCK = colExactS("sku") || colExactS("reference");
+    const resolverS = makeHeaderResolver_(headersS);
+    const C_SKU_STOCK = resolverS.colExact("sku") || resolverS.colExact("reference");
     if (!C_SKU_STOCK) return;
 
     const lastS = stock.getLastRow();
@@ -177,13 +217,9 @@ function handleAchats(e) {
     if (!stock) return;
 
     const headersS = stock.getRange(1,1,1,stock.getLastColumn()).getValues()[0];
-    const norm = s => String(s||"").toLowerCase().normalize('NFD')
-                      .replace(/[\u0300-\u036f]/g,'').replace(/\s+/g,' ').trim();
-    const nS = headersS.map(norm);
-    const colExactS = name => nS.findIndex(h => h === norm(name)) + 1;
-
-    const C_SKU_STOCK = colExactS("sku") || colExactS("reference");
-    const C_DMS_STOCK = colExactS("date de mise en stock"); // ta colonne E
+    const resolverS = makeHeaderResolver_(headersS);
+    const C_SKU_STOCK = resolverS.colExact("sku") || resolverS.colExact("reference");
+    const C_DMS_STOCK = resolverS.colExact("date de mise en stock"); // ta colonne E
     if (!C_SKU_STOCK || !C_DMS_STOCK) return;
 
     const lastS = stock.getLastRow();
@@ -193,11 +229,8 @@ function handleAchats(e) {
     const dmsVals = stock.getRange(2, C_DMS_STOCK, lastS - 1, 1).getValues();
 
     for (let i = 0; i < skuVals.length; i++) {
-      const sku = String(skuVals[i][0] || "").trim();
-      if (!sku) continue;
-      const parts = sku.split('-');
-      if (parts.length < 2) continue;
-      const base = parts.slice(0, parts.length - 1).join('-'); // ex: JLFK-0825
+      const base = extractSkuBase_(skuVals[i][0]);
+      if (!base) continue;
 
       if (base === refBase) {
         dmsVals[i][0] = dms; // peut être Date ou null
@@ -252,10 +285,8 @@ function handleAchats(e) {
 
   // Repère dynamiquement les colonnes de Stock
   const headers = target.getRange(1, 1, 1, Math.max(4, target.getLastColumn())).getValues()[0];
-  const normHeader = s => String(s||"").toLowerCase().normalize('NFD')
-                    .replace(/[\u0300-\u036f]/g,'').replace(/\s+/g,' ').trim();
-  const n = headers.map(normHeader);
-  const colExact = name => n.findIndex(h => h === normHeader(name)) + 1;
+  const resolver = makeHeaderResolver_(headers);
+  const colExact = resolver.colExact.bind(resolver);
 
   const COL_LABEL_STOCK = 1;                    // A = Libellé
   const COL_SKU_STOCK   = colExact("sku") || 3; // C par défaut
@@ -308,13 +339,9 @@ function renumberStockByBrand_(onlyOld) {
   onlyOld = !!onlyOld;
 
   const headers = stock.getRange(1,1,1,stock.getLastColumn()).getValues()[0];
-  const norm = s => String(s||"").toLowerCase().normalize('NFD')
-                    .replace(/[\u0300-\u036f]/g,'').replace(/\s+/g,' ').trim();
-  const n = headers.map(norm);
-  const colExact = name => n.findIndex(h => h === norm(name)) + 1;
-
-  const COL_OLD   = colExact("sku(ancienne nomenclature)") || 2; // B
-  const COL_NEW   = colExact("sku") || colExact("reference") || 3; // C
+  const resolver = makeHeaderResolver_(headers);
+  const COL_OLD   = resolver.colExact("sku(ancienne nomenclature)") || 2; // B
+  const COL_NEW   = resolver.colExact("sku") || resolver.colExact("reference") || 3; // C
 
   const width = Math.max(COL_NEW, COL_OLD, stock.getLastColumn());
   const data = stock.getRange(2, 1, last - 1, width).getValues();
@@ -377,16 +404,15 @@ function renumberStockByBrand_(onlyOld) {
 
 function handleStock(e) {
   const sh = e.source.getActiveSheet();
+  const ss = e.source;
   const turnedOn  = (e.value === "TRUE") || (e.value === true);
   const turnedOff = (e.value === "FALSE") || (e.value === false);
   const CLEAR_ON_UNCHECK = false;
 
-  const norm = s => String(s||"").toLowerCase().normalize('NFD')
-                    .replace(/[\u0300-\u036f]/g,'').replace(/\s+/g,' ').trim();
   const headers = sh.getRange(1,1,1,sh.getLastColumn()).getValues()[0];
-  const n = headers.map(norm);
-  const colExact = name => n.findIndex(h => h === norm(name)) + 1;
-  const colWhere = pred => { const i = n.findIndex(pred); return i >= 0 ? i+1 : 0; };
+  const resolver = makeHeaderResolver_(headers);
+  const colExact = resolver.colExact.bind(resolver);
+  const colWhere = resolver.colWhere.bind(resolver);
 
   const C_LABEL   = 1;                                       // A = libellé
   const C_OLD_SKU = colExact("sku(ancienne nomenclature)") || 2;
@@ -445,13 +471,13 @@ function handleStock(e) {
   if (C_VENDU_R && c === C_VENDU_R) {
     const cellDate = sh.getRange(r, C_DVENTE);
     if (turnedOn) {
-      if (!cellDate.getDisplayValue() || norm(cellDate.getDisplayValue()).includes("preciser la date de vente")) {
+      if (!cellDate.getDisplayValue() || normText_(cellDate.getDisplayValue()).includes("preciser la date de vente")) {
         cellDate.setValue("Préciser la date de vente");
       }
       ensureValidPriceOrWarn_(sh, r, C_PRIX);
     } else if (turnedOff) {
       // On enlève message éventuel + alerte de prix
-      if (norm(cellDate.getDisplayValue()).includes("preciser la date de vente")) {
+      if (normText_(cellDate.getDisplayValue()).includes("preciser la date de vente")) {
         cellDate.clearContent();
       }
       clearPriceAlertIfAny_(sh, r, C_PRIX);
@@ -506,13 +532,14 @@ function handleStock(e) {
     const valDate = sh.getRange(r, C_DVENTE).getValue();
     if (!(valDate instanceof Date) || isNaN(valDate.getTime())) return;
 
-    exportVente_(null, r, C_LABEL, C_SKU, C_PRIX, C_DVENTE, C_STAMPV);
+    const baseToDmsMap = buildBaseToStockDate_(ss);
+    exportVente_(null, r, C_LABEL, C_SKU, C_PRIX, C_DVENTE, C_STAMPV, baseToDmsMap);
     return;
   }
 }
 
 // Déplace la ligne de "Stock" vers "Ventes" (et calcule les délais)
-function exportVente_(e, row, C_LABEL, C_SKU, C_PRIX, C_DVENTE, C_STAMPV) {
+function exportVente_(e, row, C_LABEL, C_SKU, C_PRIX, C_DVENTE, C_STAMPV, baseToDmsMap) {
   const ss = SpreadsheetApp.getActive();
   const sh = ss.getSheetByName("Stock");
   if (!sh) return;
@@ -540,41 +567,25 @@ function exportVente_(e, row, C_LABEL, C_SKU, C_PRIX, C_DVENTE, C_STAMPV) {
   const prix  = C_PRIX ? sh.getRange(row, C_PRIX).getValue() : "";
 
   const headersS = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0];
-  const norm = s => String(s||"").toLowerCase()
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g,'')
-    .replace(/\s+/g,' ')
-    .trim();
-  const nS = headersS.map(norm);
-  const colExactS = name => nS.findIndex(h => h === norm(name)) + 1;
+  const resolverS = makeHeaderResolver_(headersS);
 
-  const C_DMIS  = colExactS("date de mise en ligne");
-  const C_DPUB  = colExactS("date de publication");
+  const C_DMS   = resolverS.colExact("date de mise en stock");
+  const C_DMIS  = resolverS.colExact("date de mise en ligne");
+  const C_DPUB  = resolverS.colExact("date de publication");
 
   const dMiseLigne = C_DMIS ? sh.getRange(row, C_DMIS).getValue() : null;
   const dPub       = C_DPUB ? sh.getRange(row, C_DPUB).getValue() : null;
 
-  let dMiseStock = null;
-  const achats = ss.getSheetByName("Achats");
-  if (achats && sku) {
-    const parts = String(sku).split('-');
-    if (parts.length >= 2) {
-      const base = parts.slice(0, parts.length - 1).join('-');
-      const lastA = achats.getLastRow();
-      if (lastA >= 2) {
-        const refVals  = achats.getRange(2, 6, lastA - 1, 1).getValues();  // F = REFERENCE
-        const stampVals= achats.getRange(2, 22, lastA - 1, 1).getValues(); // V = MIS EN STOCK LE
-        for (let i = 0; i < refVals.length; i++) {
-          const ref = String(refVals[i][0] || "").trim();
-          if (ref === base) {
-            const dt = stampVals[i][0];
-            if (dt instanceof Date && !isNaN(dt)) {
-              dMiseStock = dt;
-            }
-            break;
-          }
-        }
-      }
+  let dMiseStock = C_DMS ? sh.getRange(row, C_DMS).getValue() : null;
+  if (!(dMiseStock instanceof Date) || isNaN(dMiseStock)) {
+    dMiseStock = null;
+  }
+
+  if (!dMiseStock && sku) {
+    const base = extractSkuBase_(sku);
+    if (base) {
+      const map = baseToDmsMap || buildBaseToStockDate_(ss);
+      dMiseStock = map[base] || null;
     }
   }
 
@@ -639,12 +650,9 @@ function recalcStock() {
   }
 
   const headers = stock.getRange(1,1,1,stock.getLastColumn()).getValues()[0];
-  const norm = s => String(s||"").toLowerCase().normalize('NFD')
-                    .replace(/[\u0300-\u036f]/g,'').replace(/\s+/g,' ').trim();
-  const n = headers.map(norm);
-  const colExact = name => n.findIndex(h => h === norm(name)) + 1;
+  const resolver = makeHeaderResolver_(headers);
 
-  let C_DATE = colExact("date de livraison");
+  let C_DATE = resolver.colExact("date de livraison");
   if (!C_DATE) C_DATE = 4;
 
   const width = stock.getLastColumn();
@@ -679,17 +687,7 @@ function syncMiseEnStockFromAchats() {
     return;
   }
 
-  const refVals   = achats.getRange(2, 6,  lastA - 1, 1).getValues(); // F REFERENCE
-  const stampVals = achats.getRange(2, 22, lastA - 1, 1).getValues(); // V MIS EN STOCK LE
-  const mapBaseToDMS = Object.create(null);
-  for (let i = 0; i < refVals.length; i++) {
-    const base = String(refVals[i][0] || "").trim();
-    const dt   = stampVals[i][0];
-    if (!base) continue;
-    if (dt instanceof Date && !isNaN(dt)) {
-      mapBaseToDMS[base] = dt;
-    }
-  }
+  const mapBaseToDMS = buildBaseToStockDate_(ss);
 
   const lastS = stock.getLastRow();
   if (lastS < 2) {
@@ -698,38 +696,41 @@ function syncMiseEnStockFromAchats() {
   }
 
   const headersS = stock.getRange(1,1,1,stock.getLastColumn()).getValues()[0];
-  const norm = s => String(s||"").toLowerCase().normalize('NFD')
-                    .replace(/[\u0300-\u036f]/g,'').replace(/\s+/g,' ').trim();
-  const nS = headersS.map(norm);
-  const colExactS = name => nS.findIndex(h => h === norm(name)) + 1;
+  const resolverS = makeHeaderResolver_(headersS);
 
-  const C_SKU  = colExactS("sku") || colExactS("reference");
-  const C_DMS  = colExactS("date de mise en stock");
+  const C_SKU  = resolverS.colExact("sku") || resolverS.colExact("reference");
+  const C_DMS  = resolverS.colExact("date de mise en stock");
   if (!C_SKU || !C_DMS) {
     SpreadsheetApp.getActive().toast('Colonnes SKU ou "DATE DE MISE EN STOCK" introuvables', 'Mise à jour DMS', 5);
     return;
   }
 
   const skuVals = stock.getRange(2, C_SKU, lastS - 1, 1).getValues();
+  const dmsRange = stock.getRange(2, C_DMS, lastS - 1, 1);
+  const dmsVals = dmsRange.getValues();
 
   let updated = 0;
+  let cleared = 0;
   for (let i = 0; i < skuVals.length; i++) {
-    const row = i + 2;
-    const sku = String(skuVals[i][0] || "").trim();
-    if (!sku) continue;
-    const parts = sku.split('-');
-    if (parts.length < 2) continue;
-    const base = parts.slice(0, parts.length - 1).join('-');
+    const base = extractSkuBase_(skuVals[i][0]);
+    if (!base) continue;
 
     const dt = mapBaseToDMS[base];
-    if (dt) {
-      stock.getRange(row, C_DMS).setValue(dt);
-      updated++;
+    if (dt instanceof Date && !isNaN(dt)) {
+      if (!(dmsVals[i][0] instanceof Date) || dmsVals[i][0].getTime() !== dt.getTime()) {
+        dmsVals[i][0] = dt;
+        updated++;
+      }
+    } else if (dmsVals[i][0]) {
+      dmsVals[i][0] = null;
+      cleared++;
     }
   }
 
+  dmsRange.setValues(dmsVals);
+
   SpreadsheetApp.getActive().toast(
-    `Dates de mise en stock mises à jour sur ${updated} ligne(s).`,
+    `Dates de mise en stock mises à jour sur ${updated} ligne(s) et effacées sur ${cleared} ligne(s).`,
     'Mise à jour DMS',
     5
   );
@@ -751,11 +752,9 @@ function validateAllSales() {
   }
 
   const headers = stock.getRange(1, 1, 1, stock.getLastColumn()).getValues()[0];
-  const norm = s => String(s||"").toLowerCase().normalize('NFD')
-                    .replace(/[\u0300-\u036f]/g,'').replace(/\s+/g,' ').trim();
-  const n = headers.map(norm);
-  const colExact = name => n.findIndex(h => h === norm(name)) + 1;
-  const colWhere = pred => { const i = n.findIndex(pred); return i >= 0 ? i+1 : 0; };
+  const resolver = makeHeaderResolver_(headers);
+  const colExact = resolver.colExact.bind(resolver);
+  const colWhere = resolver.colWhere.bind(resolver);
 
   const C_LABEL    = 1; // A = libellé
   const C_SKU      = colExact("sku") || colExact("reference");
@@ -779,6 +778,7 @@ function validateAllSales() {
 
   const lastCol = stock.getLastColumn();
   const data = stock.getRange(2, 1, last - 1, lastCol).getValues();
+  const baseToDmsMap = buildBaseToStockDate_(ss);
 
   const ventes = ss.getSheetByName('Ventes') || ss.insertSheet('Ventes');
   if (ventes.getLastRow() === 0) {
@@ -828,7 +828,16 @@ function validateAllSales() {
     const label = row[C_LABEL - 1];
     const sku   = C_SKU ? row[C_SKU - 1] : "";
 
-    const dateMiseStock = C_DMS  ? row[C_DMS  - 1] : null;
+    let dateMiseStock = C_DMS  ? row[C_DMS  - 1] : null;
+    if (!(dateMiseStock instanceof Date) || isNaN(dateMiseStock)) {
+      const base = extractSkuBase_(sku);
+      if (base) {
+        const dt = baseToDmsMap[base];
+        dateMiseStock = (dt instanceof Date && !isNaN(dt)) ? dt : null;
+      } else {
+        dateMiseStock = null;
+      }
+    }
     const dateMiseLigne = C_DMIS ? row[C_DMIS - 1] : null;
     const datePub       = C_DPUB ? row[C_DPUB - 1] : null;
 
