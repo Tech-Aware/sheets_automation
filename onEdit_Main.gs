@@ -1,0 +1,875 @@
+function onEdit(e) {
+  const sh = e && e.source && e.source.getActiveSheet();
+  if (!sh || !e.range || e.range.getRow() === 1) return;
+  const name = sh.getName();
+  if (name === "Achats") return handleAchats(e);
+  if (name === "Stock")  return handleStock(e);
+}
+
+// --- utilitaires généraux ---
+
+function escReg_(s){ 
+  return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); 
+}
+
+function normText_(s) {
+  return String(s || "")
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[\/]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+// Vérifie le prix, colore la cellule si invalide, retourne true/false
+function ensureValidPriceOrWarn_(sh, row, C_PRIX) {
+  if (!C_PRIX) return false;
+  const cell = sh.getRange(row, C_PRIX);
+  const v = cell.getValue();
+
+  // Prix numérique strictement positif
+  if (typeof v === 'number' && !isNaN(v) && v > 0) {
+    cell.setBackground(null);
+    cell.setFontColor(null);
+    return true;
+  }
+
+  const disp = cell.getDisplayValue();
+  if (!disp || disp.indexOf('⚠️') === -1) {
+    cell.setBackground('#0000FF');  // bleu fort
+    cell.setFontColor('#FFFF00');   // jaune
+    cell.setValue('⚠️ Vous devez obligatoirement fournir un prix de vente');
+  }
+
+  return false;
+}
+
+// Supprime l’alerte dans PRIX DE VENTE si c’est le message ⚠️
+function clearPriceAlertIfAny_(sh, row, C_PRIX) {
+  if (!C_PRIX) return;
+  const cell = sh.getRange(row, C_PRIX);
+  const disp = cell.getDisplayValue();
+
+  if (disp && disp.indexOf('⚠️') === 0) {
+    cell.clearContent();
+    cell.setBackground(null);
+    cell.setFontColor(null);
+  }
+}
+
+// === ACHATS → synchro + ajout lignes dans Stock ===
+//
+//  - Si on modifie F (REFERENCE) → met à jour le préfixe des SKU dans Stock.
+//  - Si on modifie V (DATE DE MISE EN STOCK) → met à jour la date de mise en stock dans Stock.
+//  - Si on coche U (PRÊT POUR MISE EN STOCK) → crée les lignes dans Stock.
+
+function handleAchats(e) {
+  const sh = e.source.getActiveSheet();
+  const ss = e.source;
+  const col = e.range.getColumn();
+  const row = e.range.getRow();
+
+  // Colonnes fixes Achats
+  const COL_ART = 1;   // A ARTICLES
+  const COL_MAR = 2;   // B MARQUE
+  const COL_GEN = 4;   // D GENRE(data)
+  const COL_REF = 6;   // F REFERENCE (base SKU)
+  const COL_DLIV = 11; // K DATE DE LIVRAISON
+  const COL_QTY = 15;  // O QUANTITÉ RECUE
+  const COL_READY= 21; // U PRÊT POUR MISE EN STOCK
+  const COL_STP = 22;  // V MIS EN STOCK LE
+
+  // -------------------------
+  // 0) MODIF REFERENCE (F) → MAJ PRÉFIXE DES SKU DANS STOCK
+  // -------------------------
+  if (col === COL_REF) {
+    const oldBase = String(e.oldValue || "").trim();
+    const newBase = String(e.value     || "").trim();
+
+    // Si pas d’ancienne valeur ou pas de nouvelle, ou identiques → rien
+    if (!oldBase || !newBase || oldBase === newBase) return;
+
+    const stock = ss.getSheetByName("Stock");
+    if (!stock) return;
+
+    const headersS = stock.getRange(1,1,1,stock.getLastColumn()).getValues()[0];
+    const norm = s => String(s||"").toLowerCase().normalize('NFD')
+                      .replace(/[\u0300-\u036f]/g,'').replace(/\s+/g,' ').trim();
+    const nS = headersS.map(norm);
+    const colExactS = name => nS.findIndex(h => h === norm(name)) + 1;
+
+    const C_SKU_STOCK = colExactS("sku") || colExactS("reference");
+    if (!C_SKU_STOCK) return;
+
+    const lastS = stock.getLastRow();
+    if (lastS < 2) return;
+
+    const skuVals = stock.getRange(2, C_SKU_STOCK, lastS - 1, 1).getValues();
+    const newSkuVals = [];
+
+    const prefixOld = oldBase + '-';
+    const prefixNew = newBase + '-';
+
+    for (let i = 0; i < skuVals.length; i++) {
+      let s = String(skuVals[i][0] || "").trim();
+      if (!s) {
+        newSkuVals.push([s]);
+        continue;
+      }
+
+      // Cas standard: oldBase-numero → newBase-numero
+      if (s.indexOf(prefixOld) === 0) {
+        const suffix = s.substring(prefixOld.length); // garde le -numéro
+        s = prefixNew + suffix;
+        newSkuVals.push([s]);
+        continue;
+      }
+
+      // Cas rare: SKU == oldBase seul
+      if (s === oldBase) {
+        newSkuVals.push([newBase]);
+        continue;
+      }
+
+      // Autres cas → inchangé
+      newSkuVals.push([s]);
+    }
+
+    stock.getRange(2, C_SKU_STOCK, lastS - 1, 1).setValues(newSkuVals);
+    // On ne touche pas aux numéros, juste le préfixe.
+    return;
+  }
+
+  // -------------------------
+  // 1) ÉDITION DE LA COLONNE V (DATE DE MISE EN STOCK) → SYNC VERS STOCK
+  // -------------------------
+  if (col === COL_STP) {
+    // Base de SKU (Achats!F)
+    const refBase = String(sh.getRange(row, COL_REF).getDisplayValue() || "").trim();
+    if (!refBase) return;
+
+    // Nouvelle valeur de date saisie en V (on accepte vraie Date ou texte dd/MM/yyyy)
+    const cell = sh.getRange(row, COL_STP);
+    const rawVal = cell.getValue();
+    let dms = null;
+
+    if (rawVal instanceof Date && !isNaN(rawVal)) {
+      dms = rawVal;
+    } else {
+      const s = cell.getDisplayValue();
+      if (s) {
+        const m = s.match(/^\s*(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{2,4})\s*$/);
+        if (m) {
+          const d  = +m[1];
+          const mo = +m[2];
+          const y  = +(m[3].length === 2 ? ("20" + m[3]) : m[3]);
+          dms = new Date(y, mo - 1, d);
+        } else {
+          dms = null;
+        }
+      } else {
+        dms = null;
+      }
+    }
+
+    const stock = ss.getSheetByName("Stock");
+    if (!stock) return;
+
+    const headersS = stock.getRange(1,1,1,stock.getLastColumn()).getValues()[0];
+    const norm = s => String(s||"").toLowerCase().normalize('NFD')
+                      .replace(/[\u0300-\u036f]/g,'').replace(/\s+/g,' ').trim();
+    const nS = headersS.map(norm);
+    const colExactS = name => nS.findIndex(h => h === norm(name)) + 1;
+
+    const C_SKU_STOCK = colExactS("sku") || colExactS("reference");
+    const C_DMS_STOCK = colExactS("date de mise en stock"); // ta colonne E
+    if (!C_SKU_STOCK || !C_DMS_STOCK) return;
+
+    const lastS = stock.getLastRow();
+    if (lastS < 2) return;
+
+    const skuVals = stock.getRange(2, C_SKU_STOCK, lastS - 1, 1).getValues();
+    const dmsVals = stock.getRange(2, C_DMS_STOCK, lastS - 1, 1).getValues();
+
+    for (let i = 0; i < skuVals.length; i++) {
+      const sku = String(skuVals[i][0] || "").trim();
+      if (!sku) continue;
+      const parts = sku.split('-');
+      if (parts.length < 2) continue;
+      const base = parts.slice(0, parts.length - 1).join('-'); // ex: JLFK-0825
+
+      if (base === refBase) {
+        dmsVals[i][0] = dms; // peut être Date ou null
+      }
+    }
+
+    stock.getRange(2, C_DMS_STOCK, lastS - 1, 1).setValues(dmsVals);
+    return;
+  }
+
+  // -------------------------
+  // 2) CASE U "PRÊT POUR MISE EN STOCK" → CREATION LIGNES DANS STOCK
+  // -------------------------
+  if (col !== COL_READY) return; // pas U → on sort
+
+  const turnedOn = (e.value === "TRUE") || (e.value === true);
+  if (!turnedOn) return;
+
+  // Si déjà "MIS EN STOCK LE" → on ne recrée pas les lignes
+  const alreadyStocked = sh.getRange(row, COL_STP).getDisplayValue();
+  if (alreadyStocked) return;
+
+  const article = String(sh.getRange(row, COL_ART).getDisplayValue() || "").trim();
+  const marque  = String(sh.getRange(row, COL_MAR).getDisplayValue() || "").trim();
+  const genre   = sh.getRange(row, COL_GEN).getDisplayValue();
+  const skuBase = String(sh.getRange(row, COL_REF).getDisplayValue() || "").trim();
+  const qty     = Number(sh.getRange(row, COL_QTY).getValue());
+  if (!skuBase || !Number.isFinite(qty) || qty <= 0) return;
+
+  // Date de livraison robuste
+  const raw = sh.getRange(row, COL_DLIV).getValue();
+  let dateLiv;
+  if (raw instanceof Date && !isNaN(raw)) {
+    dateLiv = raw;
+  } else {
+    const s = sh.getRange(row, COL_DLIV).getDisplayValue();
+    const m = s && s.match(/^\s*(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{2,4})\s*$/);
+    if (!m) return;
+    const d = +m[1], mo = +m[2], y = +(m[3].length === 2 ? ("20"+m[3]) : m[3]);
+    dateLiv = new Date(y, mo - 1, d);
+  }
+
+  const target = ss.getSheetByName("Stock");
+  if (!target) return;
+
+  // Date de mise en stock : on fixe maintenant ET on la garde dans Achats!V
+  let miseStockDate = sh.getRange(row, COL_STP).getValue();
+  if (!(miseStockDate instanceof Date) || isNaN(miseStockDate)) {
+    miseStockDate = new Date();
+    sh.getRange(row, COL_STP).setValue(miseStockDate);
+  }
+
+  // Repère dynamiquement les colonnes de Stock
+  const headers = target.getRange(1, 1, 1, Math.max(4, target.getLastColumn())).getValues()[0];
+  const normHeader = s => String(s||"").toLowerCase().normalize('NFD')
+                    .replace(/[\u0300-\u036f]/g,'').replace(/\s+/g,' ').trim();
+  const n = headers.map(normHeader);
+  const colExact = name => n.findIndex(h => h === normHeader(name)) + 1;
+
+  const COL_LABEL_STOCK = 1;                    // A = Libellé
+  const COL_SKU_STOCK   = colExact("sku") || 3; // C par défaut
+  const COL_DATE_STOCK  = (COL_SKU_STOCK === 3) ? 4 : COL_SKU_STOCK + 1;
+  const C_DMS_STOCK     = colExact("date de mise en stock"); // optionnel
+
+  const base = skuBase;
+  const label = `${article} ${marque} ${genre}`.trim();
+
+  const rows = Array.from({length: qty}, () => [
+    label,              // A = Libellé
+    "",                 // B = SKU(ancienne nomenclature)
+    `${base}-0`,        // C = SKU temporaire (base-0)
+    dateLiv             // D = date de livraison
+  ]);
+
+  const start = Math.max(2, target.getLastRow() + 1);
+  target.getRange(start, 1, rows.length, 4).setValues(rows);
+
+  if (C_DMS_STOCK) {
+    target.getRange(start, C_DMS_STOCK, rows.length, 1).setValue(miseStockDate);
+  }
+
+  const lastS = target.getLastRow();
+  if (lastS > 2) {
+    target.getRange(2, 1, lastS - 1, Math.max(4, target.getLastColumn()))
+          .sort({ column: COL_DATE_STOCK, ascending: true });
+    target.getRange(2, COL_DATE_STOCK, lastS - 1, 1).setNumberFormat("dd/MM/yyyy");
+  }
+
+  renumberStockByBrand_();
+}
+
+// === RE-NUMÉROTATION GLOBALE PAR MARQUE AVEC OVERRIDE PAR B ===
+//
+// - Marque = premier morceau avant le premier "-" du SKU actuel (col "SKU").
+// - Si B (SKU ancienne) contient un nombre en fin, on utilise ce nombre pour ce produit.
+// - Sinon, on numérote en continu pour cette marque à partir de 1.
+// - Pas de zéros en tête: suffixe = "1", "2", "3", ...
+// - Paramètre onlyOld = true → on ne renumérote QUE les lignes où B est rempli.
+
+function renumberStockByBrand_(onlyOld) {
+  const ss = SpreadsheetApp.getActive();
+  const stock  = ss.getSheetByName('Stock');
+  if (!stock) return;
+
+  const last = stock.getLastRow();
+  if (last < 2) return;
+
+  onlyOld = !!onlyOld;
+
+  const headers = stock.getRange(1,1,1,stock.getLastColumn()).getValues()[0];
+  const norm = s => String(s||"").toLowerCase().normalize('NFD')
+                    .replace(/[\u0300-\u036f]/g,'').replace(/\s+/g,' ').trim();
+  const n = headers.map(norm);
+  const colExact = name => n.findIndex(h => h === norm(name)) + 1;
+
+  const COL_OLD   = colExact("sku(ancienne nomenclature)") || 2; // B
+  const COL_NEW   = colExact("sku") || colExact("reference") || 3; // C
+
+  const width = Math.max(COL_NEW, COL_OLD, stock.getLastColumn());
+  const data = stock.getRange(2, 1, last - 1, width).getValues();
+
+  const brandCounters = Object.create(null);
+  const newSkuColValues = [];
+
+  for (let i = 0; i < data.length; i++) {
+    const row = data[i];
+
+    const oldSku = String(row[COL_OLD - 1] || "").trim();  // SKU ancienne
+    let  curSku = String(row[COL_NEW - 1] || "").trim();   // SKU actuelle (base-0 ou autre)
+
+    if (!curSku) {
+      newSkuColValues.push([curSku]);
+      continue;
+    }
+
+    // Si on est en mode "onlyOld" et qu'il n'y a rien en B → on laisse le SKU tel quel
+    if (onlyOld && !oldSku) {
+      newSkuColValues.push([curSku]);
+      continue;
+    }
+
+    const parts = curSku.split('-');
+    if (parts.length < 2) {
+      newSkuColValues.push([curSku]);
+      continue;
+    }
+
+    const brand = parts[0];                         // ex: JLFK
+    const base  = parts.slice(0, parts.length-1).join('-'); // ex: JLFK-0825
+
+    if (!brandCounters[brand]) brandCounters[brand] = 0;
+
+    // extraction éventuelle du numéro dans SKU(ancienne)
+    let overrideNum = null;
+    if (oldSku) {
+      const m = String(oldSku).match(/(\d+)\s*$/);
+      if (m) overrideNum = parseInt(m[1], 10);
+    }
+
+    let suffix;
+    if (overrideNum != null && Number.isFinite(overrideNum) && overrideNum > 0) {
+      suffix = overrideNum;
+      if (suffix > brandCounters[brand]) brandCounters[brand] = suffix;
+    } else {
+      suffix = brandCounters[brand] + 1;
+      brandCounters[brand] = suffix;
+    }
+
+    const newSku = base + '-' + suffix; // sans padding
+    newSkuColValues.push([newSku]);
+  }
+
+  stock.getRange(2, COL_NEW, newSkuColValues.length, 1).setValues(newSkuColValues);
+}
+
+// === STOCK → horodatages + validations / déplacement vers Ventes ===
+
+function handleStock(e) {
+  const sh = e.source.getActiveSheet();
+  const turnedOn  = (e.value === "TRUE") || (e.value === true);
+  const turnedOff = (e.value === "FALSE") || (e.value === false);
+  const CLEAR_ON_UNCHECK = false;
+
+  const norm = s => String(s||"").toLowerCase().normalize('NFD')
+                    .replace(/[\u0300-\u036f]/g,'').replace(/\s+/g,' ').trim();
+  const headers = sh.getRange(1,1,1,sh.getLastColumn()).getValues()[0];
+  const n = headers.map(norm);
+  const colExact = name => n.findIndex(h => h === norm(name)) + 1;
+  const colWhere = pred => { const i = n.findIndex(pred); return i >= 0 ? i+1 : 0; };
+
+  const C_LABEL   = 1;                                       // A = libellé
+  const C_OLD_SKU = colExact("sku(ancienne nomenclature)") || 2;
+  const C_SKU     = colExact("sku") || colExact("reference"); // B/C
+  const C_PRIX    = colWhere(h => h.includes("prix") && h.includes("vente")); // "PRIX DE VENTE"
+  const C_MIS     = colExact("mis en ligne");
+  const C_DMIS    = colExact("date de mise en ligne");
+  const C_PUB     = colExact("publié");
+  const C_DPUB    = colExact("date de publication");
+  const C_VENDU_R = colWhere(h => h.includes("vendu") && h.includes("retroaction"));
+  const C_VENDU   = colExact("vendu");
+  let   C_DVENTE  = colExact("date de vente");
+  if (!C_DVENTE) C_DVENTE = 10;
+  const C_STAMPV  = colExact("vente exportee le");
+  const C_VALIDE  = colWhere(h => h.includes("valider") && h.includes("saisie"));
+
+  const c = e.range.getColumn(), r = e.range.getRow();
+
+  // 0) Modification de SKU(ancienne nomenclature) → renumérotation (globale)
+  if (c === C_OLD_SKU) {
+    renumberStockByBrand_();
+    return;
+  }
+
+  // 0bis) Modification du PRIX DE VENTE
+  if (C_PRIX && c === C_PRIX) {
+    const vendu  = C_VENDU   ? (sh.getRange(r, C_VENDU).getValue()   === true) : false;
+    const venduR = C_VENDU_R ? (sh.getRange(r, C_VENDU_R).getValue() === true) : false;
+
+    if (!vendu && !venduR) {
+      // Rien n'est coché → pas d'alerte.
+      clearPriceAlertIfAny_(sh, r, C_PRIX);
+      return;
+    }
+
+    // Au moins une des colonnes VENDU est cochée → contrôle du prix
+    ensureValidPriceOrWarn_(sh, r, C_PRIX);
+    return;
+  }
+
+  // 1) MIS EN LIGNE → horodate
+  if (C_MIS && C_DMIS && c === C_MIS) {
+    if (turnedOn && !sh.getRange(r, C_DMIS).getDisplayValue()) sh.getRange(r, C_DMIS).setValue(new Date());
+    if (turnedOff && CLEAR_ON_UNCHECK) sh.getRange(r, C_DMIS).clearContent();
+    return;
+  }
+
+  // 2) PUBLIÉ → horodate
+  if (C_PUB && C_DPUB && c === C_PUB) {
+    if (turnedOn && !sh.getRange(r, C_DPUB).getDisplayValue()) sh.getRange(r, C_DPUB).setValue(new Date());
+    if (turnedOff && CLEAR_ON_UNCHECK) sh.getRange(r, C_DPUB).clearContent();
+    return;
+  }
+
+  // 3) VENDU(par rétroaction) → texte sur DATE DE VENTE + alerte prix, PAS de déplacement direct
+  if (C_VENDU_R && c === C_VENDU_R) {
+    const cellDate = sh.getRange(r, C_DVENTE);
+    if (turnedOn) {
+      if (!cellDate.getDisplayValue() || norm(cellDate.getDisplayValue()).includes("preciser la date de vente")) {
+        cellDate.setValue("Préciser la date de vente");
+      }
+      ensureValidPriceOrWarn_(sh, r, C_PRIX);
+    } else if (turnedOff) {
+      // On enlève message éventuel + alerte de prix
+      if (norm(cellDate.getDisplayValue()).includes("preciser la date de vente")) {
+        cellDate.clearContent();
+      }
+      clearPriceAlertIfAny_(sh, r, C_PRIX);
+    }
+    return;
+  }
+
+  // 4) VENDU → horodatage + alerte prix, déplacement seulement via "Valider la saisie"
+  if (C_VENDU && c === C_VENDU) {
+    const dv = sh.getRange(r, C_DVENTE);
+
+    if (!turnedOn) {
+      clearPriceAlertIfAny_(sh, r, C_PRIX);
+    } else {
+      let val = dv.getValue();
+      if (!(val instanceof Date) || isNaN(val)) {
+        dv.setValue(new Date());  // on date au moment du clic
+      }
+      ensureValidPriceOrWarn_(sh, r, C_PRIX);
+    }
+    return;
+  }
+
+  // 5) Saisie directe d’une DATE DE VENTE → juste contrôle prix si VENDU/VENDU_R cochés
+  if (c === C_DVENTE) {
+    const val = sh.getRange(r, C_DVENTE).getValue();
+    const isDate = val instanceof Date && !isNaN(val.getTime());
+    if (!isDate) return;
+
+    const vendu  = C_VENDU   ? (sh.getRange(r, C_VENDU).getValue()   === true) : false;
+    const venduR = C_VENDU_R ? (sh.getRange(r, C_VENDU_R).getValue() === true) : false;
+    if (!vendu && !venduR) return;
+
+    ensureValidPriceOrWarn_(sh, r, C_PRIX);
+    return;
+  }
+
+  // 6) "Valider la saisie" → déplacement vers Ventes si tout est OK
+  if (C_VALIDE && c === C_VALIDE) {
+    if (!turnedOn) {
+      return;
+    }
+
+    const vendu  = C_VENDU   ? (sh.getRange(r, C_VENDU).getValue()   === true) : false;
+    const venduR = C_VENDU_R ? (sh.getRange(r, C_VENDU_R).getValue() === true) : false;
+    if (!vendu && !venduR) {
+      return;
+    }
+
+    if (!ensureValidPriceOrWarn_(sh, r, C_PRIX)) return;
+
+    const valDate = sh.getRange(r, C_DVENTE).getValue();
+    if (!(valDate instanceof Date) || isNaN(valDate.getTime())) return;
+
+    exportVente_(null, r, C_LABEL, C_SKU, C_PRIX, C_DVENTE, C_STAMPV);
+    return;
+  }
+}
+
+// Déplace la ligne de "Stock" vers "Ventes" (et calcule les délais)
+function exportVente_(e, row, C_LABEL, C_SKU, C_PRIX, C_DVENTE, C_STAMPV) {
+  const ss = SpreadsheetApp.getActive();
+  const sh = ss.getSheetByName("Stock");
+  if (!sh) return;
+
+  const ventes = ss.getSheetByName("Ventes") || ss.insertSheet("Ventes");
+  if (ventes.getLastRow() === 0) {
+    ventes.getRange(1, 1, 1, 8).setValues([[
+      "DATE DE VENTE",
+      "ARTICLE",
+      "SKU",
+      "PRIX VENTE",
+      "DÉLAI D'IMMOBILISATION",
+      "DELAI DE MISE EN LIGNE",
+      "DELAI DE PUBLICATION",
+      "DELAI DE VENTE"
+    ]]);
+  }
+
+  const dateCell = sh.getRange(row, C_DVENTE);
+  const dateV = dateCell.getValue();
+  if (!(dateV instanceof Date) || isNaN(dateV)) return;
+
+  const label = sh.getRange(row, C_LABEL).getDisplayValue();
+  const sku   = C_SKU  ? sh.getRange(row, C_SKU).getDisplayValue() : "";
+  const prix  = C_PRIX ? sh.getRange(row, C_PRIX).getValue() : "";
+
+  const headersS = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0];
+  const norm = s => String(s||"").toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g,'')
+    .replace(/\s+/g,' ')
+    .trim();
+  const nS = headersS.map(norm);
+  const colExactS = name => nS.findIndex(h => h === norm(name)) + 1;
+
+  const C_DMIS  = colExactS("date de mise en ligne");
+  const C_DPUB  = colExactS("date de publication");
+
+  const dMiseLigne = C_DMIS ? sh.getRange(row, C_DMIS).getValue() : null;
+  const dPub       = C_DPUB ? sh.getRange(row, C_DPUB).getValue() : null;
+
+  let dMiseStock = null;
+  const achats = ss.getSheetByName("Achats");
+  if (achats && sku) {
+    const parts = String(sku).split('-');
+    if (parts.length >= 2) {
+      const base = parts.slice(0, parts.length - 1).join('-');
+      const lastA = achats.getLastRow();
+      if (lastA >= 2) {
+        const refVals  = achats.getRange(2, 6, lastA - 1, 1).getValues();  // F = REFERENCE
+        const stampVals= achats.getRange(2, 22, lastA - 1, 1).getValues(); // V = MIS EN STOCK LE
+        for (let i = 0; i < refVals.length; i++) {
+          const ref = String(refVals[i][0] || "").trim();
+          if (ref === base) {
+            const dt = stampVals[i][0];
+            if (dt instanceof Date && !isNaN(dt)) {
+              dMiseStock = dt;
+            }
+            break;
+          }
+        }
+      }
+    }
+  }
+
+  function diffDays(toDate, fromDate) {
+    if (!(toDate   instanceof Date) || isNaN(toDate))   return "";
+    if (!(fromDate instanceof Date) || isNaN(fromDate)) return "";
+    const ms = toDate.getTime() - fromDate.getTime();
+    return Math.round(ms / (1000 * 60 * 60 * 24));
+  }
+
+  const delaiImm = diffDays(dateV, dMiseStock);
+  const delaiML  = diffDays(dMiseLigne, dMiseStock);
+  const delaiPub = diffDays(dPub, dMiseLigne);
+  const delaiVte = diffDays(dateV, dPub);
+
+  const start = Math.max(2, ventes.getLastRow() + 1);
+  ventes.getRange(start, 1, 1, 8).setValues([[
+    dateV,
+    label,
+    sku,
+    prix,
+    delaiImm,
+    delaiML,
+    delaiPub,
+    delaiVte
+  ]]);
+
+  const lastV = ventes.getLastRow();
+  if (lastV > 2) {
+    ventes.getRange(2, 1, lastV - 1, 8).sort([{column: 1, ascending: false}]);
+  }
+
+  if (C_STAMPV) sh.getRange(row, C_STAMPV).setValue(new Date());
+
+  sh.deleteRow(row);
+}
+
+// === MENU ===
+
+function onOpen(e) {
+  SpreadsheetApp.getUi()
+    .createMenu('Maintenance')
+    .addItem('Recalculer les SKU du Stock', 'recalcStock')
+    .addItem('Mettre à jour les dates de mise en stock', 'syncMiseEnStockFromAchats')
+    .addItem('Valider toutes les saisies prêtes', 'validateAllSales')
+    .addToUi();
+}
+
+// Recalcul des SKU uniquement dans Stock
+function recalcStock() {
+  const ss = SpreadsheetApp.getActive();
+  const stock  = ss.getSheetByName('Stock');
+  if (!stock) {
+    SpreadsheetApp.getActive().toast('Feuille Stock introuvable', 'Recalcul SKU', 5);
+    return;
+  }
+
+  const last = stock.getLastRow();
+  if (last < 2) {
+    SpreadsheetApp.getActive().toast('Aucune ligne dans Stock', 'Recalcul SKU', 5);
+    return;
+  }
+
+  const headers = stock.getRange(1,1,1,stock.getLastColumn()).getValues()[0];
+  const norm = s => String(s||"").toLowerCase().normalize('NFD')
+                    .replace(/[\u0300-\u036f]/g,'').replace(/\s+/g,' ').trim();
+  const n = headers.map(norm);
+  const colExact = name => n.findIndex(h => h === norm(name)) + 1;
+
+  let C_DATE = colExact("date de livraison");
+  if (!C_DATE) C_DATE = 4;
+
+  const width = stock.getLastColumn();
+
+  stock.getRange(2, 1, last - 1, width)
+       .sort({ column: C_DATE, ascending: true });
+  stock.getRange(2, C_DATE, last - 1, 1)
+       .setNumberFormat('dd/MM/yyyy');
+
+  renumberStockByBrand_(true);
+
+  SpreadsheetApp.getActive().toast(
+    'Recalcul des SKU terminé (lignes avec "SKU(ancienne nomenclature)" uniquement).',
+    'Recalcul SKU',
+    5
+  );
+}
+
+// Met à jour "DATE DE MISE EN STOCK" dans Stock à partir de Achats!V
+function syncMiseEnStockFromAchats() {
+  const ss = SpreadsheetApp.getActive();
+  const achats = ss.getSheetByName('Achats');
+  const stock  = ss.getSheetByName('Stock');
+  if (!achats || !stock) {
+    SpreadsheetApp.getActive().toast('Feuilles Achats/Stock introuvables', 'Mise à jour DMS', 5);
+    return;
+  }
+
+  const lastA = achats.getLastRow();
+  if (lastA < 2) {
+    SpreadsheetApp.getActive().toast('Aucune donnée dans Achats', 'Mise à jour DMS', 5);
+    return;
+  }
+
+  const refVals   = achats.getRange(2, 6,  lastA - 1, 1).getValues(); // F REFERENCE
+  const stampVals = achats.getRange(2, 22, lastA - 1, 1).getValues(); // V MIS EN STOCK LE
+  const mapBaseToDMS = Object.create(null);
+  for (let i = 0; i < refVals.length; i++) {
+    const base = String(refVals[i][0] || "").trim();
+    const dt   = stampVals[i][0];
+    if (!base) continue;
+    if (dt instanceof Date && !isNaN(dt)) {
+      mapBaseToDMS[base] = dt;
+    }
+  }
+
+  const lastS = stock.getLastRow();
+  if (lastS < 2) {
+    SpreadsheetApp.getActive().toast('Aucune donnée dans Stock', 'Mise à jour DMS', 5);
+    return;
+  }
+
+  const headersS = stock.getRange(1,1,1,stock.getLastColumn()).getValues()[0];
+  const norm = s => String(s||"").toLowerCase().normalize('NFD')
+                    .replace(/[\u0300-\u036f]/g,'').replace(/\s+/g,' ').trim();
+  const nS = headersS.map(norm);
+  const colExactS = name => nS.findIndex(h => h === norm(name)) + 1;
+
+  const C_SKU  = colExactS("sku") || colExactS("reference");
+  const C_DMS  = colExactS("date de mise en stock");
+  if (!C_SKU || !C_DMS) {
+    SpreadsheetApp.getActive().toast('Colonnes SKU ou "DATE DE MISE EN STOCK" introuvables', 'Mise à jour DMS', 5);
+    return;
+  }
+
+  const skuVals = stock.getRange(2, C_SKU, lastS - 1, 1).getValues();
+
+  let updated = 0;
+  for (let i = 0; i < skuVals.length; i++) {
+    const row = i + 2;
+    const sku = String(skuVals[i][0] || "").trim();
+    if (!sku) continue;
+    const parts = sku.split('-');
+    if (parts.length < 2) continue;
+    const base = parts.slice(0, parts.length - 1).join('-');
+
+    const dt = mapBaseToDMS[base];
+    if (dt) {
+      stock.getRange(row, C_DMS).setValue(dt);
+      updated++;
+    }
+  }
+
+  SpreadsheetApp.getActive().toast(
+    `Dates de mise en stock mises à jour sur ${updated} ligne(s).`,
+    'Mise à jour DMS',
+    5
+  );
+}
+
+// Validation groupée
+function validateAllSales() {
+  const ss = SpreadsheetApp.getActive();
+  const stock = ss.getSheetByName('Stock');
+  if (!stock) {
+    SpreadsheetApp.getUi().alert('Validation groupée', 'Feuille "Stock" introuvable.', SpreadsheetApp.getUi().ButtonSet.OK);
+    return;
+  }
+
+  const last = stock.getLastRow();
+  if (last < 2) {
+    SpreadsheetApp.getUi().alert('Validation groupée', 'Aucune ligne à traiter dans "Stock".', SpreadsheetApp.getUi().ButtonSet.OK);
+    return;
+  }
+
+  const headers = stock.getRange(1, 1, 1, stock.getLastColumn()).getValues()[0];
+  const norm = s => String(s||"").toLowerCase().normalize('NFD')
+                    .replace(/[\u0300-\u036f]/g,'').replace(/\s+/g,' ').trim();
+  const n = headers.map(norm);
+  const colExact = name => n.findIndex(h => h === norm(name)) + 1;
+  const colWhere = pred => { const i = n.findIndex(pred); return i >= 0 ? i+1 : 0; };
+
+  const C_LABEL    = 1; // A = libellé
+  const C_SKU      = colExact("sku") || colExact("reference");
+  const C_PRIX     = colWhere(h => h.includes("prix") && h.includes("vente"));
+  const C_DVENTE   = colExact("date de vente") || 10;
+  const C_VENDU    = colExact("vendu");
+  const C_VENDU_R  = colWhere(h => h.includes("vendu") && h.includes("retroaction"));
+  const C_VALIDATE = colWhere(h => h.includes("valider") && h.includes("saisie"));
+  const C_DMS      = colWhere(h => h.includes("mise en stock"));
+  const C_DMIS     = colExact("date de mise en ligne");
+  const C_DPUB     = colExact("date de publication");
+
+  if (!C_SKU || !C_PRIX || !C_DVENTE) {
+    SpreadsheetApp.getUi().alert(
+      'Validation groupée',
+      'Colonnes SKU / PRIX DE VENTE / DATE DE VENTE introuvables. Vérifie les en-têtes.',
+      SpreadsheetApp.getUi().ButtonSet.OK
+    );
+    return;
+  }
+
+  const lastCol = stock.getLastColumn();
+  const data = stock.getRange(2, 1, last - 1, lastCol).getValues();
+
+  const ventes = ss.getSheetByName('Ventes') || ss.insertSheet('Ventes');
+  if (ventes.getLastRow() === 0) {
+    ventes.getRange(1,1,1,8).setValues([[
+      "DATE DE VENTE",
+      "ARTICLE",
+      "SKU",
+      "PRIX VENTE",
+      "DÉLAI D'IMMOBILISATION",
+      "DELAI DE MISE EN LIGNE",
+      "DELAI DE PUBLICATION",
+      "DELAI DE VENTE"
+    ]]);
+  }
+
+  const toAppend = [];
+  const rowsToDel = [];
+  let moved = 0;
+
+  const msPerDay = 1000 * 60 * 60 * 24;
+  const daysDiff = (d2, d1) => {
+    if (!(d2 instanceof Date) || isNaN(d2) || !(d1 instanceof Date) || isNaN(d1)) return "";
+    return Math.round((d2.getTime() - d1.getTime()) / msPerDay);
+  };
+
+  for (let i = data.length - 1; i >= 0; i--) {
+    const row = data[i];
+    const rowIndex = i + 2;
+
+    const validateOk = C_VALIDATE ? (row[C_VALIDATE - 1] === true) : true;
+    if (!validateOk) continue;
+
+    const vendu  = C_VENDU   ? (row[C_VENDU   - 1] === true) : false;
+    const venduR = C_VENDU_R ? (row[C_VENDU_R - 1] === true) : false;
+    if (!vendu && !venduR) continue;
+
+    const dateVente = row[C_DVENTE - 1];
+    if (!(dateVente instanceof Date) || isNaN(dateVente)) continue;
+
+    const prix = row[C_PRIX - 1];
+    const prixOk = (typeof prix === 'number' && !isNaN(prix) && prix > 0);
+    if (!prixOk) {
+      ensureValidPriceOrWarn_(stock, rowIndex, C_PRIX);
+      continue;
+    }
+
+    const label = row[C_LABEL - 1];
+    const sku   = C_SKU ? row[C_SKU - 1] : "";
+
+    const dateMiseStock = C_DMS  ? row[C_DMS  - 1] : null;
+    const dateMiseLigne = C_DMIS ? row[C_DMIS - 1] : null;
+    const datePub       = C_DPUB ? row[C_DPUB - 1] : null;
+
+    const dImmobil = daysDiff(dateVente, dateMiseStock);
+    const dLigne   = daysDiff(dateMiseLigne, dateMiseStock);
+    const dPub     = daysDiff(datePub,  dateMiseLigne);
+    const dVente   = daysDiff(dateVente, datePub);
+
+    toAppend.push([
+      dateVente,
+      label,
+      sku,
+      prix,
+      dImmobil,
+      dLigne,
+      dPub,
+      dVente
+    ]);
+
+    rowsToDel.push(rowIndex);
+    moved++;
+  }
+
+  if (toAppend.length > 0) {
+    const startV = Math.max(2, ventes.getLastRow() + 1);
+    ventes.getRange(startV, 1, toAppend.length, 8).setValues(toAppend);
+
+    const lastV = ventes.getLastRow();
+    if (lastV > 2) {
+      ventes.getRange(2, 1, lastV - 1, 8)
+            .sort([{column: 1, ascending: false}]);
+    }
+
+    rowsToDel.sort((a, b) => b - a);
+    rowsToDel.forEach(r => stock.deleteRow(r));
+  }
+
+  const ui = SpreadsheetApp.getUi();
+  ui.alert(
+    'Validation groupée terminée',
+    `${moved} ligne(s) ont été déplacées vers "Ventes".`,
+    ui.ButtonSet.OK
+  );
+}
