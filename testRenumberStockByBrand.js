@@ -1,3 +1,4 @@
+const assert = require('assert');
 const fs = require('fs');
 const vm = require('vm');
 
@@ -115,11 +116,13 @@ const spreadsheet = {
   }
 };
 
+let activeSpreadsheet = spreadsheet;
+
 const sandbox = {
   console,
   SpreadsheetApp: {
     getActive() {
-      return spreadsheet;
+      return activeSpreadsheet;
     }
   },
   PropertiesService: {
@@ -156,3 +159,40 @@ console.log('Renumbered SKUs:', newValues);
 const suffixes = newValues.filter(Boolean).map(v => parseInt(v.split('-').pop(), 10));
 const isStrictlyIncreasing = suffixes.every((val, idx) => idx === 0 || val > suffixes[idx - 1]);
 console.log('Strictly increasing:', isStrictlyIncreasing);
+
+// Test: existing numbered SKUs should remain untouched and new entries pick the next suffix.
+const stockSheetExisting = new MockSheet('Stock', [
+  'ID',
+  'SKU(ancienne nomenclature)',
+  'SKU'
+], [
+  ['ID-10', '', 'JLF-54'],
+  ['ID-11', '', 'JLF-55'],
+  ['ID-12', '', 'JLF-0']
+]);
+
+const achatsSheetExisting = new MockSheet('Achats', [
+  'ID',
+  'REFERENCE'
+], [
+  ['ID-10', 'JLF'],
+  ['ID-11', 'JLF'],
+  ['ID-12', 'JLF']
+]);
+
+const spreadsheetExisting = {
+  getSheetByName(name) {
+    if (name === 'Stock') return stockSheetExisting;
+    if (name === 'Achats') return achatsSheetExisting;
+    return null;
+  }
+};
+
+activeSpreadsheet = spreadsheetExisting;
+
+sandbox.renumberStockByBrand_();
+
+const preservedValues = stockSheetExisting.rows.map(row => row[2]);
+console.log('Existing numbered SKUs scenario:', preservedValues);
+assert.deepStrictEqual(preservedValues, ['JLF-54', 'JLF-55', 'JLF-56']);
+console.log('Existing SKUs preserved and new suffix assigned correctly.');
