@@ -311,7 +311,7 @@ function clearPriceAlertIfAny_(sh, row, C_PRIX) {
 //
 //  - Si on modifie F (REFERENCE) → met à jour le préfixe des SKU dans Stock.
 //  - Si on modifie V (DATE DE MISE EN STOCK) → met à jour la date de mise en stock dans Stock.
-//  - Si on coche U (PRÊT POUR MISE EN STOCK) → crée les lignes dans Stock.
+//  - Si on coche V (PRÊT POUR MISE EN STOCK) → crée les lignes dans Stock.
 
 function handleAchats(e) {
   const sh = e.source.getActiveSheet();
@@ -457,9 +457,9 @@ function handleAchats(e) {
   }
 
   // -------------------------
-  // 2) CASE U "PRÊT POUR MISE EN STOCK" → CREATION LIGNES DANS STOCK
+  // 2) CASE V "PRÊT POUR MISE EN STOCK" → CREATION LIGNES DANS STOCK
   // -------------------------
-  if (!COL_READY || col !== COL_READY) return; // pas U → on sort
+  if (!COL_READY || col !== COL_READY) return; // pas V → on sort
 
   const turnedOn = (e.value === "TRUE") || (e.value === true);
   if (!turnedOn) return;
