@@ -519,11 +519,11 @@ function handleAchats(e) {
   renumberStockByBrand_();
 }
 
-// === RE-NUMÉROTATION GLOBALE PAR MARQUE AVEC OVERRIDE PAR B ===
+// === RE-NUMÉROTATION GLOBALE PAR BASE DE SKU AVEC OVERRIDE PAR B ===
 //
-// - Marque = premier morceau avant le premier "-" du SKU actuel (col "SKU").
+// - Base = toutes les parties avant le dernier "-" du SKU actuel (col "SKU").
 // - Si B (SKU ancienne) contient un nombre en fin, on utilise ce nombre pour ce produit.
-// - Sinon, on numérote en continu pour cette marque à partir de 1.
+// - Sinon, on numérote en continu pour cette base à partir de 1.
 // - Pas de zéros en tête: suffixe = "1", "2", "3", ...
 // - Paramètre onlyOld = true → on ne renumérote QUE les lignes où B est rempli.
 
@@ -545,7 +545,7 @@ function renumberStockByBrand_(onlyOld) {
   const width = Math.max(COL_NEW, COL_OLD, stock.getLastColumn());
   const data = stock.getRange(2, 1, last - 1, width).getValues();
 
-  const brandCounters = Object.create(null);
+  const baseCounters = Object.create(null);
   const newSkuColValues = [];
 
   for (let i = 0; i < data.length; i++) {
@@ -571,10 +571,9 @@ function renumberStockByBrand_(onlyOld) {
       continue;
     }
 
-    const brand = parts[0];                         // ex: JLFK
-    const base  = parts.slice(0, parts.length-1).join('-'); // ex: JLFK-0825
+    const base = parts.slice(0, parts.length - 1).join('-'); // ex: JLFK-0825
 
-    if (!brandCounters[brand]) brandCounters[brand] = 0;
+    if (!baseCounters[base]) baseCounters[base] = 0;
 
     // extraction éventuelle du numéro dans SKU(ancienne)
     let overrideNum = null;
@@ -586,10 +585,10 @@ function renumberStockByBrand_(onlyOld) {
     let suffix;
     if (overrideNum != null && Number.isFinite(overrideNum) && overrideNum > 0) {
       suffix = overrideNum;
-      if (suffix > brandCounters[brand]) brandCounters[brand] = suffix;
+      if (suffix > baseCounters[base]) baseCounters[base] = suffix;
     } else {
-      suffix = brandCounters[brand] + 1;
-      brandCounters[brand] = suffix;
+      suffix = baseCounters[base] + 1;
+      baseCounters[base] = suffix;
     }
 
     const newSku = base + '-' + suffix; // sans padding
