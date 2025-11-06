@@ -87,6 +87,101 @@ function restorePreviousCellValue_(sheet, row, col) {
   return true;
 }
 
+function getDateOrNull_(value) {
+  if (value instanceof Date) {
+    const time = value.getTime();
+    return isNaN(time) ? null : new Date(time);
+  }
+
+  if (typeof value === 'number') {
+    const date = new Date(value);
+    return isNaN(date.getTime()) ? null : date;
+  }
+
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+
+    const direct = new Date(trimmed);
+    if (!isNaN(direct.getTime())) {
+      return direct;
+    }
+
+    const slashMatch = trimmed.match(/^(\d{1,2})[\/](\d{1,2})[\/](\d{2,4})$/);
+    if (slashMatch) {
+      const day = parseInt(slashMatch[1], 10);
+      const month = parseInt(slashMatch[2], 10) - 1;
+      let year = parseInt(slashMatch[3], 10);
+      if (year < 100) {
+        year += year >= 70 ? 1900 : 2000;
+      }
+      const candidate = new Date(year, month, day);
+      return isNaN(candidate.getTime()) ? null : candidate;
+    }
+
+    const dashMatch = trimmed.match(/^(\d{4})[\/-](\d{1,2})[\/-](\d{1,2})$/);
+    if (dashMatch) {
+      const year = parseInt(dashMatch[1], 10);
+      const month = parseInt(dashMatch[2], 10) - 1;
+      const day = parseInt(dashMatch[3], 10);
+      const candidate = new Date(year, month, day);
+      return isNaN(candidate.getTime()) ? null : candidate;
+    }
+  }
+
+  return null;
+}
+
+function enforceChronologicalDates_(sheet, row, cols, options) {
+  const labels = Object.assign({
+    dms: 'DATE DE MISE EN STOCK',
+    dmis: 'DATE DE MISE EN LIGNE',
+    dpub: 'DATE DE PUBLICATION',
+    dvente: 'DATE DE VENTE'
+  }, options && options.labels);
+
+  const order = [
+    { key: 'dms',   col: cols && cols.dms },
+    { key: 'dmis',  col: cols && cols.dmis },
+    { key: 'dpub',  col: cols && cols.dpub },
+    { key: 'dvente', col: cols && cols.dvente }
+  ];
+
+  const tz = Session.getScriptTimeZone ? Session.getScriptTimeZone() : 'Etc/GMT';
+  const format = date => Utilities.formatDate(date, tz, 'dd/MM/yyyy');
+
+  let previous = null;
+  let previousKey = null;
+  const values = Object.create(null);
+
+  for (let i = 0; i < order.length; i++) {
+    const entry = order[i];
+    if (!entry.col) continue;
+
+    const cell = sheet.getRange(row, entry.col);
+    const value = getDateOrNull_(cell.getValue());
+    values[entry.key] = value;
+
+    if (!value) continue;
+
+    if (previous && value.getTime() < previous.getTime()) {
+      const labelPrev = labels[previousKey] || previousKey || 'date précédente';
+      const labelCur = labels[entry.key] || entry.key || 'date suivante';
+      return {
+        ok: false,
+        message: `${labelCur} (${format(value)}) ne peut pas être antérieure à ${labelPrev} (${format(previous)}).`,
+        conflict: { earlier: previousKey, later: entry.key },
+        values
+      };
+    }
+
+    previous = value;
+    previousKey = entry.key;
+  }
+
+  return { ok: true, values };
+}
+
 function extractSkuBase_(sku) {
   const parts = String(sku || "").trim().split('-');
   if (parts.length < 2) return "";
@@ -467,6 +562,7 @@ function handleStock(e) {
   const C_OLD_SKU = colExact("sku(ancienne nomenclature)") || 2;
   const C_SKU     = colExact("sku") || colExact("reference"); // B/C
   const C_PRIX    = colWhere(h => h.includes("prix") && h.includes("vente")); // "PRIX DE VENTE"
+  const C_DMS     = colExact("date de mise en stock");
   const C_MIS     = colExact("mis en ligne");
   const C_DMIS    = colExact("date de mise en ligne");
   const C_PUB     = colExact("publié");
@@ -478,6 +574,75 @@ function handleStock(e) {
   const C_VALIDE  = colWhere(h => h.includes("valider") && h.includes("saisie"));
 
   const c = e.range.getColumn(), r = e.range.getRow();
+
+  const chronoCols = {
+    dms: C_DMS,
+    dmis: C_DMIS,
+    dpub: C_DPUB,
+    dvente: C_DVENTE
+  };
+
+  function setCellToFallback_(col, fallback) {
+    if (!col) return;
+    const cell = sh.getRange(r, col);
+    if (restorePreviousCellValue_(sh, r, col)) {
+      return;
+    }
+
+    if (fallback === undefined || fallback === null || fallback === '') {
+      cell.clearContent();
+      return;
+    }
+
+    if (fallback instanceof Date && !isNaN(fallback.getTime())) {
+      cell.setValue(fallback);
+      return;
+    }
+
+    if (typeof fallback === 'number') {
+      const parsed = getDateOrNull_(fallback);
+      if (parsed) {
+        cell.setValue(parsed);
+        return;
+      }
+    }
+
+    if (typeof fallback === 'string') {
+      const parsed = getDateOrNull_(fallback);
+      if (parsed) {
+        cell.setValue(parsed);
+        return;
+      }
+    }
+
+    cell.setValue(fallback);
+  }
+
+  function revertCheckbox_(range, oldValue) {
+    if (!range) return;
+    let valueToSet = oldValue;
+    if (oldValue === 'TRUE') valueToSet = true;
+    if (oldValue === 'FALSE' || oldValue === undefined) valueToSet = false;
+    if (valueToSet === null || valueToSet === '') {
+      range.clearContent();
+      return;
+    }
+    range.setValue(valueToSet);
+  }
+
+  function ensureChronologyOrRevert_(changedKey, fallback, checkboxInfo) {
+    const result = enforceChronologicalDates_(sh, r, chronoCols);
+    if (result.ok) {
+      return true;
+    }
+
+    setCellToFallback_(chronoCols[changedKey], fallback);
+    if (checkboxInfo && checkboxInfo.range) {
+      revertCheckbox_(checkboxInfo.range, checkboxInfo.oldValue);
+    }
+    ss.toast(result.message || 'Ordre chronologique des dates invalide.', 'Stock', 6);
+    return false;
+  }
 
   // 0) Modification de SKU(ancienne nomenclature) → renumérotation (globale)
   if (c === C_OLD_SKU) {
@@ -530,6 +695,16 @@ function handleStock(e) {
     return;
   }
 
+  if (c === C_DMS || c === C_DMIS || c === C_DPUB || c === C_DVENTE) {
+    const key = c === C_DMS ? 'dms' : (c === C_DMIS ? 'dmis' : (c === C_DPUB ? 'dpub' : 'dvente'));
+    if (!ensureChronologyOrRevert_(key, e.oldValue)) {
+      return;
+    }
+    if (c !== C_DVENTE) {
+      return;
+    }
+  }
+
   // 1) MIS EN LIGNE → horodate
   if (C_MIS && C_DMIS && c === C_MIS) {
     if (turnedOff) {
@@ -548,6 +723,10 @@ function handleStock(e) {
       const cell = sh.getRange(r, C_DMIS);
       storePreviousCellValue_(sh, r, C_DMIS, cell.getValue());
       cell.setValue(new Date());
+      const checkboxInfo = { range: sh.getRange(r, C_MIS), oldValue: e.oldValue };
+      if (!ensureChronologyOrRevert_('dmis', null, checkboxInfo)) {
+        return;
+      }
       return;
     }
 
@@ -574,6 +753,10 @@ function handleStock(e) {
       const cell = sh.getRange(r, C_DPUB);
       storePreviousCellValue_(sh, r, C_DPUB, cell.getValue());
       cell.setValue(new Date());
+      const checkboxInfo = { range: sh.getRange(r, C_PUB), oldValue: e.oldValue };
+      if (!ensureChronologyOrRevert_('dpub', null, checkboxInfo)) {
+        return;
+      }
       return;
     }
 
@@ -594,6 +777,13 @@ function handleStock(e) {
       let val = dv.getValue();
       if (!(val instanceof Date) || isNaN(val)) {
         dv.setValue(new Date());  // on date au moment du clic
+      }
+      const checkboxInfo = { range: sh.getRange(r, C_VENDU), oldValue: e.oldValue };
+      if (!ensureChronologyOrRevert_('dvente', null, checkboxInfo)) {
+        if (C_PRIX) {
+          restorePreviousCellValue_(sh, r, C_PRIX);
+        }
+        return;
       }
       ensureValidPriceOrWarn_(sh, r, C_PRIX);
       return;
@@ -637,6 +827,13 @@ function handleStock(e) {
   // 6) "Valider la saisie" → déplacement vers Ventes si tout est OK
   if (C_VALIDE && c === C_VALIDE) {
     if (!turnedOn) {
+      return;
+    }
+
+    const chronoCheck = enforceChronologicalDates_(sh, r, chronoCols);
+    if (!chronoCheck.ok) {
+      revertCheckbox_(e.range, e.oldValue);
+      ss.toast(chronoCheck.message || 'Ordre chronologique des dates invalide.', 'Stock', 6);
       return;
     }
 
@@ -690,6 +887,17 @@ function exportVente_(e, row, C_LABEL, C_SKU, C_PRIX, C_DVENTE, C_STAMPV, baseTo
   const C_DMS   = resolverS.colExact("date de mise en stock");
   const C_DMIS  = resolverS.colExact("date de mise en ligne");
   const C_DPUB  = resolverS.colExact("date de publication");
+
+  const chronoCheck = enforceChronologicalDates_(sh, row, {
+    dms: C_DMS,
+    dmis: C_DMIS,
+    dpub: C_DPUB,
+    dvente: C_DVENTE
+  });
+  if (!chronoCheck.ok) {
+    ss.toast(chronoCheck.message || 'Ordre chronologique des dates invalide.', 'Stock', 6);
+    return;
+  }
 
   const dMiseLigne = C_DMIS ? sh.getRange(row, C_DMIS).getValue() : null;
   const dPub       = C_DPUB ? sh.getRange(row, C_DPUB).getValue() : null;
@@ -914,6 +1122,14 @@ function validateAllSales() {
   const toAppend = [];
   const rowsToDel = [];
   let moved = 0;
+  const invalidChronoRows = [];
+
+  const chronoCols = {
+    dms: C_DMS,
+    dmis: C_DMIS,
+    dpub: C_DPUB,
+    dvente: C_DVENTE
+  };
 
   const msPerDay = 1000 * 60 * 60 * 24;
   const daysDiff = (d2, d1) => {
@@ -938,6 +1154,15 @@ function validateAllSales() {
     const prixOk = (typeof prix === 'number' && !isNaN(prix) && prix > 0);
     if (!prixOk) {
       ensureValidPriceOrWarn_(stock, rowIndex, C_PRIX);
+      continue;
+    }
+
+    const chronoCheck = enforceChronologicalDates_(stock, rowIndex, chronoCols);
+    if (!chronoCheck.ok) {
+      if (C_VALIDATE) {
+        stock.getRange(rowIndex, C_VALIDATE).setValue(false);
+      }
+      invalidChronoRows.push({ row: rowIndex, message: chronoCheck.message });
       continue;
     }
 
@@ -997,4 +1222,11 @@ function validateAllSales() {
     `${moved} ligne(s) ont été déplacées vers "Ventes".`,
     ui.ButtonSet.OK
   );
+
+  if (invalidChronoRows.length > 0) {
+    const first = invalidChronoRows[0];
+    const extra = invalidChronoRows.length > 1 ? ` (et ${invalidChronoRows.length - 1} autre(s) ligne(s))` : '';
+    const message = `Validation bloquée - ligne ${first.row}: ${first.message}${extra}`;
+    SpreadsheetApp.getActive().toast(message, 'Validation groupée', 8);
+  }
 }
