@@ -311,7 +311,7 @@ function clearPriceAlertIfAny_(sh, row, C_PRIX) {
 //
 //  - Si on modifie F (REFERENCE) → met à jour le préfixe des SKU dans Stock.
 //  - Si on modifie V (DATE DE MISE EN STOCK) → met à jour la date de mise en stock dans Stock.
-//  - Si on coche U (PRÊT POUR MISE EN STOCK) → crée les lignes dans Stock.
+//  - Si on coche V (PRÊT POUR MISE EN STOCK) → crée les lignes dans Stock.
 
 function handleAchats(e) {
   const sh = e.source.getActiveSheet();
@@ -457,9 +457,9 @@ function handleAchats(e) {
   }
 
   // -------------------------
-  // 2) CASE U "PRÊT POUR MISE EN STOCK" → CREATION LIGNES DANS STOCK
+  // 2) CASE V "PRÊT POUR MISE EN STOCK" → CREATION LIGNES DANS STOCK
   // -------------------------
-  if (!COL_READY || col !== COL_READY) return; // pas U → on sort
+  if (!COL_READY || col !== COL_READY) return; // pas V → on sort
 
   const turnedOn = (e.value === "TRUE") || (e.value === true);
   if (!turnedOn) return;
@@ -530,12 +530,33 @@ function handleAchats(e) {
     if (C_DMS_STOCK) {
       existingDmsValues = target.getRange(2, C_DMS_STOCK, lastExistingStockRow - 1, 1).getValues();
     }
+    let existingIdValues = null;
+    if (COL_ID_STOCK) {
+      existingIdValues = target.getRange(2, COL_ID_STOCK, lastExistingStockRow - 1, 1).getValues();
+    }
     const prefix = `${base}-`;
+    const achatIdKey = (achatId === null || achatId === undefined || achatId === '') ? '' : String(achatId);
     for (let i = 0; i < existingSkuValues.length; i++) {
       const rawSku = String(existingSkuValues[i][0] || "").trim();
       if (!rawSku || rawSku.indexOf(prefix) !== 0) continue;
+
+      let idMatches = true;
+      let storedIdKey = '';
+      if (COL_ID_STOCK && existingIdValues) {
+        const storedRaw = existingIdValues[i] && existingIdValues[i][0];
+        storedIdKey = (storedRaw === null || storedRaw === undefined || storedRaw === '') ? '' : String(storedRaw);
+        if (achatIdKey && storedIdKey) {
+          idMatches = (storedIdKey === achatIdKey);
+        }
+      }
+
+      if (!idMatches) {
+        continue;
+      }
+
       existingStockHasBase = true;
-      if (existingDmsValues && !existingStockDms) {
+
+      if (existingDmsValues && !existingStockDms && COL_ID_STOCK && achatIdKey && storedIdKey && storedIdKey === achatIdKey) {
         const candidate = existingDmsValues[i][0];
         if (candidate instanceof Date && !isNaN(candidate)) {
           existingStockDms = candidate;
