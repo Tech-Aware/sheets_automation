@@ -466,14 +466,13 @@ function handleAchats(e) {
   // Repère dynamiquement les colonnes de Stock
   const headersStock = target.getRange(1, 1, 1, Math.max(4, target.getLastColumn())).getValues()[0];
   const resolverStock = makeHeaderResolver_(headersStock);
-  const colExactStock = resolverStock.colExact.bind(resolverStock);
 
-  const COL_ID_STOCK    = colExactStock('id');
+  const COL_ID_STOCK    = resolverStock.colExact('id');
   const COL_LABEL_STOCK = resolverStock.colWhere(h => h.includes('libell')) || resolverStock.colWhere(h => h.includes('article')) || 2;
-  const COL_OLD_STOCK   = colExactStock('sku(ancienne nomenclature)');
-  const COL_SKU_STOCK   = colExactStock('sku') || colExactStock('reference');
+  const COL_OLD_STOCK   = resolverStock.colExact('sku(ancienne nomenclature)');
+  const COL_SKU_STOCK   = resolverStock.colExact('sku') || resolverStock.colExact('reference');
   const COL_DATE_STOCK  = resolverStock.colWhere(h => h.includes('livraison')) || (COL_SKU_STOCK ? COL_SKU_STOCK + 1 : 0);
-  const C_DMS_STOCK     = colExactStock('date de mise en stock'); // optionnel
+  const C_DMS_STOCK     = resolverStock.colExact('date de mise en stock'); // optionnel
 
   const base = skuBase;
   const label = `${article} ${marque} ${genre}`.trim();
