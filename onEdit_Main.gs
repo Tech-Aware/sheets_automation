@@ -530,12 +530,33 @@ function handleAchats(e) {
     if (C_DMS_STOCK) {
       existingDmsValues = target.getRange(2, C_DMS_STOCK, lastExistingStockRow - 1, 1).getValues();
     }
+    let existingIdValues = null;
+    if (COL_ID_STOCK) {
+      existingIdValues = target.getRange(2, COL_ID_STOCK, lastExistingStockRow - 1, 1).getValues();
+    }
     const prefix = `${base}-`;
+    const achatIdKey = (achatId === null || achatId === undefined || achatId === '') ? '' : String(achatId);
     for (let i = 0; i < existingSkuValues.length; i++) {
       const rawSku = String(existingSkuValues[i][0] || "").trim();
       if (!rawSku || rawSku.indexOf(prefix) !== 0) continue;
+
+      let idMatches = true;
+      let storedIdKey = '';
+      if (COL_ID_STOCK && existingIdValues) {
+        const storedRaw = existingIdValues[i] && existingIdValues[i][0];
+        storedIdKey = (storedRaw === null || storedRaw === undefined || storedRaw === '') ? '' : String(storedRaw);
+        if (achatIdKey && storedIdKey) {
+          idMatches = (storedIdKey === achatIdKey);
+        }
+      }
+
+      if (!idMatches) {
+        continue;
+      }
+
       existingStockHasBase = true;
-      if (existingDmsValues && !existingStockDms) {
+
+      if (existingDmsValues && !existingStockDms && COL_ID_STOCK && achatIdKey && storedIdKey && storedIdKey === achatIdKey) {
         const candidate = existingDmsValues[i][0];
         if (candidate instanceof Date && !isNaN(candidate)) {
           existingStockDms = candidate;
