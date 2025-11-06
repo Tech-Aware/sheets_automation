@@ -133,12 +133,13 @@ function getDateOrNull_(value) {
 }
 
 function enforceChronologicalDates_(sheet, row, cols, options) {
+  const opts = options || {};
   const labels = Object.assign({
     dms: 'DATE DE MISE EN STOCK',
     dmis: 'DATE DE MISE EN LIGNE',
     dpub: 'DATE DE PUBLICATION',
     dvente: 'DATE DE VENTE'
-  }, options && options.labels);
+  }, opts.labels);
 
   const order = [
     { key: 'dms',   col: cols && cols.dms },
@@ -153,6 +154,7 @@ function enforceChronologicalDates_(sheet, row, cols, options) {
   let previous = null;
   let previousKey = null;
   const values = Object.create(null);
+  const missingKeys = [];
 
   for (let i = 0; i < order.length; i++) {
     const entry = order[i];
@@ -162,7 +164,12 @@ function enforceChronologicalDates_(sheet, row, cols, options) {
     const value = getDateOrNull_(cell.getValue());
     values[entry.key] = value;
 
-    if (!value) continue;
+    if (!value) {
+      if (opts.requireAllDates) {
+        missingKeys.push(entry.key);
+      }
+      continue;
+    }
 
     if (previous && value.getTime() < previous.getTime()) {
       const labelPrev = labels[previousKey] || previousKey || 'date précédente';
@@ -177,6 +184,16 @@ function enforceChronologicalDates_(sheet, row, cols, options) {
 
     previous = value;
     previousKey = entry.key;
+  }
+
+  if (opts.requireAllDates && missingKeys.length > 0) {
+    const missingLabels = missingKeys.map(key => labels[key] || key).join(', ');
+    return {
+      ok: false,
+      message: `Impossible de valider : renseignez ${missingLabels}.`,
+      missing: missingKeys,
+      values
+    };
   }
 
   return { ok: true, values };
@@ -830,7 +847,7 @@ function handleStock(e) {
       return;
     }
 
-    const chronoCheck = enforceChronologicalDates_(sh, r, chronoCols);
+    const chronoCheck = enforceChronologicalDates_(sh, r, chronoCols, { requireAllDates: true });
     if (!chronoCheck.ok) {
       revertCheckbox_(e.range, e.oldValue);
       ss.toast(chronoCheck.message || 'Ordre chronologique des dates invalide.', 'Stock', 6);
@@ -893,7 +910,7 @@ function exportVente_(e, row, C_LABEL, C_SKU, C_PRIX, C_DVENTE, C_STAMPV, baseTo
     dmis: C_DMIS,
     dpub: C_DPUB,
     dvente: C_DVENTE
-  });
+  }, { requireAllDates: true });
   if (!chronoCheck.ok) {
     ss.toast(chronoCheck.message || 'Ordre chronologique des dates invalide.', 'Stock', 6);
     return;
@@ -1157,7 +1174,7 @@ function validateAllSales() {
       continue;
     }
 
-    const chronoCheck = enforceChronologicalDates_(stock, rowIndex, chronoCols);
+    const chronoCheck = enforceChronologicalDates_(stock, rowIndex, chronoCols, { requireAllDates: true });
     if (!chronoCheck.ok) {
       if (C_VALIDATE) {
         stock.getRange(rowIndex, C_VALIDATE).setValue(false);
