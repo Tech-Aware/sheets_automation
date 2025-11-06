@@ -471,7 +471,6 @@ function handleStock(e) {
   const C_DMIS    = colExact("date de mise en ligne");
   const C_PUB     = colExact("publié");
   const C_DPUB    = colExact("date de publication");
-  const C_VENDU_R = colWhere(h => h.includes("vendu") && h.includes("retroaction"));
   const C_VENDU   = colExact("vendu");
   let   C_DVENTE  = colExact("date de vente");
   if (!C_DVENTE) C_DVENTE = 10;
@@ -488,16 +487,15 @@ function handleStock(e) {
 
   // 0bis) Modification du PRIX DE VENTE
   if (C_PRIX && c === C_PRIX) {
-    const vendu  = C_VENDU   ? (sh.getRange(r, C_VENDU).getValue()   === true) : false;
-    const venduR = C_VENDU_R ? (sh.getRange(r, C_VENDU_R).getValue() === true) : false;
+    const vendu = C_VENDU ? (sh.getRange(r, C_VENDU).getValue() === true) : false;
 
-    if (!vendu && !venduR) {
+    if (!vendu) {
       // Rien n'est coché → pas d'alerte.
       clearPriceAlertIfAny_(sh, r, C_PRIX);
       return;
     }
 
-    // Au moins une des colonnes VENDU est cochée → contrôle du prix
+    // La colonne VENDU est cochée → contrôle du prix
     ensureValidPriceOrWarn_(sh, r, C_PRIX);
     return;
   }
@@ -529,9 +527,8 @@ function handleStock(e) {
   // 2) PUBLIÉ → horodate
   if (C_PUB && C_DPUB && c === C_PUB) {
     if (turnedOff) {
-      const vendu  = C_VENDU   ? (sh.getRange(r, C_VENDU).getValue()   === true) : false;
-      const venduR = C_VENDU_R ? (sh.getRange(r, C_VENDU_R).getValue() === true) : false;
-      if (vendu || venduR) {
+      const vendu = C_VENDU ? (sh.getRange(r, C_VENDU).getValue() === true) : false;
+      if (vendu) {
         sh.getRange(r, C_PUB).setValue(true);
         ss.toast('Impossible de décocher "PUBLIÉ" lorsqu\'une vente est cochée.', 'Stock', 5);
         return;
@@ -594,15 +591,14 @@ function handleStock(e) {
     return;
   }
 
-  // 5) Saisie directe d’une DATE DE VENTE → juste contrôle prix si VENDU/VENDU_R cochés
+  // 5) Saisie directe d’une DATE DE VENTE → juste contrôle prix si VENDU coché
   if (c === C_DVENTE) {
     const val = sh.getRange(r, C_DVENTE).getValue();
     const isDate = val instanceof Date && !isNaN(val.getTime());
     if (!isDate) return;
 
-    const vendu  = C_VENDU   ? (sh.getRange(r, C_VENDU).getValue()   === true) : false;
-    const venduR = C_VENDU_R ? (sh.getRange(r, C_VENDU_R).getValue() === true) : false;
-    if (!vendu && !venduR) return;
+    const vendu = C_VENDU ? (sh.getRange(r, C_VENDU).getValue() === true) : false;
+    if (!vendu) return;
 
     ensureValidPriceOrWarn_(sh, r, C_PRIX);
     return;
@@ -614,9 +610,8 @@ function handleStock(e) {
       return;
     }
 
-    const vendu  = C_VENDU   ? (sh.getRange(r, C_VENDU).getValue()   === true) : false;
-    const venduR = C_VENDU_R ? (sh.getRange(r, C_VENDU_R).getValue() === true) : false;
-    if (!vendu && !venduR) {
+    const vendu = C_VENDU ? (sh.getRange(r, C_VENDU).getValue() === true) : false;
+    if (!vendu) {
       return;
     }
 
@@ -854,7 +849,6 @@ function validateAllSales() {
   const C_PRIX     = colWhere(h => h.includes("prix") && h.includes("vente"));
   const C_DVENTE   = colExact("date de vente") || 10;
   const C_VENDU    = colExact("vendu");
-  const C_VENDU_R  = colWhere(h => h.includes("vendu") && h.includes("retroaction"));
   const C_VALIDATE = colWhere(h => h.includes("valider") && h.includes("saisie"));
   const C_DMS      = colWhere(h => h.includes("mise en stock"));
   const C_DMIS     = colExact("date de mise en ligne");
@@ -904,9 +898,8 @@ function validateAllSales() {
     const validateOk = C_VALIDATE ? (row[C_VALIDATE - 1] === true) : true;
     if (!validateOk) continue;
 
-    const vendu  = C_VENDU   ? (row[C_VENDU   - 1] === true) : false;
-    const venduR = C_VENDU_R ? (row[C_VENDU_R - 1] === true) : false;
-    if (!vendu && !venduR) continue;
+    const vendu = C_VENDU ? (row[C_VENDU - 1] === true) : false;
+    if (!vendu) continue;
 
     const dateVente = row[C_DVENTE - 1];
     if (!(dateVente instanceof Date) || isNaN(dateVente)) continue;
