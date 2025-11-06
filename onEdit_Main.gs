@@ -21,6 +21,8 @@ const HEADERS = Object.freeze({
     OLD_SKU: 'SKU(ancienne nomenclature)',
     SKU: 'SKU',
     REFERENCE: 'REFERENCE',
+    TAILLE_COLIS: 'TAILLE DE COLIS',
+    LOT: 'LOT',
     LIBELLE: 'LIBELLÉ',
     LIBELLE_ALT: 'LIBELLE',
     ARTICLE: 'ARTICLES',
@@ -192,6 +194,150 @@ function getDateOrNull_(value) {
   }
 
   return null;
+}
+
+function isListValidationRule_(rule) {
+  if (!rule || typeof rule.getCriteriaType !== 'function') {
+    return false;
+  }
+
+  if (typeof SpreadsheetApp === 'undefined' || !SpreadsheetApp || !SpreadsheetApp.DataValidationCriteria) {
+    return false;
+  }
+
+  const criteria = SpreadsheetApp.DataValidationCriteria;
+
+  try {
+    const type = rule.getCriteriaType();
+    return type === criteria.VALUE_IN_LIST || type === criteria.VALUE_IN_RANGE;
+  } catch (err) {
+    return false;
+  }
+}
+
+function isValidationCompatibleWithTemplate_(rule, template) {
+  if (!template || !rule) {
+    return false;
+  }
+
+  if (rule === template) {
+    return true;
+  }
+
+  if (typeof SpreadsheetApp === 'undefined' || !SpreadsheetApp || !SpreadsheetApp.DataValidationCriteria) {
+    return false;
+  }
+
+  const criteria = SpreadsheetApp.DataValidationCriteria;
+
+  if (typeof rule.getCriteriaType !== 'function' || typeof template.getCriteriaType !== 'function') {
+    return false;
+  }
+
+  const ruleType = rule.getCriteriaType();
+  const templateType = template.getCriteriaType();
+
+  if (ruleType === templateType) {
+    if (ruleType === criteria.VALUE_IN_LIST || ruleType === criteria.VALUE_IN_RANGE) {
+      return true;
+    }
+    return ruleType === templateType;
+  }
+
+  if (isListValidationRule_(rule) && isListValidationRule_(template)) {
+    return true;
+  }
+
+  return false;
+}
+
+function applyValidationTemplateToSubRange_(range, template) {
+  if (!range || !template) {
+    return;
+  }
+
+  try {
+    range.setDataValidation(template);
+  } catch (err) {
+    if (typeof range.getNumRows !== 'function' || range.getNumRows() <= 1) {
+      return;
+    }
+
+    const rows = range.getNumRows();
+    for (let i = 0; i < rows; i++) {
+      const single = range.offset(i, 0, 1, 1);
+      try {
+        single.setDataValidation(template);
+      } catch (singleErr) {
+        // Ignore cells that cannot accept the validation (e.g. "type personnalisé").
+      }
+    }
+  }
+}
+
+function ensureListValidationForColumn_(range) {
+  if (!range) {
+    return;
+  }
+
+  if (typeof range.getNumRows !== 'function' || range.getNumRows() <= 0) {
+    return;
+  }
+
+  let validations;
+  try {
+    validations = range.getDataValidations();
+  } catch (err) {
+    return;
+  }
+
+  if (!validations || !validations.length) {
+    return;
+  }
+
+  let template = null;
+  for (let i = 0; i < validations.length && !template; i++) {
+    const rule = validations[i] && validations[i][0];
+    if (isListValidationRule_(rule)) {
+      template = rule;
+    }
+  }
+
+  if (!template) {
+    return;
+  }
+
+  const segments = [];
+  let current = null;
+
+  for (let i = 0; i < validations.length; i++) {
+    const rule = validations[i] && validations[i][0];
+    const needs = !isValidationCompatibleWithTemplate_(rule, template);
+    if (needs) {
+      if (!current) {
+        current = { start: i, size: 1 };
+      } else {
+        current.size++;
+      }
+    } else if (current) {
+      segments.push(current);
+      current = null;
+    }
+  }
+
+  if (current) {
+    segments.push(current);
+  }
+
+  if (!segments.length) {
+    return;
+  }
+
+  for (let i = 0; i < segments.length; i++) {
+    const segment = segments[i];
+    const sub = range.offset(segment.start, 0, segment.size, 1);
+    applyValidationTemplateToSubRange_(sub, template);
+  }
 }
 
 function enforceChronologicalDates_(sheet, row, cols, options) {
@@ -865,6 +1011,10 @@ function handleStock(e) {
   const C_SKU     = colExact(HEADERS.STOCK.SKU) || colExact(HEADERS.STOCK.REFERENCE); // B/C
   const C_PRIX    = colExact(HEADERS.STOCK.PRIX_VENTE)
     || colWhere(h => h.includes("prix") && h.includes("vente"));
+  const C_TAILLE  = colExact(HEADERS.STOCK.TAILLE_COLIS)
+    || colWhere(h => h.includes('taille') && h.includes('colis'));
+  const C_LOT     = colExact(HEADERS.STOCK.LOT)
+    || colWhere(h => h === 'lot' || h.includes('lot '));
   const C_DMS     = colExact(HEADERS.STOCK.DATE_MISE_EN_STOCK);
   const C_MIS     = colExact(HEADERS.STOCK.MIS_EN_LIGNE);
   const C_DMIS    = colExact(HEADERS.STOCK.DATE_MISE_EN_LIGNE);
@@ -878,6 +1028,21 @@ function handleStock(e) {
     || colWhere(h => h.includes("valider") && h.includes("saisie"));
 
   const c = e.range.getColumn(), r = e.range.getRow();
+
+  const lastRow = sh.getLastRow();
+  if (lastRow > 1) {
+    if (C_TAILLE) {
+      const tailleRange = sh.getRange(2, C_TAILLE, lastRow - 1, 1);
+      // Ne pas écraser les validations personnalisées : on ne cible que les cellules sans
+      // liste ou avec une règle incompatible.
+      ensureListValidationForColumn_(tailleRange);
+    }
+
+    if (C_LOT) {
+      const lotRange = sh.getRange(2, C_LOT, lastRow - 1, 1);
+      ensureListValidationForColumn_(lotRange);
+    }
+  }
 
   const chronoCols = {
     dms: C_DMS,
