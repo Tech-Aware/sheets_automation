@@ -644,12 +644,17 @@ function renumberStockByBrand_(onlyOld) {
       continue;
     }
 
-    let base = extractSkuBase_(curSku);
-    if (!base) {
-      base = extractSkuBase_(oldSku);
-    }
-    if (!base && idKey && idToBase && idToBase[idKey]) {
-      base = idToBase[idKey];
+    const idBase = (idKey && idToBase && idToBase[idKey]) ? idToBase[idKey] : '';
+    const curBase = extractSkuBase_(curSku);
+    const oldBase = extractSkuBase_(oldSku);
+
+    let base = curBase || oldBase || idBase;
+    if (base && idBase && base !== idBase) {
+      const curAligned = !curBase || curBase === idBase;
+      const oldAligned = !oldBase || oldBase === idBase;
+      if (curAligned && oldAligned) {
+        base = idBase;
+      }
     }
 
     if (!base) {
