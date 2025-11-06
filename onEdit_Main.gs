@@ -38,6 +38,55 @@ function makeHeaderResolver_(headers) {
   };
 }
 
+function makePrevDateKey_(sheet, row, col) {
+  return ['prevDate', sheet.getSheetId(), row, col].join('|');
+}
+
+function storePreviousCellValue_(sheet, row, col, value) {
+  const props = PropertiesService.getDocumentProperties();
+  const key = makePrevDateKey_(sheet, row, col);
+  let payload;
+  if (value instanceof Date && !isNaN(value)) {
+    payload = JSON.stringify({ type: 'date', value: value.getTime() });
+  } else if (value === '' || value === null) {
+    payload = JSON.stringify({ type: 'empty' });
+  } else {
+    payload = JSON.stringify({ type: 'value', value: value });
+  }
+  props.setProperty(key, payload);
+}
+
+function restorePreviousCellValue_(sheet, row, col) {
+  const props = PropertiesService.getDocumentProperties();
+  const key = makePrevDateKey_(sheet, row, col);
+  const payload = props.getProperty(key);
+  if (!payload) return false;
+
+  let parsed;
+  try {
+    parsed = JSON.parse(payload);
+  } catch (err) {
+    props.deleteProperty(key);
+    return false;
+  }
+
+  const cell = sheet.getRange(row, col);
+  switch (parsed.type) {
+    case 'date':
+      cell.setValue(new Date(parsed.value));
+      break;
+    case 'empty':
+      cell.clearContent();
+      break;
+    default:
+      cell.setValue(parsed.value);
+      break;
+  }
+
+  props.deleteProperty(key);
+  return true;
+}
+
 function extractSkuBase_(sku) {
   const parts = String(sku || "").trim().split('-');
   if (parts.length < 2) return "";
@@ -455,37 +504,56 @@ function handleStock(e) {
 
   // 1) MIS EN LIGNE → horodate
   if (C_MIS && C_DMIS && c === C_MIS) {
-    if (turnedOn) sh.getRange(r, C_DMIS).setValue(new Date());
-    if (turnedOff && CLEAR_ON_UNCHECK) sh.getRange(r, C_DMIS).clearContent();
+    if (turnedOff) {
+      if (C_PUB && sh.getRange(r, C_PUB).getValue() === true) {
+        sh.getRange(r, C_MIS).setValue(true);
+        ss.toast('Impossible de décocher "MIS EN LIGNE" tant que "PUBLIÉ" est coché.', 'Stock', 5);
+        return;
+      }
+      if (!restorePreviousCellValue_(sh, r, C_DMIS) && CLEAR_ON_UNCHECK) {
+        sh.getRange(r, C_DMIS).clearContent();
+      }
+      return;
+    }
+
+    if (turnedOn) {
+      const cell = sh.getRange(r, C_DMIS);
+      storePreviousCellValue_(sh, r, C_DMIS, cell.getValue());
+      cell.setValue(new Date());
+      return;
+    }
+
     return;
   }
 
   // 2) PUBLIÉ → horodate
   if (C_PUB && C_DPUB && c === C_PUB) {
-    if (turnedOn && !sh.getRange(r, C_DPUB).getDisplayValue()) sh.getRange(r, C_DPUB).setValue(new Date());
-    if (turnedOff && CLEAR_ON_UNCHECK) sh.getRange(r, C_DPUB).clearContent();
-    return;
-  }
+    if (turnedOff) {
+      const vendu  = C_VENDU   ? (sh.getRange(r, C_VENDU).getValue()   === true) : false;
+      const venduR = C_VENDU_R ? (sh.getRange(r, C_VENDU_R).getValue() === true) : false;
+      if (vendu || venduR) {
+        sh.getRange(r, C_PUB).setValue(true);
+        ss.toast('Impossible de décocher "PUBLIÉ" lorsqu\'une vente est cochée.', 'Stock', 5);
+        return;
+      }
 
-  // 3) VENDU(par rétroaction) → texte sur DATE DE VENTE + alerte prix, PAS de déplacement direct
-  if (C_VENDU_R && c === C_VENDU_R) {
-    const cellDate = sh.getRange(r, C_DVENTE);
-    if (turnedOn) {
-      if (!cellDate.getDisplayValue() || normText_(cellDate.getDisplayValue()).includes("preciser la date de vente")) {
-        cellDate.setValue("Préciser la date de vente");
+      if (!restorePreviousCellValue_(sh, r, C_DPUB) && CLEAR_ON_UNCHECK) {
+        sh.getRange(r, C_DPUB).clearContent();
       }
-      ensureValidPriceOrWarn_(sh, r, C_PRIX);
-    } else if (turnedOff) {
-      // On enlève message éventuel + alerte de prix
-      if (normText_(cellDate.getDisplayValue()).includes("preciser la date de vente")) {
-        cellDate.clearContent();
-      }
-      clearPriceAlertIfAny_(sh, r, C_PRIX);
+      return;
     }
+
+    if (turnedOn) {
+      const cell = sh.getRange(r, C_DPUB);
+      storePreviousCellValue_(sh, r, C_DPUB, cell.getValue());
+      cell.setValue(new Date());
+      return;
+    }
+
     return;
   }
 
-  // 4) VENDU → horodatage + alerte prix, déplacement seulement via "Valider la saisie"
+  // 3) VENDU → horodatage + alerte prix, déplacement seulement via "Valider la saisie"
   if (C_VENDU && c === C_VENDU) {
     const dv = sh.getRange(r, C_DVENTE);
 
