@@ -821,6 +821,12 @@ function handleStock(e) {
       } else {
         clearPriceAlertIfAny_(sh, r, C_PRIX);
       }
+
+      if (C_VALIDE) {
+        const valCell = sh.getRange(r, C_VALIDE);
+        valCell.clearDataValidations();
+        valCell.clearContent();
+      }
       return;
     }
 
