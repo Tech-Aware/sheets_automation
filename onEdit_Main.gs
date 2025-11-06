@@ -292,7 +292,11 @@ function handleAchats(e) {
   const COL_ID   = colExact('id');
   const COL_ART  = colWhere(h => h.includes('article'));
   const COL_MAR  = colWhere(h => h.includes('marque'));
-  const COL_GEN  = colWhere(h => h.includes('genre'));
+  const COL_GEN_DATA = colExact('genre(data)')
+    || colExact('genre data')
+    || colWhere(h => h.includes('genre') && h.includes('data'));
+  const COL_GEN_LEGACY = colExact('genre') || colWhere(h => h.includes('genre'));
+  const COL_GEN  = COL_GEN_DATA || (COL_GEN_LEGACY && COL_GEN_LEGACY !== COL_GEN_DATA ? COL_GEN_LEGACY : 0);
   const COL_REF  = colExact('reference') || colWhere(h => h.includes('reference'));
   const COL_DLIV = colWhere(h => h.includes('livraison'));
   const COL_QTY  = colWhere(h => h.includes('quantite') && (h.includes('recu') || h.includes('recue')));
@@ -433,7 +437,16 @@ function handleAchats(e) {
   const achatId = COL_ID ? sh.getRange(row, COL_ID).getValue() : "";
   const article = COL_ART ? String(sh.getRange(row, COL_ART).getDisplayValue() || "").trim() : "";
   const marque  = COL_MAR ? String(sh.getRange(row, COL_MAR).getDisplayValue() || "").trim() : "";
-  const genre   = COL_GEN ? sh.getRange(row, COL_GEN).getDisplayValue() : "";
+  const genrePrimary = COL_GEN_DATA
+    ? String(sh.getRange(row, COL_GEN_DATA).getDisplayValue() || "").trim()
+    : "";
+  const fallbackGenreCol = (!genrePrimary && COL_GEN_LEGACY && COL_GEN_LEGACY !== COL_GEN_DATA)
+    ? COL_GEN_LEGACY
+    : 0;
+  const genreFallback = fallbackGenreCol
+    ? String(sh.getRange(row, fallbackGenreCol).getDisplayValue() || "").trim()
+    : "";
+  const genre   = genrePrimary || genreFallback;
   if (!COL_REF || !COL_QTY) return;
   const skuBase = String(sh.getRange(row, COL_REF).getDisplayValue() || "").trim();
   const qty     = Number(sh.getRange(row, COL_QTY).getValue());
