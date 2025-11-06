@@ -585,7 +585,7 @@ function renumberStockByBrand_(onlyOld) {
     let suffix;
     if (overrideNum != null && Number.isFinite(overrideNum) && overrideNum > 0) {
       suffix = overrideNum;
-      if (suffix > baseCounters[base]) baseCounters[base] = suffix;
+      baseCounters[base] = suffix;
     } else {
       suffix = baseCounters[base] + 1;
       baseCounters[base] = suffix;
