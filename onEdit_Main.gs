@@ -1035,10 +1035,8 @@ function recalcStock() {
   stock.getRange(2, C_DATE, last - 1, 1)
        .setNumberFormat('dd/MM/yyyy');
 
-  renumberStockByBrand_(true);
-
   SpreadsheetApp.getActive().toast(
-    'Recalcul des SKU terminé (lignes avec "SKU(ancienne nomenclature)" uniquement).',
+    'Tri du stock terminé (aucune renumérotation de SKU effectuée).',
     'Recalcul SKU',
     5
   );
