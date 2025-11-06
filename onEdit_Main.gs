@@ -464,8 +464,8 @@ function handleAchats(e) {
   }
 
   // Repère dynamiquement les colonnes de Stock
-  const headers = target.getRange(1, 1, 1, Math.max(4, target.getLastColumn())).getValues()[0];
-  const resolver = makeHeaderResolver_(headers);
+  const headersStock = target.getRange(1, 1, 1, Math.max(4, target.getLastColumn())).getValues()[0];
+  const resolver = makeHeaderResolver_(headersStock);
   const colExact = resolver.colExact.bind(resolver);
 
   const COL_ID_STOCK    = colExact('id');
