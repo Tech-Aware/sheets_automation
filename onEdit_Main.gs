@@ -212,8 +212,8 @@ function buildBaseToStockDate_(ss) {
   const lastA = achats.getLastRow();
   if (lastA < 2) return Object.create(null);
 
-  const headers = achats.getRange(1, 1, 1, achats.getLastColumn()).getValues()[0];
-  const resolver = makeHeaderResolver_(headers);
+  const achatsHeaders = achats.getRange(1, 1, 1, achats.getLastColumn()).getValues()[0];
+  const resolver = makeHeaderResolver_(achatsHeaders);
   const colWhere = resolver.colWhere.bind(resolver);
   const colExact = resolver.colExact.bind(resolver);
 
@@ -284,8 +284,8 @@ function handleAchats(e) {
   const col = e.range.getColumn();
   const row = e.range.getRow();
 
-  const headers = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0];
-  const resolver = makeHeaderResolver_(headers);
+  const achatsHeaders = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0];
+  const resolver = makeHeaderResolver_(achatsHeaders);
   const colWhere = resolver.colWhere.bind(resolver);
   const colExact = resolver.colExact.bind(resolver);
 
@@ -525,8 +525,8 @@ function renumberStockByBrand_(onlyOld) {
 
   onlyOld = !!onlyOld;
 
-  const headers = stock.getRange(1,1,1,stock.getLastColumn()).getValues()[0];
-  const resolver = makeHeaderResolver_(headers);
+  const stockHeaders = stock.getRange(1,1,1,stock.getLastColumn()).getValues()[0];
+  const resolver = makeHeaderResolver_(stockHeaders);
   const COL_OLD   = resolver.colExact("sku(ancienne nomenclature)") || 2; // B
   const COL_NEW   = resolver.colExact("sku") || resolver.colExact("reference") || 3; // C
 
@@ -596,8 +596,8 @@ function handleStock(e) {
   const turnedOff = (e.value === "FALSE") || (e.value === false);
   const CLEAR_ON_UNCHECK = false;
 
-  const headers = sh.getRange(1,1,1,sh.getLastColumn()).getValues()[0];
-  const resolver = makeHeaderResolver_(headers);
+  const stockHeaders = sh.getRange(1,1,1,sh.getLastColumn()).getValues()[0];
+  const resolver = makeHeaderResolver_(stockHeaders);
   const colExact = resolver.colExact.bind(resolver);
   const colWhere = resolver.colWhere.bind(resolver);
 
@@ -1047,8 +1047,8 @@ function sortVentesByDate() {
   }
 
   const lastColumn = ventes.getLastColumn();
-  const headers = ventes.getRange(1, 1, 1, lastColumn).getValues()[0];
-  const resolver = makeHeaderResolver_(headers);
+  const ventesHeaders = ventes.getRange(1, 1, 1, lastColumn).getValues()[0];
+  const resolver = makeHeaderResolver_(ventesHeaders);
   const colDate = resolver.colWhere(h => h.includes('date') && h.includes('vente')) || 2;
 
   ventes
@@ -1074,8 +1074,8 @@ function recalcStock() {
     return;
   }
 
-  const headers = stock.getRange(1,1,1,stock.getLastColumn()).getValues()[0];
-  const resolver = makeHeaderResolver_(headers);
+  const stockHeaders = stock.getRange(1,1,1,stock.getLastColumn()).getValues()[0];
+  const resolver = makeHeaderResolver_(stockHeaders);
 
   let C_DATE = resolver.colExact("date de livraison");
   if (!C_DATE) C_DATE = 4;
@@ -1174,8 +1174,8 @@ function validateAllSales() {
     return;
   }
 
-  const headers = stock.getRange(1, 1, 1, stock.getLastColumn()).getValues()[0];
-  const resolver = makeHeaderResolver_(headers);
+  const stockHeaders = stock.getRange(1, 1, 1, stock.getLastColumn()).getValues()[0];
+  const resolver = makeHeaderResolver_(stockHeaders);
   const colExact = resolver.colExact.bind(resolver);
   const colWhere = resolver.colWhere.bind(resolver);
 
