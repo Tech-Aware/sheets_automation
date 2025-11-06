@@ -212,8 +212,17 @@ function buildBaseToStockDate_(ss) {
   const lastA = achats.getLastRow();
   if (lastA < 2) return Object.create(null);
 
-  const refVals = achats.getRange(2, 6, lastA - 1, 1).getValues();
-  const stampVals = achats.getRange(2, 22, lastA - 1, 1).getValues();
+  const headers = achats.getRange(1, 1, 1, achats.getLastColumn()).getValues()[0];
+  const resolver = makeHeaderResolver_(headers);
+  const colWhere = resolver.colWhere.bind(resolver);
+  const colExact = resolver.colExact.bind(resolver);
+
+  const COL_REF = colExact('reference') || colWhere(h => h.includes('reference'));
+  const COL_STP = colWhere(h => h.includes('mis en stock')) || colWhere(h => h.includes('mise en stock'));
+  if (!COL_REF || !COL_STP) return Object.create(null);
+
+  const refVals = achats.getRange(2, COL_REF, lastA - 1, 1).getValues();
+  const stampVals = achats.getRange(2, COL_STP, lastA - 1, 1).getValues();
 
   const map = Object.create(null);
   for (let i = 0; i < refVals.length; i++) {
@@ -275,20 +284,25 @@ function handleAchats(e) {
   const col = e.range.getColumn();
   const row = e.range.getRow();
 
-  // Colonnes fixes Achats
-  const COL_ART = 1;   // A ARTICLES
-  const COL_MAR = 2;   // B MARQUE
-  const COL_GEN = 4;   // D GENRE(data)
-  const COL_REF = 6;   // F REFERENCE (base SKU)
-  const COL_DLIV = 11; // K DATE DE LIVRAISON
-  const COL_QTY = 15;  // O QUANTITÉ RECUE
-  const COL_READY= 21; // U PRÊT POUR MISE EN STOCK
-  const COL_STP = 22;  // V MIS EN STOCK LE
+  const headers = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0];
+  const resolver = makeHeaderResolver_(headers);
+  const colWhere = resolver.colWhere.bind(resolver);
+  const colExact = resolver.colExact.bind(resolver);
+
+  const COL_ID   = colExact('id');
+  const COL_ART  = colWhere(h => h.includes('article'));
+  const COL_MAR  = colWhere(h => h.includes('marque'));
+  const COL_GEN  = colWhere(h => h.includes('genre'));
+  const COL_REF  = colExact('reference') || colWhere(h => h.includes('reference'));
+  const COL_DLIV = colWhere(h => h.includes('livraison'));
+  const COL_QTY  = colWhere(h => h.includes('quantite') && (h.includes('recu') || h.includes('recue')));
+  const COL_READY= colWhere(h => h.includes('pret') && h.includes('stock'));
+  const COL_STP  = colWhere(h => h.includes('mis en stock')) || colWhere(h => h.includes('mise en stock'));
 
   // -------------------------
   // 0) MODIF REFERENCE (F) → MAJ PRÉFIXE DES SKU DANS STOCK
   // -------------------------
-  if (col === COL_REF) {
+  if (COL_REF && col === COL_REF) {
     const oldBase = String(e.oldValue || "").trim();
     const newBase = String(e.value     || "").trim();
 
@@ -345,8 +359,9 @@ function handleAchats(e) {
   // -------------------------
   // 1) ÉDITION DE LA COLONNE V (DATE DE MISE EN STOCK) → SYNC VERS STOCK
   // -------------------------
-  if (col === COL_STP) {
+  if (COL_STP && col === COL_STP) {
     // Base de SKU (Achats!F)
+    if (!COL_REF) return;
     const refBase = String(sh.getRange(row, COL_REF).getDisplayValue() || "").trim();
     if (!refBase) return;
 
@@ -405,23 +420,27 @@ function handleAchats(e) {
   // -------------------------
   // 2) CASE U "PRÊT POUR MISE EN STOCK" → CREATION LIGNES DANS STOCK
   // -------------------------
-  if (col !== COL_READY) return; // pas U → on sort
+  if (!COL_READY || col !== COL_READY) return; // pas U → on sort
 
   const turnedOn = (e.value === "TRUE") || (e.value === true);
   if (!turnedOn) return;
 
   // Si déjà "MIS EN STOCK LE" → on ne recrée pas les lignes
+  if (!COL_STP) return;
   const alreadyStocked = sh.getRange(row, COL_STP).getDisplayValue();
   if (alreadyStocked) return;
 
-  const article = String(sh.getRange(row, COL_ART).getDisplayValue() || "").trim();
-  const marque  = String(sh.getRange(row, COL_MAR).getDisplayValue() || "").trim();
-  const genre   = sh.getRange(row, COL_GEN).getDisplayValue();
+  const achatId = COL_ID ? sh.getRange(row, COL_ID).getValue() : "";
+  const article = COL_ART ? String(sh.getRange(row, COL_ART).getDisplayValue() || "").trim() : "";
+  const marque  = COL_MAR ? String(sh.getRange(row, COL_MAR).getDisplayValue() || "").trim() : "";
+  const genre   = COL_GEN ? sh.getRange(row, COL_GEN).getDisplayValue() : "";
+  if (!COL_REF || !COL_QTY) return;
   const skuBase = String(sh.getRange(row, COL_REF).getDisplayValue() || "").trim();
   const qty     = Number(sh.getRange(row, COL_QTY).getValue());
   if (!skuBase || !Number.isFinite(qty) || qty <= 0) return;
 
   // Date de livraison robuste
+  if (!COL_DLIV) return;
   const raw = sh.getRange(row, COL_DLIV).getValue();
   let dateLiv;
   if (raw instanceof Date && !isNaN(raw)) {
@@ -445,35 +464,42 @@ function handleAchats(e) {
   }
 
   // Repère dynamiquement les colonnes de Stock
-  const headers = target.getRange(1, 1, 1, Math.max(4, target.getLastColumn())).getValues()[0];
-  const resolver = makeHeaderResolver_(headers);
+  const headersStock = target.getRange(1, 1, 1, Math.max(4, target.getLastColumn())).getValues()[0];
+  const resolver = makeHeaderResolver_(headersStock);
   const colExact = resolver.colExact.bind(resolver);
 
-  const COL_LABEL_STOCK = 1;                    // A = Libellé
-  const COL_SKU_STOCK   = colExact("sku") || 3; // C par défaut
-  const COL_DATE_STOCK  = (COL_SKU_STOCK === 3) ? 4 : COL_SKU_STOCK + 1;
-  const C_DMS_STOCK     = colExact("date de mise en stock"); // optionnel
+  const COL_ID_STOCK    = colExact('id');
+  const COL_LABEL_STOCK = resolver.colWhere(h => h.includes('libell')) || resolver.colWhere(h => h.includes('article')) || 2;
+  const COL_OLD_STOCK   = colExact('sku(ancienne nomenclature)');
+  const COL_SKU_STOCK   = colExact('sku') || colExact('reference');
+  const COL_DATE_STOCK  = resolver.colWhere(h => h.includes('livraison')) || (COL_SKU_STOCK ? COL_SKU_STOCK + 1 : 0);
+  const C_DMS_STOCK     = colExact('date de mise en stock'); // optionnel
 
   const base = skuBase;
   const label = `${article} ${marque} ${genre}`.trim();
 
-  const rows = Array.from({length: qty}, () => [
-    label,              // A = Libellé
-    "",                 // B = SKU(ancienne nomenclature)
-    `${base}-0`,        // C = SKU temporaire (base-0)
-    dateLiv             // D = date de livraison
-  ]);
+  const width = Math.max(target.getLastColumn(), COL_LABEL_STOCK || 0, COL_SKU_STOCK || 0, COL_DATE_STOCK || 0, COL_ID_STOCK || 0, COL_OLD_STOCK || 0);
+  const rows = Array.from({length: qty}, () => Array(Math.max(1, width)).fill(""));
+
+  for (let i = 0; i < rows.length; i++) {
+    const rowValues = rows[i];
+    if (COL_ID_STOCK) rowValues[COL_ID_STOCK - 1] = achatId;
+    if (COL_LABEL_STOCK) rowValues[COL_LABEL_STOCK - 1] = label;
+    if (COL_OLD_STOCK) rowValues[COL_OLD_STOCK - 1] = "";
+    if (COL_SKU_STOCK) rowValues[COL_SKU_STOCK - 1] = `${base}-0`;
+    if (COL_DATE_STOCK) rowValues[COL_DATE_STOCK - 1] = dateLiv;
+  }
 
   const start = Math.max(2, target.getLastRow() + 1);
-  target.getRange(start, 1, rows.length, 4).setValues(rows);
+  target.getRange(start, 1, rows.length, rows[0].length).setValues(rows);
 
   if (C_DMS_STOCK) {
     target.getRange(start, C_DMS_STOCK, rows.length, 1).setValue(miseStockDate);
   }
 
   const lastS = target.getLastRow();
-  if (lastS > 2) {
-    target.getRange(2, 1, lastS - 1, Math.max(4, target.getLastColumn()))
+  if (lastS > 2 && COL_DATE_STOCK) {
+    target.getRange(2, 1, lastS - 1, target.getLastColumn())
           .sort({ column: COL_DATE_STOCK, ascending: true });
     target.getRange(2, COL_DATE_STOCK, lastS - 1, 1).setNumberFormat("dd/MM/yyyy");
   }
@@ -575,7 +601,8 @@ function handleStock(e) {
   const colExact = resolver.colExact.bind(resolver);
   const colWhere = resolver.colWhere.bind(resolver);
 
-  const C_LABEL   = 1;                                       // A = libellé
+  const C_ID      = colExact('id');
+  const C_LABEL   = colWhere(h => h.includes('libell')) || colWhere(h => h.includes('article')) || 2;
   const C_OLD_SKU = colExact("sku(ancienne nomenclature)") || 2;
   const C_SKU     = colExact("sku") || colExact("reference"); // B/C
   const C_PRIX    = colWhere(h => h.includes("prix") && h.includes("vente")); // "PRIX DE VENTE"
@@ -871,20 +898,21 @@ function handleStock(e) {
     if (!(valDate instanceof Date) || isNaN(valDate.getTime())) return;
 
     const baseToDmsMap = buildBaseToStockDate_(ss);
-    exportVente_(null, r, C_LABEL, C_SKU, C_PRIX, C_DVENTE, C_STAMPV, baseToDmsMap);
+    exportVente_(null, r, C_ID, C_LABEL, C_SKU, C_PRIX, C_DVENTE, C_STAMPV, baseToDmsMap);
     return;
   }
 }
 
 // Déplace la ligne de "Stock" vers "Ventes" (et calcule les délais)
-function exportVente_(e, row, C_LABEL, C_SKU, C_PRIX, C_DVENTE, C_STAMPV, baseToDmsMap) {
+function exportVente_(e, row, C_ID, C_LABEL, C_SKU, C_PRIX, C_DVENTE, C_STAMPV, baseToDmsMap) {
   const ss = SpreadsheetApp.getActive();
   const sh = ss.getSheetByName("Stock");
   if (!sh) return;
 
   const ventes = ss.getSheetByName("Ventes") || ss.insertSheet("Ventes");
   if (ventes.getLastRow() === 0) {
-    ventes.getRange(1, 1, 1, 8).setValues([[
+    ventes.getRange(1, 1, 1, 9).setValues([[
+      "ID",
       "DATE DE VENTE",
       "ARTICLE",
       "SKU",
@@ -896,11 +924,28 @@ function exportVente_(e, row, C_LABEL, C_SKU, C_PRIX, C_DVENTE, C_STAMPV, baseTo
     ]]);
   }
 
+  const ventesHeaders = ventes.getRange(1, 1, 1, Math.max(9, ventes.getLastColumn())).getValues()[0];
+  const ventesResolver = makeHeaderResolver_(ventesHeaders);
+  const ventesExact = ventesResolver.colExact.bind(ventesResolver);
+  const ventesWhere = ventesResolver.colWhere.bind(ventesResolver);
+
+  const COL_ID_VENTE    = ventesExact('id');
+  const COL_DATE_VENTE  = ventesWhere(h => h.includes('date') && h.includes('vente'));
+  const COL_ARTICLE     = ventesWhere(h => h.includes('article')) || ventesWhere(h => h.includes('libell'));
+  const COL_SKU_VENTE   = ventesExact('sku');
+  const COL_PRIX_VENTE  = ventesWhere(h => h.includes('prix') && h.includes('vente'));
+  const COL_DELAI_IMM   = ventesWhere(h => h.includes('immobilisation'));
+  const COL_DELAI_ML    = ventesWhere(h => h.includes('mise en ligne'));
+  const COL_DELAI_PUB   = ventesWhere(h => h.includes('publication'));
+  const COL_DELAI_VENTE = ventesWhere(h => h.includes('delai') && h.includes('vente'));
+  const widthVentes     = Math.max(ventes.getLastColumn(), 9);
+
   const dateCell = sh.getRange(row, C_DVENTE);
   const dateV = dateCell.getValue();
   if (!(dateV instanceof Date) || isNaN(dateV)) return;
 
-  const label = sh.getRange(row, C_LABEL).getDisplayValue();
+  const idVal = C_ID ? sh.getRange(row, C_ID).getValue() : "";
+  const label = C_LABEL ? sh.getRange(row, C_LABEL).getDisplayValue() : "";
   const sku   = C_SKU  ? sh.getRange(row, C_SKU).getDisplayValue() : "";
   const prix  = C_PRIX ? sh.getRange(row, C_PRIX).getValue() : "";
 
@@ -951,20 +996,23 @@ function exportVente_(e, row, C_LABEL, C_SKU, C_PRIX, C_DVENTE, C_STAMPV, baseTo
   const delaiVte = diffDays(dateV, dPub);
 
   const start = Math.max(2, ventes.getLastRow() + 1);
-  ventes.getRange(start, 1, 1, 8).setValues([[
-    dateV,
-    label,
-    sku,
-    prix,
-    delaiImm,
-    delaiML,
-    delaiPub,
-    delaiVte
-  ]]);
+  const newRow = Array(widthVentes).fill("");
+  if (COL_ID_VENTE) newRow[COL_ID_VENTE - 1] = idVal;
+  if (COL_DATE_VENTE) newRow[COL_DATE_VENTE - 1] = dateV;
+  if (COL_ARTICLE) newRow[COL_ARTICLE - 1] = label;
+  if (COL_SKU_VENTE) newRow[COL_SKU_VENTE - 1] = sku;
+  if (COL_PRIX_VENTE) newRow[COL_PRIX_VENTE - 1] = prix;
+  if (COL_DELAI_IMM) newRow[COL_DELAI_IMM - 1] = delaiImm;
+  if (COL_DELAI_ML) newRow[COL_DELAI_ML - 1] = delaiML;
+  if (COL_DELAI_PUB) newRow[COL_DELAI_PUB - 1] = delaiPub;
+  if (COL_DELAI_VENTE) newRow[COL_DELAI_VENTE - 1] = delaiVte;
+
+  ventes.getRange(start, 1, 1, newRow.length).setValues([newRow]);
 
   const lastV = ventes.getLastRow();
-  if (lastV > 2) {
-    ventes.getRange(2, 1, lastV - 1, 8).sort([{column: 1, ascending: false}]);
+  if (lastV > 2 && COL_DATE_VENTE) {
+    ventes.getRange(2, 1, lastV - 1, ventes.getLastColumn()).sort([{column: COL_DATE_VENTE, ascending: false}]);
+    ventes.getRange(2, COL_DATE_VENTE, lastV - 1, 1).setNumberFormat('dd/MM/yyyy');
   }
 
   if (C_STAMPV) sh.getRange(row, C_STAMPV).setValue(new Date());
@@ -999,10 +1047,14 @@ function sortVentesByDate() {
   }
 
   const lastColumn = ventes.getLastColumn();
+  const headers = ventes.getRange(1, 1, 1, lastColumn).getValues()[0];
+  const resolver = makeHeaderResolver_(headers);
+  const colDate = resolver.colWhere(h => h.includes('date') && h.includes('vente')) || 2;
+
   ventes
     .getRange(2, 1, lastRow - 1, lastColumn)
-    .sort({ column: 1, ascending: false });
-  ventes.getRange(2, 1, lastRow - 1, 1).setNumberFormat('dd/MM/yyyy');
+    .sort({ column: colDate, ascending: false });
+  ventes.getRange(2, colDate, lastRow - 1, 1).setNumberFormat('dd/MM/yyyy');
 
   ss.toast('Les ventes ont été triées par date décroissante.', 'Tri des ventes', 5);
 }
@@ -1127,7 +1179,8 @@ function validateAllSales() {
   const colExact = resolver.colExact.bind(resolver);
   const colWhere = resolver.colWhere.bind(resolver);
 
-  const C_LABEL    = 1; // A = libellé
+  const C_ID       = colExact('id');
+  const C_LABEL    = colWhere(h => h.includes('libell')) || colWhere(h => h.includes('article')) || 2;
   const C_SKU      = colExact("sku") || colExact("reference");
   const C_PRIX     = colWhere(h => h.includes("prix") && h.includes("vente"));
   const C_DVENTE   = colExact("date de vente") || 10;
@@ -1152,7 +1205,8 @@ function validateAllSales() {
 
   const ventes = ss.getSheetByName('Ventes') || ss.insertSheet('Ventes');
   if (ventes.getLastRow() === 0) {
-    ventes.getRange(1,1,1,8).setValues([[
+    ventes.getRange(1,1,1,9).setValues([[
+      "ID",
       "DATE DE VENTE",
       "ARTICLE",
       "SKU",
@@ -1163,6 +1217,22 @@ function validateAllSales() {
       "DELAI DE VENTE"
     ]]);
   }
+
+  const ventesHeaders = ventes.getRange(1, 1, 1, Math.max(9, ventes.getLastColumn())).getValues()[0];
+  const ventesResolver = makeHeaderResolver_(ventesHeaders);
+  const ventesExact = ventesResolver.colExact.bind(ventesResolver);
+  const ventesWhere = ventesResolver.colWhere.bind(ventesResolver);
+
+  const COL_ID_VENTE    = ventesExact('id');
+  const COL_DATE_VENTE  = ventesWhere(h => h.includes('date') && h.includes('vente'));
+  const COL_ARTICLE     = ventesWhere(h => h.includes('article')) || ventesWhere(h => h.includes('libell'));
+  const COL_SKU_VENTE   = ventesExact('sku');
+  const COL_PRIX_VENTE  = ventesWhere(h => h.includes('prix') && h.includes('vente'));
+  const COL_DELAI_IMM   = ventesWhere(h => h.includes('immobilisation'));
+  const COL_DELAI_ML    = ventesWhere(h => h.includes('mise en ligne'));
+  const COL_DELAI_PUB   = ventesWhere(h => h.includes('publication'));
+  const COL_DELAI_VENTE = ventesWhere(h => h.includes('delai') && h.includes('vente'));
+  const widthVentes     = Math.max(ventes.getLastColumn(), 9);
 
   const toAppend = [];
   const rowsToDel = [];
@@ -1211,6 +1281,7 @@ function validateAllSales() {
       continue;
     }
 
+    const idValue = C_ID ? row[C_ID - 1] : '';
     const label = row[C_LABEL - 1];
     const sku   = C_SKU ? row[C_SKU - 1] : "";
 
@@ -1232,16 +1303,18 @@ function validateAllSales() {
     const dPub     = daysDiff(datePub,  dateMiseLigne);
     const dVente   = daysDiff(dateVente, datePub);
 
-    toAppend.push([
-      dateVente,
-      label,
-      sku,
-      prix,
-      dImmobil,
-      dLigne,
-      dPub,
-      dVente
-    ]);
+    const newRow = Array(widthVentes).fill('');
+    if (COL_ID_VENTE) newRow[COL_ID_VENTE - 1] = idValue;
+    if (COL_DATE_VENTE) newRow[COL_DATE_VENTE - 1] = dateVente;
+    if (COL_ARTICLE) newRow[COL_ARTICLE - 1] = label;
+    if (COL_SKU_VENTE) newRow[COL_SKU_VENTE - 1] = sku;
+    if (COL_PRIX_VENTE) newRow[COL_PRIX_VENTE - 1] = prix;
+    if (COL_DELAI_IMM) newRow[COL_DELAI_IMM - 1] = dImmobil;
+    if (COL_DELAI_ML) newRow[COL_DELAI_ML - 1] = dLigne;
+    if (COL_DELAI_PUB) newRow[COL_DELAI_PUB - 1] = dPub;
+    if (COL_DELAI_VENTE) newRow[COL_DELAI_VENTE - 1] = dVente;
+
+    toAppend.push(newRow);
 
     rowsToDel.push(rowIndex);
     moved++;
@@ -1249,12 +1322,13 @@ function validateAllSales() {
 
   if (toAppend.length > 0) {
     const startV = Math.max(2, ventes.getLastRow() + 1);
-    ventes.getRange(startV, 1, toAppend.length, 8).setValues(toAppend);
+    ventes.getRange(startV, 1, toAppend.length, widthVentes).setValues(toAppend);
 
     const lastV = ventes.getLastRow();
-    if (lastV > 2) {
-      ventes.getRange(2, 1, lastV - 1, 8)
-            .sort([{column: 1, ascending: false}]);
+    if (lastV > 2 && COL_DATE_VENTE) {
+      ventes.getRange(2, 1, lastV - 1, ventes.getLastColumn())
+            .sort([{column: COL_DATE_VENTE, ascending: false}]);
+      ventes.getRange(2, COL_DATE_VENTE, lastV - 1, 1).setNumberFormat('dd/MM/yyyy');
     }
 
     rowsToDel.sort((a, b) => b - a);
