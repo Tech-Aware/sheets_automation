@@ -557,15 +557,40 @@ function handleStock(e) {
   if (C_VENDU && c === C_VENDU) {
     const dv = sh.getRange(r, C_DVENTE);
 
-    if (!turnedOn) {
-      clearPriceAlertIfAny_(sh, r, C_PRIX);
-    } else {
+    if (turnedOn) {
+      storePreviousCellValue_(sh, r, C_DVENTE, dv.getValue());
+      if (C_PRIX) {
+        const priceCell = sh.getRange(r, C_PRIX);
+        storePreviousCellValue_(sh, r, C_PRIX, priceCell.getValue());
+      }
+
       let val = dv.getValue();
       if (!(val instanceof Date) || isNaN(val)) {
         dv.setValue(new Date());  // on date au moment du clic
       }
       ensureValidPriceOrWarn_(sh, r, C_PRIX);
+      return;
     }
+
+    if (turnedOff) {
+      if (!restorePreviousCellValue_(sh, r, C_DVENTE)) {
+        dv.clearContent();
+      }
+
+      if (C_PRIX) {
+        restorePreviousCellValue_(sh, r, C_PRIX);
+        clearPriceAlertIfAny_(sh, r, C_PRIX);
+        const priceCell = sh.getRange(r, C_PRIX);
+        priceCell.clearContent();
+        priceCell.setBackground(null);
+        priceCell.setFontColor(null);
+      } else {
+        clearPriceAlertIfAny_(sh, r, C_PRIX);
+      }
+      return;
+    }
+
+    clearPriceAlertIfAny_(sh, r, C_PRIX);
     return;
   }
 
