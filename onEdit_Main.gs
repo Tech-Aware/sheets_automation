@@ -488,6 +488,36 @@ function handleStock(e) {
   // 0bis) Modification du PRIX DE VENTE
   if (C_PRIX && c === C_PRIX) {
     const vendu = C_VENDU ? (sh.getRange(r, C_VENDU).getValue() === true) : false;
+    const priceCell = sh.getRange(r, C_PRIX);
+    const priceValue = priceCell.getValue();
+    const priceDisplay = priceCell.getDisplayValue();
+
+    if (C_VALIDE) {
+      const valCell = sh.getRange(r, C_VALIDE);
+      const validation = valCell.getDataValidation();
+      const isCheckbox = validation &&
+        typeof validation.getCriteriaType === 'function' &&
+        validation.getCriteriaType() === SpreadsheetApp.DataValidationCriteria.CHECKBOX;
+      const allowInvalid = validation && typeof validation.getAllowInvalid === 'function' && validation.getAllowInvalid();
+      const shouldEnable = (typeof priceValue === 'number') && !isNaN(priceValue) && priceValue > 0 && (!priceDisplay || priceDisplay.indexOf('⚠️') !== 0);
+
+      if (shouldEnable) {
+        if (!isCheckbox || allowInvalid) {
+          const rule = SpreadsheetApp
+            .newDataValidation()
+            .requireCheckbox()
+            .setAllowInvalid(false)
+            .build();
+          valCell.setDataValidation(rule);
+          if (!isCheckbox) {
+            valCell.setValue(false);
+          }
+        }
+      } else {
+        valCell.clearDataValidations();
+        valCell.clearContent();
+      }
+    }
 
     if (!vendu) {
       // Rien n'est coché → pas d'alerte.
