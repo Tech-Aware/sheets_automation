@@ -980,7 +980,31 @@ function onOpen(e) {
     .addItem('Recalculer les SKU du Stock', 'recalcStock')
     .addItem('Mettre à jour les dates de mise en stock', 'syncMiseEnStockFromAchats')
     .addItem('Valider toutes les saisies prêtes', 'validateAllSales')
+    .addItem('Trier les ventes (date décroissante)', 'sortVentesByDate')
     .addToUi();
+}
+
+function sortVentesByDate() {
+  const ss = SpreadsheetApp.getActive();
+  const ventes = ss.getSheetByName('Ventes');
+  if (!ventes) {
+    ss.toast('Feuille Ventes introuvable', 'Tri des ventes', 5);
+    return;
+  }
+
+  const lastRow = ventes.getLastRow();
+  if (lastRow <= 2) {
+    ss.toast('Aucune donnée à trier', 'Tri des ventes', 5);
+    return;
+  }
+
+  const lastColumn = ventes.getLastColumn();
+  ventes
+    .getRange(2, 1, lastRow - 1, lastColumn)
+    .sort({ column: 1, ascending: false });
+  ventes.getRange(2, 1, lastRow - 1, 1).setNumberFormat('dd/MM/yyyy');
+
+  ss.toast('Les ventes ont été triées par date décroissante.', 'Tri des ventes', 5);
 }
 
 // Recalcul des SKU uniquement dans Stock
