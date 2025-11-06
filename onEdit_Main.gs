@@ -661,9 +661,17 @@ function renumberStockByBrand_(onlyOld) {
       curSku = base + '-0';
     }
 
-    const counterKey = base + '||' + (idKey || '');
+    const counterKey = base;
     if (!Object.prototype.hasOwnProperty.call(baseCounters, counterKey)) {
-      baseCounters[counterKey] = 0;
+      let initialCounter = 0;
+      const curMatch = String(curSku).match(/-(\d+)\s*$/);
+      if (curMatch) {
+        const parsed = parseInt(curMatch[1], 10);
+        if (!isNaN(parsed)) {
+          initialCounter = parsed;
+        }
+      }
+      baseCounters[counterKey] = initialCounter;
     }
 
     // extraction éventuelle du numéro dans SKU(ancienne)
