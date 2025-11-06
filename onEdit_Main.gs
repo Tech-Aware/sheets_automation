@@ -236,6 +236,41 @@ function buildBaseToStockDate_(ss) {
   return map;
 }
 
+function buildIdToSkuBaseMap_(ss) {
+  const achats = ss && ss.getSheetByName('Achats');
+  if (!achats) return Object.create(null);
+
+  const last = achats.getLastRow();
+  if (last < 2) return Object.create(null);
+
+  const headers = achats.getRange(1, 1, 1, achats.getLastColumn()).getValues()[0];
+  const resolver = makeHeaderResolver_(headers);
+  const colExact = resolver.colExact.bind(resolver);
+  const colWhere = resolver.colWhere.bind(resolver);
+
+  const COL_ID  = colExact('id');
+  const COL_REF = colExact('reference') || colWhere(h => h.includes('reference'));
+  if (!COL_ID || !COL_REF) return Object.create(null);
+
+  const ids  = achats.getRange(2, COL_ID, last - 1, 1).getValues();
+  const refs = achats.getRange(2, COL_REF, last - 1, 1).getValues();
+
+  const map = Object.create(null);
+  for (let i = 0; i < ids.length; i++) {
+    const idRaw = ids[i][0];
+    const refRaw = refs[i][0];
+    if (idRaw === null || idRaw === undefined || idRaw === '') continue;
+
+    const key = String(idRaw);
+    const base = String(refRaw || "").trim();
+    if (base) {
+      map[key] = base;
+    }
+  }
+
+  return map;
+}
+
 // Vérifie le prix, colore la cellule si invalide, retourne true/false
 function ensureValidPriceOrWarn_(sh, row, C_PRIX) {
   if (!C_PRIX) return false;
@@ -483,7 +518,10 @@ function handleAchats(e) {
   const COL_ID_STOCK    = resolverStock.colExact('id');
   const COL_LABEL_STOCK = resolverStock.colWhere(h => h.includes('libell')) || resolverStock.colWhere(h => h.includes('article')) || 2;
   const COL_OLD_STOCK   = resolverStock.colExact('sku(ancienne nomenclature)');
-  const COL_SKU_STOCK   = resolverStock.colExact('sku') || resolverStock.colExact('reference');
+  const COL_SKU_STOCK   = resolverStock.colExact('sku')
+    || resolverStock.colExact('reference')
+    || resolverStock.colWhere(h => h.includes('sku'))
+    || 3;
   const COL_DATE_STOCK  = resolverStock.colWhere(h => h.includes('livraison')) || (COL_SKU_STOCK ? COL_SKU_STOCK + 1 : 0);
   const C_DMS_STOCK     = resolverStock.colExact('date de mise en stock'); // optionnel
 
@@ -539,12 +577,17 @@ function renumberStockByBrand_(onlyOld) {
 
   const stockHeaders = stock.getRange(1,1,1,stock.getLastColumn()).getValues()[0];
   const resolver = makeHeaderResolver_(stockHeaders);
-  const COL_OLD   = resolver.colExact("sku(ancienne nomenclature)") || 2; // B
-  const COL_NEW   = resolver.colExact("sku") || resolver.colExact("reference") || 3; // C
+  const COL_ID    = resolver.colExact('id');
+  const COL_OLD   = resolver.colExact("sku(ancienne nomenclature)") || resolver.colWhere(h => h.includes('ancienne')) || 2; // B
+  const COL_NEW   = resolver.colExact("sku")
+    || resolver.colExact("reference")
+    || resolver.colWhere(h => h.includes('sku'))
+    || 3; // C
 
-  const width = Math.max(COL_NEW, COL_OLD, stock.getLastColumn());
+  const width = Math.max(COL_NEW, COL_OLD, COL_ID || 0, stock.getLastColumn());
   const data = stock.getRange(2, 1, last - 1, width).getValues();
 
+  const idToBase = COL_ID ? buildIdToSkuBaseMap_(ss) : null;
   const baseCounters = Object.create(null);
   const newSkuColValues = [];
 
@@ -553,11 +596,8 @@ function renumberStockByBrand_(onlyOld) {
 
     const oldSku = String(row[COL_OLD - 1] || "").trim();  // SKU ancienne
     let  curSku = String(row[COL_NEW - 1] || "").trim();   // SKU actuelle (base-0 ou autre)
-
-    if (!curSku) {
-      newSkuColValues.push([curSku]);
-      continue;
-    }
+    const idRaw = (COL_ID ? row[COL_ID - 1] : '') ;
+    const idKey = idRaw === null || idRaw === undefined || idRaw === '' ? '' : String(idRaw);
 
     // Si on est en mode "onlyOld" et qu'il n'y a rien en B → on laisse le SKU tel quel
     if (onlyOld && !oldSku) {
@@ -565,13 +605,22 @@ function renumberStockByBrand_(onlyOld) {
       continue;
     }
 
-    const parts = curSku.split('-');
-    if (parts.length < 2) {
+    let base = extractSkuBase_(curSku);
+    if (!base) {
+      base = extractSkuBase_(oldSku);
+    }
+    if (!base && idKey && idToBase && idToBase[idKey]) {
+      base = idToBase[idKey];
+    }
+
+    if (!base) {
       newSkuColValues.push([curSku]);
       continue;
     }
 
-    const base = parts.slice(0, parts.length - 1).join('-'); // ex: JLFK-0825
+    if (!curSku || curSku.indexOf(base + '-') !== 0) {
+      curSku = base + '-0';
+    }
 
     if (!baseCounters[base]) baseCounters[base] = 0;
 
