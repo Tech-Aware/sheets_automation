@@ -464,10 +464,10 @@ function handleAchats(e) {
   const turnedOn = (e.value === "TRUE") || (e.value === true);
   if (!turnedOn) return;
 
-  // Si déjà "MIS EN STOCK LE" → on ne recrée pas les lignes
   if (!COL_STP) return;
-  const alreadyStocked = sh.getRange(row, COL_STP).getDisplayValue();
-  if (alreadyStocked) return;
+  const stpCell = sh.getRange(row, COL_STP);
+  const stockStampDisplay = stpCell.getDisplayValue();
+  const stockStampRaw = stpCell.getValue();
 
   const achatId = COL_ID ? sh.getRange(row, COL_ID).getValue() : "";
   const article = COL_ART ? String(sh.getRange(row, COL_ART).getDisplayValue() || "").trim() : "";
@@ -504,13 +504,6 @@ function handleAchats(e) {
   const target = ss.getSheetByName("Stock");
   if (!target) return;
 
-  // Date de mise en stock : on fixe maintenant ET on la garde dans Achats!V
-  let miseStockDate = sh.getRange(row, COL_STP).getValue();
-  if (!(miseStockDate instanceof Date) || isNaN(miseStockDate)) {
-    miseStockDate = new Date();
-    sh.getRange(row, COL_STP).setValue(miseStockDate);
-  }
-
   // Repère dynamiquement les colonnes de Stock
   const headersStock = target.getRange(1, 1, 1, Math.max(4, target.getLastColumn())).getValues()[0];
   const resolverStock = makeHeaderResolver_(headersStock);
@@ -527,6 +520,52 @@ function handleAchats(e) {
 
   const base = skuBase;
   const label = `${article} ${marque} ${genre}`.trim();
+
+  const lastExistingStockRow = target.getLastRow();
+  let existingStockHasBase = false;
+  let existingStockDms = null;
+  if (lastExistingStockRow >= 2 && COL_SKU_STOCK) {
+    const existingSkuValues = target.getRange(2, COL_SKU_STOCK, lastExistingStockRow - 1, 1).getValues();
+    let existingDmsValues = null;
+    if (C_DMS_STOCK) {
+      existingDmsValues = target.getRange(2, C_DMS_STOCK, lastExistingStockRow - 1, 1).getValues();
+    }
+    const prefix = `${base}-`;
+    for (let i = 0; i < existingSkuValues.length; i++) {
+      const rawSku = String(existingSkuValues[i][0] || "").trim();
+      if (!rawSku || rawSku.indexOf(prefix) !== 0) continue;
+      existingStockHasBase = true;
+      if (existingDmsValues && !existingStockDms) {
+        const candidate = existingDmsValues[i][0];
+        if (candidate instanceof Date && !isNaN(candidate)) {
+          existingStockDms = candidate;
+        }
+      }
+    }
+  }
+
+  if (existingStockHasBase) {
+    if (COL_STP && !getDateOrNull_(stockStampRaw)) {
+      const fallbackDms = existingStockDms || getDateOrNull_(stockStampDisplay);
+      if (fallbackDms) {
+        stpCell.setValue(fallbackDms);
+      }
+    }
+    renumberStockByBrand_();
+    return;
+  }
+
+  // Date de mise en stock : on fixe maintenant ET on la garde dans Achats!V
+  let miseStockDate = getDateOrNull_(stockStampRaw);
+  if (!miseStockDate) {
+    miseStockDate = getDateOrNull_(stockStampDisplay);
+  }
+  if (!miseStockDate) {
+    miseStockDate = new Date();
+  }
+  if (!(stockStampRaw instanceof Date) || isNaN(stockStampRaw)) {
+    stpCell.setValue(miseStockDate);
+  }
 
   const width = Math.max(target.getLastColumn(), COL_LABEL_STOCK || 0, COL_SKU_STOCK || 0, COL_DATE_STOCK || 0, COL_ID_STOCK || 0, COL_OLD_STOCK || 0);
   const rows = Array.from({length: qty}, () => Array(Math.max(1, width)).fill(""));
@@ -622,22 +661,28 @@ function renumberStockByBrand_(onlyOld) {
       curSku = base + '-0';
     }
 
-    if (!baseCounters[base]) baseCounters[base] = 0;
+    const counterKey = base + '||' + (idKey || '');
+    if (!Object.prototype.hasOwnProperty.call(baseCounters, counterKey)) {
+      baseCounters[counterKey] = 0;
+    }
 
     // extraction éventuelle du numéro dans SKU(ancienne)
     let overrideNum = null;
     if (oldSku) {
-      const m = String(oldSku).match(/(\d+)\s*$/);
-      if (m) overrideNum = parseInt(m[1], 10);
+      const overrideBase = extractSkuBase_(oldSku);
+      if (!overrideBase || overrideBase === base) {
+        const m = String(oldSku).match(/(\d+)\s*$/);
+        if (m) overrideNum = parseInt(m[1], 10);
+      }
     }
 
     let suffix;
     if (overrideNum != null && Number.isFinite(overrideNum) && overrideNum > 0) {
       suffix = overrideNum;
-      baseCounters[base] = suffix;
+      baseCounters[counterKey] = suffix;
     } else {
-      suffix = baseCounters[base] + 1;
-      baseCounters[base] = suffix;
+      suffix = baseCounters[counterKey] + 1;
+      baseCounters[counterKey] = suffix;
     }
 
     const newSku = base + '-' + suffix; // sans padding
