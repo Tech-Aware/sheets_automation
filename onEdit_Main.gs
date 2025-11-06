@@ -455,7 +455,7 @@ function handleStock(e) {
 
   // 1) MIS EN LIGNE → horodate
   if (C_MIS && C_DMIS && c === C_MIS) {
-    if (turnedOn && !sh.getRange(r, C_DMIS).getDisplayValue()) sh.getRange(r, C_DMIS).setValue(new Date());
+    if (turnedOn) sh.getRange(r, C_DMIS).setValue(new Date());
     if (turnedOff && CLEAR_ON_UNCHECK) sh.getRange(r, C_DMIS).clearContent();
     return;
   }
