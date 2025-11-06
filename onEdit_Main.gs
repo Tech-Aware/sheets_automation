@@ -262,6 +262,26 @@ function extractSkuBase_(sku) {
   return parts.slice(0, parts.length - 1).join('-');
 }
 
+function extractSkuSuffix_(sku, expectedBase) {
+  const text = String(sku || "").trim();
+  if (!text) return null;
+
+  const base = String(expectedBase || "").trim();
+  if (base && text.indexOf(base + '-') !== 0) {
+    return null;
+  }
+
+  const match = text.match(/-(\d+)\s*$/);
+  if (!match) return null;
+
+  const parsed = parseInt(match[1], 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return null;
+  }
+
+  return parsed;
+}
+
 function buildBaseToStockDate_(ss) {
   const achats = ss && ss.getSheetByName('Achats');
   if (!achats) return Object.create(null);
@@ -720,21 +740,15 @@ function renumberStockByBrand_(onlyOld) {
 
   const idToBase = COL_ID ? buildIdToSkuBaseMap_(ss) : null;
   const baseCounters = Object.create(null);
-  const newSkuColValues = [];
+  const rowInfos = [];
 
   for (let i = 0; i < data.length; i++) {
     const row = data[i];
 
     const oldSku = String(row[COL_OLD - 1] || "").trim();  // SKU ancienne
-    let  curSku = String(row[COL_NEW - 1] || "").trim();   // SKU actuelle (base-0 ou autre)
-    const idRaw = (COL_ID ? row[COL_ID - 1] : '') ;
+    const curSku = String(row[COL_NEW - 1] || "").trim();   // SKU actuelle (base-0 ou autre)
+    const idRaw = (COL_ID ? row[COL_ID - 1] : '');
     const idKey = idRaw === null || idRaw === undefined || idRaw === '' ? '' : String(idRaw);
-
-    // Si on est en mode "onlyOld" et qu'il n'y a rien en B → on laisse le SKU tel quel
-    if (onlyOld && !oldSku) {
-      newSkuColValues.push([curSku]);
-      continue;
-    }
 
     const idBase = (idKey && idToBase && idToBase[idKey]) ? idToBase[idKey] : '';
     const curBase = extractSkuBase_(curSku);
@@ -749,49 +763,77 @@ function renumberStockByBrand_(onlyOld) {
       }
     }
 
+    let overrideSuffix = null;
+    let curSuffix = null;
+
+    if (base) {
+      const counterKey = base;
+      if (!Object.prototype.hasOwnProperty.call(baseCounters, counterKey)) {
+        baseCounters[counterKey] = 0;
+      }
+
+      if (oldSku && (!oldBase || oldBase === base)) {
+        overrideSuffix = extractSkuSuffix_(oldSku, base);
+        if (overrideSuffix != null) {
+          baseCounters[counterKey] = Math.max(baseCounters[counterKey], overrideSuffix);
+        }
+      }
+
+      if (curSku && (!curBase || curBase === base)) {
+        curSuffix = extractSkuSuffix_(curSku, base);
+        if (curSuffix != null) {
+          baseCounters[counterKey] = Math.max(baseCounters[counterKey], curSuffix);
+        }
+      }
+    }
+
+    rowInfos.push({
+      base,
+      oldSku,
+      curSku,
+      overrideSuffix,
+      curSuffix
+    });
+  }
+
+  const newSkuColValues = [];
+
+  for (let i = 0; i < rowInfos.length; i++) {
+    const info = rowInfos[i];
+    const base = info.base;
+    const oldSku = info.oldSku;
+    const curSku = info.curSku;
+
+    if (onlyOld && !oldSku) {
+      newSkuColValues.push([curSku]);
+      continue;
+    }
+
     if (!base) {
       newSkuColValues.push([curSku]);
       continue;
     }
 
-    if (!curSku || curSku.indexOf(base + '-') !== 0) {
-      curSku = base + '-0';
-    }
-
     const counterKey = base;
     if (!Object.prototype.hasOwnProperty.call(baseCounters, counterKey)) {
-      let initialCounter = 0;
-      const curMatch = String(curSku).match(/-(\d+)\s*$/);
-      if (curMatch) {
-        const parsed = parseInt(curMatch[1], 10);
-        if (!isNaN(parsed)) {
-          initialCounter = parsed;
-        }
-      }
-      baseCounters[counterKey] = initialCounter;
+      baseCounters[counterKey] = 0;
     }
 
-    // extraction éventuelle du numéro dans SKU(ancienne)
-    let overrideNum = null;
-    if (oldSku) {
-      const overrideBase = extractSkuBase_(oldSku);
-      if (!overrideBase || overrideBase === base) {
-        const m = String(oldSku).match(/(\d+)\s*$/);
-        if (m) overrideNum = parseInt(m[1], 10);
-      }
+    if (info.overrideSuffix != null) {
+      baseCounters[counterKey] = Math.max(baseCounters[counterKey], info.overrideSuffix);
+      newSkuColValues.push([counterKey + '-' + info.overrideSuffix]);
+      continue;
     }
 
-    let suffix;
-    if (overrideNum != null && Number.isFinite(overrideNum) && overrideNum > 0) {
-      suffix = overrideNum;
-      baseCounters[counterKey] = suffix;
-    } else {
-      suffix = baseCounters[counterKey] + 1;
-      baseCounters[counterKey] = suffix;
+    if (info.curSuffix != null) {
+      baseCounters[counterKey] = Math.max(baseCounters[counterKey], info.curSuffix);
+      newSkuColValues.push([curSku]);
+      continue;
     }
 
-    const newSku = base + '-' + suffix; // sans padding
-    newSkuColValues.push([newSku]);
+    const nextSuffix = baseCounters[counterKey] + 1;
+    baseCounters[counterKey] = nextSuffix;
+    newSkuColValues.push([counterKey + '-' + nextSuffix]);
   }
 
   stock.getRange(2, COL_NEW, newSkuColValues.length, 1).setValues(newSkuColValues);
