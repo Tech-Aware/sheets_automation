@@ -1,3 +1,65 @@
+const HEADERS = Object.freeze({
+  ACHATS: Object.freeze({
+    ID: 'ID',
+    ARTICLE: 'ARTICLES',
+    ARTICLE_ALT: 'ARTICLE',
+    MARQUE: 'MARQUE',
+    GENRE_DATA: 'GENRE(data)',
+    GENRE_DATA_ALT: 'GENRE(DATA)',
+    GENRE_LEGACY: 'GENRE',
+    REFERENCE: 'REFERENCE',
+    DATE_LIVRAISON: 'DATE DE LIVRAISON',
+    QUANTITE_RECUE: 'QUANTITÉ RECUE',
+    QUANTITE_RECUE_ALT: 'QUANTITE RECUE',
+    PRET_STOCK: 'PRËT POUR MISE EN STOCK',
+    PRET_STOCK_ALT: 'PRÊT POUR MISE EN STOCK',
+    DATE_MISE_EN_STOCK: 'MIS EN STOCK LE',
+    DATE_MISE_EN_STOCK_ALT: 'DATE DE MISE EN STOCK'
+  }),
+  STOCK: Object.freeze({
+    ID: 'ID',
+    OLD_SKU: 'SKU(ancienne nomenclature)',
+    SKU: 'SKU',
+    REFERENCE: 'REFERENCE',
+    LIBELLE: 'LIBELLÉ',
+    LIBELLE_ALT: 'LIBELLE',
+    ARTICLE: 'ARTICLES',
+    ARTICLE_ALT: 'ARTICLE',
+    PRIX_VENTE: 'PRIX DE VENTE',
+    DATE_LIVRAISON: 'DATE DE LIVRAISON',
+    DATE_MISE_EN_STOCK: 'DATE DE MISE EN STOCK',
+    MIS_EN_LIGNE: 'MIS EN LIGNE',
+    DATE_MISE_EN_LIGNE: 'DATE DE MISE EN LIGNE',
+    PUBLIE: 'PUBLIÉ',
+    DATE_PUBLICATION: 'DATE DE PUBLICATION',
+    VENDU: 'VENDU',
+    DATE_VENTE: 'DATE DE VENTE',
+    VENTE_EXPORTEE_LE: 'VENTE EXPORTEE LE',
+    VALIDER_SAISIE: 'VALIDER LA SAISIE'
+  }),
+  VENTES: Object.freeze({
+    ID: 'ID',
+    DATE_VENTE: 'DATE DE VENTE',
+    ARTICLE: 'ARTICLE',
+    ARTICLE_ALT: 'ARTICLES',
+    SKU: 'SKU',
+    PRIX_VENTE: 'PRIX VENTE',
+    PRIX_VENTE_ALT: 'PRIX DE VENTE',
+    DELAI_IMMOBILISATION: "DÉLAI D'IMMOBILISATION",
+    DELAI_MISE_EN_LIGNE: 'DELAI DE MISE EN LIGNE',
+    DELAI_PUBLICATION: 'DELAI DE PUBLICATION',
+    DELAI_VENTE: 'DELAI DE VENTE',
+    RETOUR: 'RETOUR'
+  })
+});
+
+const HEADER_LABELS = Object.freeze({
+  dms: HEADERS.STOCK.DATE_MISE_EN_STOCK,
+  dmis: HEADERS.STOCK.DATE_MISE_EN_LIGNE,
+  dpub: HEADERS.STOCK.DATE_PUBLICATION,
+  dvente: HEADERS.STOCK.DATE_VENTE
+});
+
 function onEdit(e) {
   const sh = e && e.source && e.source.getActiveSheet();
   if (!sh || !e.range || e.range.getRow() === 1) return;
@@ -134,12 +196,7 @@ function getDateOrNull_(value) {
 
 function enforceChronologicalDates_(sheet, row, cols, options) {
   const opts = options || {};
-  const labels = Object.assign({
-    dms: 'DATE DE MISE EN STOCK',
-    dmis: 'DATE DE MISE EN LIGNE',
-    dpub: 'DATE DE PUBLICATION',
-    dvente: 'DATE DE VENTE'
-  }, opts.labels);
+  const labels = Object.assign({}, HEADER_LABELS, opts.labels);
 
   const order = [
     { key: 'dms',   col: cols && cols.dms },
@@ -217,8 +274,11 @@ function buildBaseToStockDate_(ss) {
   const colWhere = resolver.colWhere.bind(resolver);
   const colExact = resolver.colExact.bind(resolver);
 
-  const COL_REF = colExact('reference') || colWhere(h => h.includes('reference'));
-  const COL_STP = colWhere(h => h.includes('mis en stock')) || colWhere(h => h.includes('mise en stock'));
+  const COL_REF = colExact(HEADERS.ACHATS.REFERENCE) || colWhere(h => h.includes('reference'));
+  const COL_STP = colExact(HEADERS.ACHATS.DATE_MISE_EN_STOCK)
+    || colExact(HEADERS.ACHATS.DATE_MISE_EN_STOCK_ALT)
+    || colWhere(h => h.includes('mis en stock'))
+    || colWhere(h => h.includes('mise en stock'));
   if (!COL_REF || !COL_STP) return Object.create(null);
 
   const refVals = achats.getRange(2, COL_REF, lastA - 1, 1).getValues();
@@ -248,8 +308,8 @@ function buildIdToSkuBaseMap_(ss) {
   const colExact = resolver.colExact.bind(resolver);
   const colWhere = resolver.colWhere.bind(resolver);
 
-  const COL_ID  = colExact('id');
-  const COL_REF = colExact('reference') || colWhere(h => h.includes('reference'));
+  const COL_ID  = colExact(HEADERS.ACHATS.ID);
+  const COL_REF = colExact(HEADERS.ACHATS.REFERENCE) || colWhere(h => h.includes('reference'));
   if (!COL_ID || !COL_REF) return Object.create(null);
 
   const ids  = achats.getRange(2, COL_ID, last - 1, 1).getValues();
@@ -288,7 +348,7 @@ function ensureValidPriceOrWarn_(sh, row, C_PRIX) {
   if (!disp || disp.indexOf('⚠️') === -1) {
     cell.setBackground('#0000FF');  // bleu fort
     cell.setFontColor('#FFFF00');   // jaune
-    cell.setValue('⚠️ Vous devez obligatoirement fournir un prix de vente');
+    cell.setValue(`⚠️ Vous devez obligatoirement fournir un ${HEADERS.STOCK.PRIX_VENTE}`);
   }
 
   return false;
@@ -324,19 +384,28 @@ function handleAchats(e) {
   const colWhere = resolver.colWhere.bind(resolver);
   const colExact = resolver.colExact.bind(resolver);
 
-  const COL_ID   = colExact('id');
-  const COL_ART  = colWhere(h => h.includes('article'));
-  const COL_MAR  = colWhere(h => h.includes('marque'));
-  const COL_GEN_DATA = colExact('genre(data)')
-    || colExact('genre data')
+  const COL_ID   = colExact(HEADERS.ACHATS.ID);
+  const COL_ART  = colExact(HEADERS.ACHATS.ARTICLE)
+    || colExact(HEADERS.ACHATS.ARTICLE_ALT)
+    || colWhere(h => h.includes('article'));
+  const COL_MAR  = colExact(HEADERS.ACHATS.MARQUE) || colWhere(h => h.includes('marque'));
+  const COL_GEN_DATA = colExact(HEADERS.ACHATS.GENRE_DATA)
+    || colExact(HEADERS.ACHATS.GENRE_DATA_ALT)
     || colWhere(h => h.includes('genre') && h.includes('data'));
-  const COL_GEN_LEGACY = colExact('genre') || colWhere(h => h.includes('genre'));
+  const COL_GEN_LEGACY = colExact(HEADERS.ACHATS.GENRE_LEGACY) || colWhere(h => h.includes('genre'));
   const COL_GEN  = COL_GEN_DATA || (COL_GEN_LEGACY && COL_GEN_LEGACY !== COL_GEN_DATA ? COL_GEN_LEGACY : 0);
-  const COL_REF  = colExact('reference') || colWhere(h => h.includes('reference'));
-  const COL_DLIV = colWhere(h => h.includes('livraison'));
-  const COL_QTY  = colWhere(h => h.includes('quantite') && (h.includes('recu') || h.includes('recue')));
-  const COL_READY= colWhere(h => h.includes('pret') && h.includes('stock'));
-  const COL_STP  = colWhere(h => h.includes('mis en stock')) || colWhere(h => h.includes('mise en stock'));
+  const COL_REF  = colExact(HEADERS.ACHATS.REFERENCE) || colWhere(h => h.includes('reference'));
+  const COL_DLIV = colExact(HEADERS.ACHATS.DATE_LIVRAISON) || colWhere(h => h.includes('livraison'));
+  const COL_QTY  = colExact(HEADERS.ACHATS.QUANTITE_RECUE)
+    || colExact(HEADERS.ACHATS.QUANTITE_RECUE_ALT)
+    || colWhere(h => h.includes('quantite') && (h.includes('recu') || h.includes('recue')));
+  const COL_READY= colExact(HEADERS.ACHATS.PRET_STOCK)
+    || colExact(HEADERS.ACHATS.PRET_STOCK_ALT)
+    || colWhere(h => h.includes('pret') && h.includes('stock'));
+  const COL_STP  = colExact(HEADERS.ACHATS.DATE_MISE_EN_STOCK)
+    || colExact(HEADERS.ACHATS.DATE_MISE_EN_STOCK_ALT)
+    || colWhere(h => h.includes('mis en stock'))
+    || colWhere(h => h.includes('mise en stock'));
 
   // -------------------------
   // 0) MODIF REFERENCE (F) → MAJ PRÉFIXE DES SKU DANS STOCK
@@ -353,7 +422,8 @@ function handleAchats(e) {
 
     const headersS = stock.getRange(1,1,1,stock.getLastColumn()).getValues()[0];
     const resolverS = makeHeaderResolver_(headersS);
-    const C_SKU_STOCK = resolverS.colExact("sku") || resolverS.colExact("reference");
+    const C_SKU_STOCK = resolverS.colExact(HEADERS.STOCK.SKU)
+      || resolverS.colExact(HEADERS.STOCK.REFERENCE);
     if (!C_SKU_STOCK) return;
 
     const lastS = stock.getLastRow();
@@ -433,8 +503,9 @@ function handleAchats(e) {
 
     const headersS = stock.getRange(1,1,1,stock.getLastColumn()).getValues()[0];
     const resolverS = makeHeaderResolver_(headersS);
-    const C_SKU_STOCK = resolverS.colExact("sku") || resolverS.colExact("reference");
-    const C_DMS_STOCK = resolverS.colExact("date de mise en stock"); // ta colonne E
+    const C_SKU_STOCK = resolverS.colExact(HEADERS.STOCK.SKU)
+      || resolverS.colExact(HEADERS.STOCK.REFERENCE);
+    const C_DMS_STOCK = resolverS.colExact(HEADERS.STOCK.DATE_MISE_EN_STOCK); // ta colonne E
     if (!C_SKU_STOCK || !C_DMS_STOCK) return;
 
     const lastS = stock.getLastRow();
@@ -508,15 +579,15 @@ function handleAchats(e) {
   const headersStock = target.getRange(1, 1, 1, Math.max(4, target.getLastColumn())).getValues()[0];
   const resolverStock = makeHeaderResolver_(headersStock);
 
-  const COL_ID_STOCK    = resolverStock.colExact('id');
+  const COL_ID_STOCK    = resolverStock.colExact(HEADERS.STOCK.ID);
   const COL_LABEL_STOCK = resolverStock.colWhere(h => h.includes('libell')) || resolverStock.colWhere(h => h.includes('article')) || 2;
-  const COL_OLD_STOCK   = resolverStock.colExact('sku(ancienne nomenclature)');
-  const COL_SKU_STOCK   = resolverStock.colExact('sku')
-    || resolverStock.colExact('reference')
+  const COL_OLD_STOCK   = resolverStock.colExact(HEADERS.STOCK.OLD_SKU);
+  const COL_SKU_STOCK   = resolverStock.colExact(HEADERS.STOCK.SKU)
+    || resolverStock.colExact(HEADERS.STOCK.REFERENCE)
     || resolverStock.colWhere(h => h.includes('sku'))
     || 3;
   const COL_DATE_STOCK  = resolverStock.colWhere(h => h.includes('livraison')) || (COL_SKU_STOCK ? COL_SKU_STOCK + 1 : 0);
-  const C_DMS_STOCK     = resolverStock.colExact('date de mise en stock'); // optionnel
+  const C_DMS_STOCK     = resolverStock.colExact(HEADERS.STOCK.DATE_MISE_EN_STOCK); // optionnel
 
   const base = skuBase;
   const label = `${article} ${marque} ${genre}`.trim();
@@ -638,9 +709,9 @@ function renumberStockByBrand_(onlyOld) {
   const stockHeaders = stock.getRange(1,1,1,stock.getLastColumn()).getValues()[0];
   const resolver = makeHeaderResolver_(stockHeaders);
   const COL_ID    = resolver.colExact('id');
-  const COL_OLD   = resolver.colExact("sku(ancienne nomenclature)") || resolver.colWhere(h => h.includes('ancienne')) || 2; // B
-  const COL_NEW   = resolver.colExact("sku")
-    || resolver.colExact("reference")
+  const COL_OLD   = resolver.colExact(HEADERS.STOCK.OLD_SKU) || resolver.colWhere(h => h.includes('ancienne')) || 2; // B
+  const COL_NEW   = resolver.colExact(HEADERS.STOCK.SKU)
+    || resolver.colExact(HEADERS.STOCK.REFERENCE)
     || resolver.colWhere(h => h.includes('sku'))
     || 3; // C
 
@@ -740,21 +811,29 @@ function handleStock(e) {
   const colExact = resolver.colExact.bind(resolver);
   const colWhere = resolver.colWhere.bind(resolver);
 
-  const C_ID      = colExact('id');
-  const C_LABEL   = colWhere(h => h.includes('libell')) || colWhere(h => h.includes('article')) || 2;
-  const C_OLD_SKU = colExact("sku(ancienne nomenclature)") || 2;
-  const C_SKU     = colExact("sku") || colExact("reference"); // B/C
-  const C_PRIX    = colWhere(h => h.includes("prix") && h.includes("vente")); // "PRIX DE VENTE"
-  const C_DMS     = colExact("date de mise en stock");
-  const C_MIS     = colExact("mis en ligne");
-  const C_DMIS    = colExact("date de mise en ligne");
-  const C_PUB     = colExact("publié");
-  const C_DPUB    = colExact("date de publication");
-  const C_VENDU   = colExact("vendu");
-  let   C_DVENTE  = colExact("date de vente");
+  const C_ID      = colExact(HEADERS.STOCK.ID);
+  const C_LABEL   = colExact(HEADERS.STOCK.LIBELLE)
+    || colExact(HEADERS.STOCK.LIBELLE_ALT)
+    || colExact(HEADERS.STOCK.ARTICLE)
+    || colExact(HEADERS.STOCK.ARTICLE_ALT)
+    || colWhere(h => h.includes('libell'))
+    || colWhere(h => h.includes('article'))
+    || 2;
+  const C_OLD_SKU = colExact(HEADERS.STOCK.OLD_SKU) || 2;
+  const C_SKU     = colExact(HEADERS.STOCK.SKU) || colExact(HEADERS.STOCK.REFERENCE); // B/C
+  const C_PRIX    = colExact(HEADERS.STOCK.PRIX_VENTE)
+    || colWhere(h => h.includes("prix") && h.includes("vente"));
+  const C_DMS     = colExact(HEADERS.STOCK.DATE_MISE_EN_STOCK);
+  const C_MIS     = colExact(HEADERS.STOCK.MIS_EN_LIGNE);
+  const C_DMIS    = colExact(HEADERS.STOCK.DATE_MISE_EN_LIGNE);
+  const C_PUB     = colExact(HEADERS.STOCK.PUBLIE);
+  const C_DPUB    = colExact(HEADERS.STOCK.DATE_PUBLICATION);
+  const C_VENDU   = colExact(HEADERS.STOCK.VENDU);
+  let   C_DVENTE  = colExact(HEADERS.STOCK.DATE_VENTE);
   if (!C_DVENTE) C_DVENTE = 10;
-  const C_STAMPV  = colExact("vente exportee le");
-  const C_VALIDE  = colWhere(h => h.includes("valider") && h.includes("saisie"));
+  const C_STAMPV  = colExact(HEADERS.STOCK.VENTE_EXPORTEE_LE);
+  const C_VALIDE  = colExact(HEADERS.STOCK.VALIDER_SAISIE)
+    || colWhere(h => h.includes("valider") && h.includes("saisie"));
 
   const c = e.range.getColumn(), r = e.range.getRow();
 
@@ -893,7 +972,11 @@ function handleStock(e) {
     if (turnedOff) {
       if (C_PUB && sh.getRange(r, C_PUB).getValue() === true) {
         sh.getRange(r, C_MIS).setValue(true);
-        ss.toast('Impossible de décocher "MIS EN LIGNE" tant que "PUBLIÉ" est coché.', 'Stock', 5);
+        ss.toast(
+          `Impossible de décocher "${HEADERS.STOCK.MIS_EN_LIGNE}" tant que "${HEADERS.STOCK.PUBLIE}" est coché.`,
+          'Stock',
+          5
+        );
         return;
       }
       if (!restorePreviousCellValue_(sh, r, C_DMIS) && CLEAR_ON_UNCHECK) {
@@ -922,7 +1005,11 @@ function handleStock(e) {
       const vendu = C_VENDU ? (sh.getRange(r, C_VENDU).getValue() === true) : false;
       if (vendu) {
         sh.getRange(r, C_PUB).setValue(true);
-        ss.toast('Impossible de décocher "PUBLIÉ" lorsqu\'une vente est cochée.', 'Stock', 5);
+        ss.toast(
+          `Impossible de décocher "${HEADERS.STOCK.PUBLIE}" lorsqu'une vente est cochée.`,
+          'Stock',
+          5
+        );
         return;
       }
 
@@ -1051,15 +1138,15 @@ function exportVente_(e, row, C_ID, C_LABEL, C_SKU, C_PRIX, C_DVENTE, C_STAMPV, 
   const ventes = ss.getSheetByName("Ventes") || ss.insertSheet("Ventes");
   if (ventes.getLastRow() === 0) {
     ventes.getRange(1, 1, 1, 9).setValues([[
-      "ID",
-      "DATE DE VENTE",
-      "ARTICLE",
-      "SKU",
-      "PRIX VENTE",
-      "DÉLAI D'IMMOBILISATION",
-      "DELAI DE MISE EN LIGNE",
-      "DELAI DE PUBLICATION",
-      "DELAI DE VENTE"
+      HEADERS.VENTES.ID,
+      HEADERS.VENTES.DATE_VENTE,
+      HEADERS.VENTES.ARTICLE,
+      HEADERS.VENTES.SKU,
+      HEADERS.VENTES.PRIX_VENTE,
+      HEADERS.VENTES.DELAI_IMMOBILISATION,
+      HEADERS.VENTES.DELAI_MISE_EN_LIGNE,
+      HEADERS.VENTES.DELAI_PUBLICATION,
+      HEADERS.VENTES.DELAI_VENTE
     ]]);
   }
 
@@ -1068,15 +1155,24 @@ function exportVente_(e, row, C_ID, C_LABEL, C_SKU, C_PRIX, C_DVENTE, C_STAMPV, 
   const ventesExact = ventesResolver.colExact.bind(ventesResolver);
   const ventesWhere = ventesResolver.colWhere.bind(ventesResolver);
 
-  const COL_ID_VENTE    = ventesExact('id');
-  const COL_DATE_VENTE  = ventesWhere(h => h.includes('date') && h.includes('vente'));
-  const COL_ARTICLE     = ventesWhere(h => h.includes('article')) || ventesWhere(h => h.includes('libell'));
-  const COL_SKU_VENTE   = ventesExact('sku');
-  const COL_PRIX_VENTE  = ventesWhere(h => h.includes('prix') && h.includes('vente'));
-  const COL_DELAI_IMM   = ventesWhere(h => h.includes('immobilisation'));
-  const COL_DELAI_ML    = ventesWhere(h => h.includes('mise en ligne'));
-  const COL_DELAI_PUB   = ventesWhere(h => h.includes('publication'));
-  const COL_DELAI_VENTE = ventesWhere(h => h.includes('delai') && h.includes('vente'));
+  const COL_ID_VENTE    = ventesExact(HEADERS.VENTES.ID);
+  const COL_DATE_VENTE  = ventesExact(HEADERS.VENTES.DATE_VENTE)
+    || ventesWhere(h => h.includes('date') && h.includes('vente'));
+  const COL_ARTICLE     = ventesExact(HEADERS.VENTES.ARTICLE)
+    || ventesWhere(h => h.includes('article'))
+    || ventesWhere(h => h.includes('libell'));
+  const COL_SKU_VENTE   = ventesExact(HEADERS.VENTES.SKU);
+  const COL_PRIX_VENTE  = ventesExact(HEADERS.VENTES.PRIX_VENTE)
+    || ventesExact(HEADERS.VENTES.PRIX_VENTE_ALT)
+    || ventesWhere(h => h.includes('prix') && h.includes('vente'));
+  const COL_DELAI_IMM   = ventesExact(HEADERS.VENTES.DELAI_IMMOBILISATION)
+    || ventesWhere(h => h.includes('immobilisation'));
+  const COL_DELAI_ML    = ventesExact(HEADERS.VENTES.DELAI_MISE_EN_LIGNE)
+    || ventesWhere(h => h.includes('mise en ligne'));
+  const COL_DELAI_PUB   = ventesExact(HEADERS.VENTES.DELAI_PUBLICATION)
+    || ventesWhere(h => h.includes('publication'));
+  const COL_DELAI_VENTE = ventesExact(HEADERS.VENTES.DELAI_VENTE)
+    || ventesWhere(h => h.includes('delai') && h.includes('vente'));
   const widthVentes     = Math.max(ventes.getLastColumn(), 9);
 
   const dateCell = sh.getRange(row, C_DVENTE);
@@ -1091,9 +1187,9 @@ function exportVente_(e, row, C_ID, C_LABEL, C_SKU, C_PRIX, C_DVENTE, C_STAMPV, 
   const headersS = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0];
   const resolverS = makeHeaderResolver_(headersS);
 
-  const C_DMS   = resolverS.colExact("date de mise en stock");
-  const C_DMIS  = resolverS.colExact("date de mise en ligne");
-  const C_DPUB  = resolverS.colExact("date de publication");
+  const C_DMS   = resolverS.colExact(HEADERS.STOCK.DATE_MISE_EN_STOCK);
+  const C_DMIS  = resolverS.colExact(HEADERS.STOCK.DATE_MISE_EN_LIGNE);
+  const C_DPUB  = resolverS.colExact(HEADERS.STOCK.DATE_PUBLICATION);
 
   const chronoCheck = enforceChronologicalDates_(sh, row, {
     dms: C_DMS,
@@ -1189,7 +1285,9 @@ function sortVentesByDate() {
   const lastColumn = ventes.getLastColumn();
   const ventesHeaders = ventes.getRange(1, 1, 1, lastColumn).getValues()[0];
   const resolver = makeHeaderResolver_(ventesHeaders);
-  const colDate = resolver.colWhere(h => h.includes('date') && h.includes('vente')) || 2;
+  const colDate = resolver.colExact(HEADERS.VENTES.DATE_VENTE)
+    || resolver.colWhere(h => h.includes('date') && h.includes('vente'))
+    || 2;
 
   ventes
     .getRange(2, 1, lastRow - 1, lastColumn)
@@ -1217,7 +1315,7 @@ function recalcStock() {
   const stockHeaders = stock.getRange(1,1,1,stock.getLastColumn()).getValues()[0];
   const resolver = makeHeaderResolver_(stockHeaders);
 
-  let C_DATE = resolver.colExact("date de livraison");
+  let C_DATE = resolver.colExact(HEADERS.STOCK.DATE_LIVRAISON);
   if (!C_DATE) C_DATE = 4;
 
   const width = stock.getLastColumn();
@@ -1261,10 +1359,15 @@ function syncMiseEnStockFromAchats() {
   const headersS = stock.getRange(1,1,1,stock.getLastColumn()).getValues()[0];
   const resolverS = makeHeaderResolver_(headersS);
 
-  const C_SKU  = resolverS.colExact("sku") || resolverS.colExact("reference");
-  const C_DMS  = resolverS.colExact("date de mise en stock");
+  const C_SKU  = resolverS.colExact(HEADERS.STOCK.SKU)
+    || resolverS.colExact(HEADERS.STOCK.REFERENCE);
+  const C_DMS  = resolverS.colExact(HEADERS.STOCK.DATE_MISE_EN_STOCK);
   if (!C_SKU || !C_DMS) {
-    SpreadsheetApp.getActive().toast('Colonnes SKU ou "DATE DE MISE EN STOCK" introuvables', 'Mise à jour DMS', 5);
+    SpreadsheetApp.getActive().toast(
+      `Colonnes ${HEADERS.STOCK.SKU} ou "${HEADERS.STOCK.DATE_MISE_EN_STOCK}" introuvables`,
+      'Mise à jour DMS',
+      5
+    );
     return;
   }
 
@@ -1325,13 +1428,18 @@ function purgeStockFromVentes() {
   const stockResolver = makeHeaderResolver_(stockHeaders);
   const ventesResolver = makeHeaderResolver_(ventesHeaders);
 
-  const C_STOCK_ID = stockResolver.colExact('id');
-  const C_STOCK_SKU = stockResolver.colExact('sku') || stockResolver.colExact('reference');
-  const C_VENTE_ID = ventesResolver.colExact('id');
-  const C_VENTE_SKU = ventesResolver.colExact('sku');
+  const C_STOCK_ID = stockResolver.colExact(HEADERS.STOCK.ID);
+  const C_STOCK_SKU = stockResolver.colExact(HEADERS.STOCK.SKU)
+    || stockResolver.colExact(HEADERS.STOCK.REFERENCE);
+  const C_VENTE_ID = ventesResolver.colExact(HEADERS.VENTES.ID);
+  const C_VENTE_SKU = ventesResolver.colExact(HEADERS.VENTES.SKU);
 
   if (!C_STOCK_ID || !C_STOCK_SKU || !C_VENTE_ID || !C_VENTE_SKU) {
-    ss.toast('Colonnes ID ou SKU introuvables dans Stock/Ventes.', 'Purge du stock', 8);
+    ss.toast(
+      `Colonnes ${HEADERS.STOCK.ID} ou ${HEADERS.STOCK.SKU} introuvables dans Stock/Ventes.`,
+      'Purge du stock',
+      8
+    );
     return;
   }
 
@@ -1391,7 +1499,7 @@ function purgeStockFromVentes() {
   const restants = Array.from(venteCounts.values()).reduce((sum, val) => sum + val, 0);
   const messageParts = [`${rowsToDelete.length} ligne(s) supprimée(s) du Stock.`];
   if (ventesIgnorées) {
-    messageParts.push(`${ventesIgnorées} vente(s) ignorée(s) (ID ou SKU manquant).`);
+    messageParts.push(`${ventesIgnorées} vente(s) ignorée(s) (${HEADERS.VENTES.ID} ou ${HEADERS.VENTES.SKU} manquant).`);
   }
   if (restants) {
     messageParts.push(`${restants} vente(s) sans correspondance dans le Stock.`);
@@ -1420,21 +1528,30 @@ function validateAllSales() {
   const colExact = resolver.colExact.bind(resolver);
   const colWhere = resolver.colWhere.bind(resolver);
 
-  const C_ID       = colExact('id');
-  const C_LABEL    = colWhere(h => h.includes('libell')) || colWhere(h => h.includes('article')) || 2;
-  const C_SKU      = colExact("sku") || colExact("reference");
-  const C_PRIX     = colWhere(h => h.includes("prix") && h.includes("vente"));
-  const C_DVENTE   = colExact("date de vente") || 10;
-  const C_VENDU    = colExact("vendu");
-  const C_VALIDATE = colWhere(h => h.includes("valider") && h.includes("saisie"));
-  const C_DMS      = colWhere(h => h.includes("mise en stock"));
-  const C_DMIS     = colExact("date de mise en ligne");
-  const C_DPUB     = colExact("date de publication");
+  const C_ID       = colExact(HEADERS.STOCK.ID);
+  const C_LABEL    = colExact(HEADERS.STOCK.LIBELLE)
+    || colExact(HEADERS.STOCK.LIBELLE_ALT)
+    || colExact(HEADERS.STOCK.ARTICLE)
+    || colExact(HEADERS.STOCK.ARTICLE_ALT)
+    || colWhere(h => h.includes('libell'))
+    || colWhere(h => h.includes('article'))
+    || 2;
+  const C_SKU      = colExact(HEADERS.STOCK.SKU) || colExact(HEADERS.STOCK.REFERENCE);
+  const C_PRIX     = colExact(HEADERS.STOCK.PRIX_VENTE)
+    || colWhere(h => h.includes("prix") && h.includes("vente"));
+  const C_DVENTE   = colExact(HEADERS.STOCK.DATE_VENTE) || 10;
+  const C_VENDU    = colExact(HEADERS.STOCK.VENDU);
+  const C_VALIDATE = colExact(HEADERS.STOCK.VALIDER_SAISIE)
+    || colWhere(h => h.includes("valider") && h.includes("saisie"));
+  const C_DMS      = colExact(HEADERS.STOCK.DATE_MISE_EN_STOCK)
+    || colWhere(h => h.includes("mise en stock"));
+  const C_DMIS     = colExact(HEADERS.STOCK.DATE_MISE_EN_LIGNE);
+  const C_DPUB     = colExact(HEADERS.STOCK.DATE_PUBLICATION);
 
   if (!C_SKU || !C_PRIX || !C_DVENTE) {
     SpreadsheetApp.getUi().alert(
       'Validation groupée',
-      'Colonnes SKU / PRIX DE VENTE / DATE DE VENTE introuvables. Vérifie les en-têtes.',
+      `Colonnes ${HEADERS.STOCK.SKU} / ${HEADERS.STOCK.PRIX_VENTE} / ${HEADERS.STOCK.DATE_VENTE} introuvables. Vérifie les en-têtes.`,
       SpreadsheetApp.getUi().ButtonSet.OK
     );
     return;
@@ -1447,15 +1564,15 @@ function validateAllSales() {
   const ventes = ss.getSheetByName('Ventes') || ss.insertSheet('Ventes');
   if (ventes.getLastRow() === 0) {
     ventes.getRange(1,1,1,9).setValues([[
-      "ID",
-      "DATE DE VENTE",
-      "ARTICLE",
-      "SKU",
-      "PRIX VENTE",
-      "DÉLAI D'IMMOBILISATION",
-      "DELAI DE MISE EN LIGNE",
-      "DELAI DE PUBLICATION",
-      "DELAI DE VENTE"
+      HEADERS.VENTES.ID,
+      HEADERS.VENTES.DATE_VENTE,
+      HEADERS.VENTES.ARTICLE,
+      HEADERS.VENTES.SKU,
+      HEADERS.VENTES.PRIX_VENTE,
+      HEADERS.VENTES.DELAI_IMMOBILISATION,
+      HEADERS.VENTES.DELAI_MISE_EN_LIGNE,
+      HEADERS.VENTES.DELAI_PUBLICATION,
+      HEADERS.VENTES.DELAI_VENTE
     ]]);
   }
 
@@ -1464,15 +1581,24 @@ function validateAllSales() {
   const ventesExact = ventesResolver.colExact.bind(ventesResolver);
   const ventesWhere = ventesResolver.colWhere.bind(ventesResolver);
 
-  const COL_ID_VENTE    = ventesExact('id');
-  const COL_DATE_VENTE  = ventesWhere(h => h.includes('date') && h.includes('vente'));
-  const COL_ARTICLE     = ventesWhere(h => h.includes('article')) || ventesWhere(h => h.includes('libell'));
-  const COL_SKU_VENTE   = ventesExact('sku');
-  const COL_PRIX_VENTE  = ventesWhere(h => h.includes('prix') && h.includes('vente'));
-  const COL_DELAI_IMM   = ventesWhere(h => h.includes('immobilisation'));
-  const COL_DELAI_ML    = ventesWhere(h => h.includes('mise en ligne'));
-  const COL_DELAI_PUB   = ventesWhere(h => h.includes('publication'));
-  const COL_DELAI_VENTE = ventesWhere(h => h.includes('delai') && h.includes('vente'));
+  const COL_ID_VENTE    = ventesExact(HEADERS.VENTES.ID);
+  const COL_DATE_VENTE  = ventesExact(HEADERS.VENTES.DATE_VENTE)
+    || ventesWhere(h => h.includes('date') && h.includes('vente'));
+  const COL_ARTICLE     = ventesExact(HEADERS.VENTES.ARTICLE)
+    || ventesWhere(h => h.includes('article'))
+    || ventesWhere(h => h.includes('libell'));
+  const COL_SKU_VENTE   = ventesExact(HEADERS.VENTES.SKU);
+  const COL_PRIX_VENTE  = ventesExact(HEADERS.VENTES.PRIX_VENTE)
+    || ventesExact(HEADERS.VENTES.PRIX_VENTE_ALT)
+    || ventesWhere(h => h.includes('prix') && h.includes('vente'));
+  const COL_DELAI_IMM   = ventesExact(HEADERS.VENTES.DELAI_IMMOBILISATION)
+    || ventesWhere(h => h.includes('immobilisation'));
+  const COL_DELAI_ML    = ventesExact(HEADERS.VENTES.DELAI_MISE_EN_LIGNE)
+    || ventesWhere(h => h.includes('mise en ligne'));
+  const COL_DELAI_PUB   = ventesExact(HEADERS.VENTES.DELAI_PUBLICATION)
+    || ventesWhere(h => h.includes('publication'));
+  const COL_DELAI_VENTE = ventesExact(HEADERS.VENTES.DELAI_VENTE)
+    || ventesWhere(h => h.includes('delai') && h.includes('vente'));
   const widthVentes     = Math.max(ventes.getLastColumn(), 9);
 
   const toAppend = [];

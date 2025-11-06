@@ -86,26 +86,8 @@ class MockSheet {
   }
 }
 
-const stockSheet = new MockSheet('Stock', [
-  'ID',
-  'SKU(ancienne nomenclature)',
-  'SKU'
-], [
-  ['ID-1', 'PCF-1', 'PCF-1'],
-  ['ID-2', 'PCF-2', 'PCF-0'],
-  ['ID-3', 'PCF-5', 'PCF-0'],
-  ['ID-4', '',      'PCF-0']
-]);
-
-const achatsSheet = new MockSheet('Achats', [
-  'ID',
-  'REFERENCE'
-], [
-  ['ID-1', 'PCF'],
-  ['ID-2', 'PCF'],
-  ['ID-3', 'PCF'],
-  ['ID-4', 'PCF']
-]);
+let stockSheet = null;
+let achatsSheet = null;
 
 const spreadsheet = {
   getSheetByName(name) {
@@ -145,6 +127,29 @@ const sandbox = {
 
 const code = fs.readFileSync('onEdit_Main.gs', 'utf8');
 vm.runInNewContext(code, sandbox);
+
+const HEADERS = vm.runInNewContext('HEADERS', sandbox);
+
+stockSheet = new MockSheet('Stock', [
+  HEADERS.STOCK.ID,
+  HEADERS.STOCK.OLD_SKU,
+  HEADERS.STOCK.SKU
+], [
+  ['ID-1', 'PCF-1', 'PCF-1'],
+  ['ID-2', 'PCF-2', 'PCF-0'],
+  ['ID-3', 'PCF-5', 'PCF-0'],
+  ['ID-4', '',      'PCF-0']
+]);
+
+achatsSheet = new MockSheet('Achats', [
+  HEADERS.ACHATS.ID,
+  HEADERS.ACHATS.REFERENCE
+], [
+  ['ID-1', 'PCF'],
+  ['ID-2', 'PCF'],
+  ['ID-3', 'PCF'],
+  ['ID-4', 'PCF']
+]);
 
 console.log('Initial old SKUs:', stockSheet.rows.map(row => row[1]));
 
