@@ -1041,6 +1041,7 @@ function onOpen(e) {
     .addItem('Mettre à jour les dates de mise en stock', 'syncMiseEnStockFromAchats')
     .addItem('Valider toutes les saisies prêtes', 'validateAllSales')
     .addItem('Trier les ventes (date décroissante)', 'sortVentesByDate')
+    .addItem('Retirer du Stock les ventes importées', 'purgeStockFromVentes')
     .addToUi();
 }
 
@@ -1169,6 +1170,107 @@ function syncMiseEnStockFromAchats() {
     'Mise à jour DMS',
     5
   );
+}
+
+function purgeStockFromVentes() {
+  const ss = SpreadsheetApp.getActive();
+  const stock = ss.getSheetByName('Stock');
+  const ventes = ss.getSheetByName('Ventes');
+
+  if (!stock || !ventes) {
+    ss.toast('Feuilles "Stock" ou "Ventes" introuvables.', 'Purge du stock', 6);
+    return;
+  }
+
+  const stockLast = stock.getLastRow();
+  const ventesLast = ventes.getLastRow();
+  if (stockLast < 2) {
+    ss.toast('Aucune ligne à traiter dans "Stock".', 'Purge du stock', 6);
+    return;
+  }
+  if (ventesLast < 2) {
+    ss.toast('Aucune vente disponible pour le rapprochement.', 'Purge du stock', 6);
+    return;
+  }
+
+  const stockHeaders = stock.getRange(1, 1, 1, stock.getLastColumn()).getValues()[0];
+  const ventesHeaders = ventes.getRange(1, 1, 1, ventes.getLastColumn()).getValues()[0];
+  const stockResolver = makeHeaderResolver_(stockHeaders);
+  const ventesResolver = makeHeaderResolver_(ventesHeaders);
+
+  const C_STOCK_ID = stockResolver.colExact('id');
+  const C_STOCK_SKU = stockResolver.colExact('sku') || stockResolver.colExact('reference');
+  const C_VENTE_ID = ventesResolver.colExact('id');
+  const C_VENTE_SKU = ventesResolver.colExact('sku');
+
+  if (!C_STOCK_ID || !C_STOCK_SKU || !C_VENTE_ID || !C_VENTE_SKU) {
+    ss.toast('Colonnes ID ou SKU introuvables dans Stock/Ventes.', 'Purge du stock', 8);
+    return;
+  }
+
+  const ventesWidth = ventes.getLastColumn();
+  const ventesValues = ventes.getRange(2, 1, ventesLast - 1, ventesWidth).getValues();
+  const venteCounts = new Map();
+  let ventesIgnorées = 0;
+
+  function buildKey(idValue, skuValue) {
+    const id = idValue === null || idValue === undefined ? '' : String(idValue).trim();
+    const sku = skuValue === null || skuValue === undefined ? '' : String(skuValue).trim().toLowerCase();
+    if (!id || !sku) return '';
+    return id + '|' + sku;
+  }
+
+  for (let i = 0; i < ventesValues.length; i++) {
+    const row = ventesValues[i];
+    const key = buildKey(row[C_VENTE_ID - 1], row[C_VENTE_SKU - 1]);
+    if (!key) {
+      ventesIgnorées++;
+      continue;
+    }
+    venteCounts.set(key, (venteCounts.get(key) || 0) + 1);
+  }
+
+  if (!venteCounts.size) {
+    ss.toast('Aucun couple ID+SKU exploitable dans "Ventes".', 'Purge du stock', 6);
+    return;
+  }
+
+  const stockWidth = stock.getLastColumn();
+  const stockValues = stock.getRange(2, 1, stockLast - 1, stockWidth).getValues();
+  const rowsToDelete = [];
+
+  for (let i = 0; i < stockValues.length; i++) {
+    const row = stockValues[i];
+    const key = buildKey(row[C_STOCK_ID - 1], row[C_STOCK_SKU - 1]);
+    const count = key ? venteCounts.get(key) : 0;
+    if (count && count > 0) {
+      rowsToDelete.push(i + 2);
+      if (count === 1) {
+        venteCounts.delete(key);
+      } else {
+        venteCounts.set(key, count - 1);
+      }
+    }
+  }
+
+  if (!rowsToDelete.length) {
+    ss.toast('Aucune ligne du stock ne correspond aux ventes.', 'Purge du stock', 6);
+    return;
+  }
+
+  rowsToDelete.sort((a, b) => b - a);
+  rowsToDelete.forEach(row => stock.deleteRow(row));
+
+  const restants = Array.from(venteCounts.values()).reduce((sum, val) => sum + val, 0);
+  const messageParts = [`${rowsToDelete.length} ligne(s) supprimée(s) du Stock.`];
+  if (ventesIgnorées) {
+    messageParts.push(`${ventesIgnorées} vente(s) ignorée(s) (ID ou SKU manquant).`);
+  }
+  if (restants) {
+    messageParts.push(`${restants} vente(s) sans correspondance dans le Stock.`);
+  }
+
+  ss.toast(messageParts.join(' '), 'Purge du stock', 8);
 }
 
 // Validation groupée
