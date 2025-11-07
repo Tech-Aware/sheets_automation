@@ -32,6 +32,7 @@ const HEADERS = Object.freeze({
     PRIX_VENTE: 'PRIX DE VENTE',
     TAILLE_COLIS: 'TAILLE DU COLIS',
     TAILLE_COLIS_ALT: 'TAILLE COLIS',
+    TAILLE: 'TAILLE',
     LOT: 'LOT',
     DATE_LIVRAISON: 'DATE DE LIVRAISON',
     DATE_MISE_EN_STOCK: 'DATE DE MISE EN STOCK',
@@ -61,6 +62,7 @@ const HEADERS = Object.freeze({
     PRIX_VENTE_ALT: 'PRIX DE VENTE',
     FRAIS_COLISSAGE: 'FRAIS DE COLISSAGE',
     TAILLE_COLIS: 'TAILLE DU COLIS',
+    TAILLE: 'TAILLE',
     LOT: 'LOT',
     DELAI_IMMOBILISATION: "DÉLAI D'IMMOBILISATION",
     DELAI_MISE_EN_LIGNE: 'DELAI DE MISE EN LIGNE',
@@ -81,7 +83,7 @@ const DEFAULT_VENTES_HEADERS = Object.freeze([
   HEADERS.VENTES.DELAI_PUBLICATION,
   HEADERS.VENTES.DELAI_VENTE,
   HEADERS.VENTES.FRAIS_COLISSAGE,
-  HEADERS.VENTES.TAILLE_COLIS,
+  HEADERS.VENTES.TAILLE,
   HEADERS.VENTES.LOT
 ]);
 
@@ -130,6 +132,23 @@ function makeHeaderResolver_(headers) {
       return idx >= 0 ? idx + 1 : 0;
     }
   };
+}
+
+function isShippingSizeHeader_(normalizedHeader) {
+  if (!normalizedHeader) return false;
+  if (!normalizedHeader.includes('taille')) return false;
+  if (normalizedHeader.includes('colis')) return true;
+  return normalizedHeader === 'taille';
+}
+
+function getHeaderLabel_(resolver, columnIndex, fallback) {
+  if (!resolver || !columnIndex) {
+    return fallback;
+  }
+
+  const headers = resolver.headers || [];
+  const header = headers[columnIndex - 1];
+  return header || fallback;
 }
 
 function makePrevDateKey_(sheet, row, col) {
@@ -414,9 +433,10 @@ function buildShippingFeeLookup_(ss) {
   const colExact = resolver.colExact.bind(resolver);
   const colWhere = resolver.colWhere.bind(resolver);
 
-  const COL_SIZE = colExact('TAILLE DU COLIS')
-    || colExact('TAILLE COLIS')
-    || colWhere(h => h.includes('taille') && h.includes('colis'));
+  const COL_SIZE = colExact(HEADERS.STOCK.TAILLE_COLIS)
+    || colExact(HEADERS.STOCK.TAILLE_COLIS_ALT)
+    || colExact(HEADERS.STOCK.TAILLE)
+    || colWhere(isShippingSizeHeader_);
   const COL_LOT = colExact('LOT') || colWhere(h => h.includes('lot'));
   const COL_FEE = colExact('FRAIS DE COLISSAGE')
     || colWhere(h => h.includes('frais') && h.includes('colis'))
@@ -1443,7 +1463,9 @@ function handleStock(e) {
     || colWhere(h => h.includes("prix") && h.includes("vente"));
   const C_TAILLE  = colExact(HEADERS.STOCK.TAILLE_COLIS)
     || colExact(HEADERS.STOCK.TAILLE_COLIS_ALT)
-    || colWhere(h => h.includes('taille') && h.includes('colis'));
+    || colExact(HEADERS.STOCK.TAILLE)
+    || colWhere(isShippingSizeHeader_);
+  const tailleHeaderLabel = getHeaderLabel_(resolver, C_TAILLE, HEADERS.STOCK.TAILLE);
   const C_LOT     = colExact(HEADERS.STOCK.LOT) || colWhere(h => h.includes('lot'));
   const C_DMS     = colExact(HEADERS.STOCK.DATE_MISE_EN_STOCK);
 
@@ -2221,14 +2243,14 @@ function handleStock(e) {
 
     if (!C_TAILLE) {
       revertCheckbox_(e.range, e.oldValue);
-      ss.toast(`Colonne ${HEADERS.STOCK.TAILLE_COLIS} introuvable.`, 'Stock', 6);
+      ss.toast('Colonne taille introuvable ("TAILLE" / "TAILLE DU COLIS").', 'Stock', 6);
       return;
     }
 
     const tailleValue = String(sh.getRange(r, C_TAILLE).getDisplayValue() || '').trim();
     if (!tailleValue) {
       revertCheckbox_(e.range, e.oldValue);
-      ss.toast(`Indique la ${HEADERS.STOCK.TAILLE_COLIS} avant de valider.`, 'Stock', 6);
+      ss.toast(`Indique la colonne ${tailleHeaderLabel} avant de valider.`, 'Stock', 6);
       return;
     }
 
@@ -2315,7 +2337,8 @@ function exportVente_(e, row, C_ID, C_LABEL, C_SKU, C_PRIX, C_DVENTE, C_STAMPV, 
   const COL_FRAIS_VENTE = ventesExact(HEADERS.VENTES.FRAIS_COLISSAGE)
     || ventesWhere(h => h.includes('frais') && h.includes('colis'));
   const COL_TAILLE_VENTE = ventesExact(HEADERS.VENTES.TAILLE_COLIS)
-    || ventesWhere(h => h.includes('taille') && h.includes('colis'));
+    || ventesExact(HEADERS.VENTES.TAILLE)
+    || ventesWhere(isShippingSizeHeader_);
   const COL_LOT_VENTE   = ventesExact(HEADERS.VENTES.LOT)
     || ventesWhere(h => h.includes('lot'));
   const COL_DELAI_IMM   = ventesExact(HEADERS.VENTES.DELAI_IMMOBILISATION)
@@ -2711,7 +2734,9 @@ function validateAllSales() {
     || colWhere(h => h.includes("prix") && h.includes("vente"));
   const C_TAILLE   = colExact(HEADERS.STOCK.TAILLE_COLIS)
     || colExact(HEADERS.STOCK.TAILLE_COLIS_ALT)
-    || colWhere(h => h.includes('taille') && h.includes('colis'));
+    || colExact(HEADERS.STOCK.TAILLE)
+    || colWhere(isShippingSizeHeader_);
+  const tailleHeaderLabel = getHeaderLabel_(resolver, C_TAILLE, HEADERS.STOCK.TAILLE);
   const C_LOT      = colExact(HEADERS.STOCK.LOT) || colWhere(h => h.includes('lot'));
   const combinedVenduValidation = resolveCombinedVenduColumn_(resolver);
   const legacyVenduValidation = combinedVenduValidation ? { checkboxCol: 0, dateCol: 0 } : resolveLegacyVenduColumns_(resolver);
@@ -2747,7 +2772,7 @@ function validateAllSales() {
   if (!C_TAILLE) {
     SpreadsheetApp.getUi().alert(
       'Validation groupée',
-      `Colonne ${HEADERS.STOCK.TAILLE_COLIS} introuvable.`,
+      'Colonne taille introuvable ("TAILLE" / "TAILLE DU COLIS").',
       SpreadsheetApp.getUi().ButtonSet.OK
     );
     return;
@@ -2802,7 +2827,8 @@ function validateAllSales() {
   const COL_FRAIS_VENTE = ventesExact(HEADERS.VENTES.FRAIS_COLISSAGE)
     || ventesWhere(h => h.includes('frais') && h.includes('colis'));
   const COL_TAILLE_VENTE = ventesExact(HEADERS.VENTES.TAILLE_COLIS)
-    || ventesWhere(h => h.includes('taille') && h.includes('colis'));
+    || ventesExact(HEADERS.VENTES.TAILLE)
+    || ventesWhere(isShippingSizeHeader_);
   const COL_LOT_VENTE   = ventesExact(HEADERS.VENTES.LOT)
     || ventesWhere(h => h.includes('lot'));
   const COL_DELAI_IMM   = ventesExact(HEADERS.VENTES.DELAI_IMMOBILISATION)
@@ -2963,7 +2989,7 @@ function validateAllSales() {
   if (missingShippingRows.length > 0) {
     const list = missingShippingRows.join(', ');
     SpreadsheetApp.getActive().toast(
-      `Validation bloquée - renseigne ${HEADERS.STOCK.TAILLE_COLIS} pour la/les ligne(s) ${list}.`,
+      `Validation bloquée - renseigne la colonne ${tailleHeaderLabel} pour la/les ligne(s) ${list}.`,
       'Validation groupée',
       8
     );
