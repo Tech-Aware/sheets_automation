@@ -46,6 +46,10 @@ const HEADERS = Object.freeze({
     VENDU_ALT: 'VENDU',
     DATE_VENTE: 'VENDU | DATE DE VENTE',
     DATE_VENTE_ALT: 'DATE DE VENTE',
+    PUBLIE: 'PUBLIÉ',
+    DATE_PUBLICATION: 'DATE DE PUBLICATION',
+    VENDU: 'VENDU',
+    DATE_VENTE: 'DATE DE VENTE',
     VENTE_EXPORTEE_LE: 'VENTE EXPORTEE LE',
     VALIDER_SAISIE: 'VALIDER LA SAISIE'
   }),
@@ -1334,6 +1338,11 @@ function handleStock(e) {
   const C_VENDU   = useCombinedVenduCol ? combinedVenduCol : legacyVenduCols.checkboxCol;
   let   C_DVENTE  = useCombinedVenduCol ? combinedVenduCol : legacyVenduCols.dateCol;
   if (!C_DVENTE) C_DVENTE = colExact(HEADERS.STOCK.DATE_VENTE_ALT) || 10;
+  const C_PUB     = colExact(HEADERS.STOCK.PUBLIE);
+  const C_DPUB    = colExact(HEADERS.STOCK.DATE_PUBLICATION);
+  const C_VENDU   = colExact(HEADERS.STOCK.VENDU);
+  let   C_DVENTE  = colExact(HEADERS.STOCK.DATE_VENTE);
+  if (!C_DVENTE) C_DVENTE = 10;
   const C_STAMPV  = colExact(HEADERS.STOCK.VENTE_EXPORTEE_LE);
   const C_VALIDE  = colExact(HEADERS.STOCK.VALIDER_SAISIE)
     || colWhere(h => h.includes("valider") && h.includes("saisie"));
@@ -1491,6 +1500,8 @@ function handleStock(e) {
   const isCombinedVenduCell = useCombinedVenduCol && C_VENDU && C_DVENTE && C_VENDU === C_DVENTE;
 
   if (c === C_DMS || (!isCombinedMisCell && c === C_DMIS) || (!isCombinedPubCell && c === C_DPUB) || (!isCombinedVenduCell && c === C_DVENTE)) {
+
+  if (c === C_DMS || (!isCombinedMisCell && c === C_DMIS) || c === C_DPUB || c === C_DVENTE) {
     const key = c === C_DMS ? 'dms' : (c === C_DMIS ? 'dmis' : (c === C_DPUB ? 'dpub' : 'dvente'));
     if (!ensureChronologyOrRevert_(key, e.oldValue)) {
       return;
@@ -1507,6 +1518,7 @@ function handleStock(e) {
     const previousValidation = cell.getDataValidation();
     const wasCheckbox = isCheckboxValidation_(previousValidation);
     const published = C_PUB ? isStatusActiveValue_(sh.getRange(r, C_PUB).getValue()) : false;
+    const published = C_PUB ? (sh.getRange(r, C_PUB).getValue() === true) : false;
     const value = cell.getValue();
     const oldValue = e.oldValue;
     const oldValueDate = getDateOrNull_(oldValue);
@@ -2128,6 +2140,7 @@ function exportVente_(e, row, C_ID, C_LABEL, C_SKU, C_PRIX, C_DVENTE, C_STAMPV, 
   const combinedPubForRow = resolveCombinedPublicationColumn_(resolverS);
   const legacyPubForRow = combinedPubForRow ? { checkboxCol: 0, dateCol: 0 } : resolveLegacyPublicationColumns_(resolverS);
   const C_DPUB  = combinedPubForRow || legacyPubForRow.dateCol;
+  const C_DPUB  = resolverS.colExact(HEADERS.STOCK.DATE_PUBLICATION);
 
   const chronoCheck = enforceChronologicalDates_(sh, row, {
     dms: C_DMS,
@@ -2514,6 +2527,7 @@ function validateAllSales() {
   const combinedPubValidation = resolveCombinedPublicationColumn_(resolver);
   const legacyPubValidation = combinedPubValidation ? { checkboxCol: 0, dateCol: 0 } : resolveLegacyPublicationColumns_(resolver);
   const C_DPUB     = combinedPubValidation || legacyPubValidation.dateCol;
+  const C_DPUB     = colExact(HEADERS.STOCK.DATE_PUBLICATION);
 
   if (!C_SKU || !C_PRIX || !C_DVENTE) {
     SpreadsheetApp.getUi().alert(
