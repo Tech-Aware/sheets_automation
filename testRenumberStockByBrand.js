@@ -113,7 +113,17 @@ class MockRange {
     return this;
   }
 
+  getDataValidation() {
+    return this.sheet.getValidation(this.row, this.col);
+  }
+
+  setDataValidation(rule) {
+    this.sheet.setValidation(this.row, this.col, this.numRows, this.numCols, rule);
+    return this;
+  }
+
   clearDataValidations() {
+    this.sheet.clearValidation(this.row, this.col, this.numRows, this.numCols);
     return this;
   }
 
@@ -135,6 +145,7 @@ class MockSheet {
     this.name = name;
     this.header = header.slice();
     this.rows = rows.map(r => r.slice());
+    this.validations = new Map();
   }
 
   getName() {
@@ -155,6 +166,29 @@ class MockSheet {
 
   getRange(row, col, numRows, numCols) {
     return new MockRange(this, row, col, numRows, numCols);
+  }
+
+  setValidation(row, col, numRows, numCols, rule) {
+    const targetRows = Math.max(1, numRows || 1);
+    const targetCols = Math.max(1, numCols || 1);
+    for (let r = 0; r < targetRows; r++) {
+      for (let c = 0; c < targetCols; c++) {
+        const key = `${row + r},${col + c}`;
+        if (rule) {
+          this.validations.set(key, rule);
+        } else {
+          this.validations.delete(key);
+        }
+      }
+    }
+  }
+
+  getValidation(row, col) {
+    return this.validations.get(`${row},${col}`) || null;
+  }
+
+  clearValidation(row, col, numRows, numCols) {
+    this.setValidation(row, col, numRows, numCols, null);
   }
 
   deleteRow(rowNumber) {
@@ -181,6 +215,32 @@ let activeSpreadsheet = spreadsheet;
 const sandbox = {
   console,
   SpreadsheetApp: {
+    DataValidationCriteria: {
+      CHECKBOX: 'CHECKBOX'
+    },
+    newDataValidation() {
+      return {
+        allowInvalid: false,
+        requireCheckbox() {
+          return this;
+        },
+        setAllowInvalid(flag) {
+          this.allowInvalid = flag;
+          return this;
+        },
+        build() {
+          const allowInvalid = this.allowInvalid;
+          return {
+            getCriteriaType() {
+              return 'CHECKBOX';
+            },
+            getAllowInvalid() {
+              return allowInvalid;
+            }
+          };
+        }
+      };
+    },
     getActive() {
       return activeSpreadsheet;
     }
@@ -417,14 +477,161 @@ console.log('Existing SKUs preserved and new suffix assigned correctly.');
 })();
 
 (() => {
+  const headers = [
+    HEADERS.ACHATS.ID,
+    HEADERS.ACHATS.ARTICLE,
+    HEADERS.ACHATS.MARQUE,
+    HEADERS.ACHATS.GENRE_DATA,
+    HEADERS.ACHATS.REFERENCE,
+    HEADERS.ACHATS.DATE_LIVRAISON,
+    HEADERS.ACHATS.QUANTITE_RECUE,
+    HEADERS.ACHATS.PRET_STOCK_COMBINED
+  ];
+
+  const livraison = vm.runInNewContext('new Date("2024-01-05T00:00:00Z")', sandbox);
+
+  const rows = [[
+    'ACH-100',
+    'Robe',
+    'MarqueX',
+    'Femme',
+    'PCF',
+    livraison,
+    2,
+    false
+  ]];
+
+  const achats = new MockSheet('Achats', headers, rows);
+  const combinedCol = headers.indexOf(HEADERS.ACHATS.PRET_STOCK_COMBINED) + 1;
+
+  const stockHeaders = [
+    HEADERS.STOCK.ID,
+    HEADERS.STOCK.LIBELLE,
+    HEADERS.STOCK.SKU,
+    HEADERS.STOCK.DATE_LIVRAISON,
+    HEADERS.STOCK.DATE_MISE_EN_STOCK
+  ];
+  const stock = new MockSheet('Stock', stockHeaders, []);
+
+  const readyRange = achats.getRange(2, combinedCol);
+  readyRange.setDataValidation(
+    sandbox.SpreadsheetApp.newDataValidation()
+      .requireCheckbox()
+      .setAllowInvalid(false)
+      .build()
+  );
+  readyRange.setValue(false);
+
+  const event = {
+    source: {
+      getActiveSheet() { return achats; },
+      getSheetByName(name) {
+        if (name === 'Achats') return achats;
+        if (name === 'Stock') return stock;
+        return null;
+      }
+    },
+    range: achats.getRange(2, combinedCol),
+    value: 'TRUE',
+    oldValue: 'FALSE'
+  };
+
+  achats.rows[0][combinedCol - 1] = true;
+
+  sandbox.handleAchats(event);
+
+  const combinedValue = achats.rows[0][combinedCol - 1];
+  assert.strictEqual(
+    Object.prototype.toString.call(combinedValue),
+    '[object Date]',
+    'Combined prêt/mise en stock cell should contain a Date after activation.'
+  );
+  const validationAfter = achats.getRange(2, combinedCol).getDataValidation();
+  assert.strictEqual(validationAfter, null, 'Validation should be cleared once the combined column stores a date.');
+  assert.strictEqual(stock.rows.length, 2, 'Stock rows should be created for the combined prêt column.');
+  const skuIndex = stockHeaders.indexOf(HEADERS.STOCK.SKU);
+  assert(stock.rows.every(row => row[skuIndex] === 'PCF-0'), 'Stock rows should use the base SKU with suffix 0 when created.');
+  console.log('handleAchats supports combined prêt/mise en stock activation.');
+})();
+
+(() => {
+  const headers = [
+    HEADERS.ACHATS.ID,
+    HEADERS.ACHATS.ARTICLE,
+    HEADERS.ACHATS.MARQUE,
+    HEADERS.ACHATS.GENRE_DATA,
+    HEADERS.ACHATS.REFERENCE,
+    HEADERS.ACHATS.DATE_LIVRAISON,
+    HEADERS.ACHATS.QUANTITE_RECUE,
+    HEADERS.ACHATS.PRET_STOCK_COMBINED
+  ];
+
+  const livraison = vm.runInNewContext('new Date("2024-01-05T00:00:00Z")', sandbox);
+  const storedDate = vm.runInNewContext('new Date("2024-01-10T00:00:00Z")', sandbox);
+
+  const rows = [[
+    'ACH-101',
+    'Robe',
+    'MarqueX',
+    'Femme',
+    'PCF',
+    livraison,
+    1,
+    storedDate
+  ]];
+
+  const achats = new MockSheet('Achats', headers, rows);
+  const combinedCol = headers.indexOf(HEADERS.ACHATS.PRET_STOCK_COMBINED) + 1;
+
+  const stockHeaders = [
+    HEADERS.STOCK.ID,
+    HEADERS.STOCK.SKU,
+    HEADERS.STOCK.DATE_MISE_EN_STOCK
+  ];
+  const stockRows = [[
+    'ACH-101',
+    'PCF-1',
+    storedDate
+  ]];
+  const stock = new MockSheet('Stock', stockHeaders, stockRows);
+
+  const event = {
+    source: {
+      getActiveSheet() { return achats; },
+      getSheetByName(name) {
+        if (name === 'Achats') return achats;
+        if (name === 'Stock') return stock;
+        return null;
+      }
+    },
+    range: achats.getRange(2, combinedCol),
+    value: 'FALSE',
+    oldValue: storedDate
+  };
+
+  achats.rows[0][combinedCol - 1] = false;
+
+  sandbox.handleAchats(event);
+
+  const combinedValue = achats.rows[0][combinedCol - 1];
+  assert.strictEqual(combinedValue, false, 'Combined prêt/mise en stock cell should revert to checkbox when unchecked.');
+  const validation = achats.getRange(2, combinedCol).getDataValidation();
+  assert(validation, 'Checkbox validation should be restored when combined prêt column is cleared.');
+  assert.strictEqual(validation.getCriteriaType(), sandbox.SpreadsheetApp.DataValidationCriteria.CHECKBOX);
+  const dmsIndex = stockHeaders.indexOf(HEADERS.STOCK.DATE_MISE_EN_STOCK);
+  assert.strictEqual(stock.rows[0][dmsIndex], null, 'Stock date should be cleared after unchecking the combined prêt column.');
+  console.log('handleAchats restores checkbox validation after combined column deactivation.');
+})();
+
+(() => {
   const saleDate = vm.runInNewContext('new Date("2023-01-02T00:00:00Z")', sandbox);
   const stockHeaders = [
     HEADERS.STOCK.ID,
     HEADERS.STOCK.SKU,
     HEADERS.STOCK.TAILLE_COLIS,
     HEADERS.STOCK.LOT,
-    HEADERS.STOCK.VENDU,
-    HEADERS.STOCK.DATE_VENTE,
+    HEADERS.STOCK.VENDU_ALT,
+    HEADERS.STOCK.DATE_VENTE_ALT,
     HEADERS.STOCK.PRIX_VENTE,
     HEADERS.STOCK.VALIDER_SAISIE
   ];
@@ -515,7 +722,7 @@ console.log('Existing SKUs preserved and new suffix assigned correctly.');
     oldValue: 'FALSE'
   };
 
-  const dateCol = stockHeaders.indexOf(HEADERS.STOCK.DATE_VENTE) + 1;
+  const dateCol = stockHeaders.indexOf(HEADERS.STOCK.DATE_VENTE_ALT) + 1;
   const rawDate = stock.getRange(2, dateCol).getValue();
   assert.strictEqual(Object.prototype.toString.call(rawDate), '[object Date]');
   assert.strictEqual(Object.prototype.toString.call(sandbox.getDateOrNull_(rawDate)), '[object Date]');
@@ -545,8 +752,8 @@ console.log('Existing SKUs preserved and new suffix assigned correctly.');
     HEADERS.STOCK.SKU,
     HEADERS.STOCK.TAILLE_COLIS,
     HEADERS.STOCK.LOT,
-    HEADERS.STOCK.VENDU,
-    HEADERS.STOCK.DATE_VENTE,
+    HEADERS.STOCK.VENDU_ALT,
+    HEADERS.STOCK.DATE_VENTE_ALT,
     HEADERS.STOCK.PRIX_VENTE,
     HEADERS.STOCK.VALIDER_SAISIE
   ];
