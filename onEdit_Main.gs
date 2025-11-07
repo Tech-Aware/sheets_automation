@@ -224,6 +224,21 @@ function getDateOrNull_(value) {
   return null;
 }
 
+function addDays_(date, days) {
+  if (!(date instanceof Date)) {
+    return null;
+  }
+
+  const time = date.getTime();
+  if (isNaN(time)) {
+    return null;
+  }
+
+  const clone = new Date(time);
+  clone.setDate(clone.getDate() + days);
+  return clone;
+}
+
 function getTomorrow_() {
   const date = new Date();
   date.setDate(date.getDate() + 1);
@@ -1353,6 +1368,84 @@ function handleStock(e) {
     dvente: C_DVENTE
   };
 
+  const chronology = [
+    { key: 'dms', column: chronoCols.dms, statusCol: 0 },
+    { key: 'dmis', column: chronoCols.dmis, statusCol: C_MIS },
+    { key: 'dpub', column: chronoCols.dpub, statusCol: C_PUB },
+    { key: 'dvente', column: chronoCols.dvente, statusCol: C_VENDU }
+  ];
+
+  function findChronologyIndex_(key) {
+    return chronology.findIndex(entry => entry.key === key);
+  }
+
+  function getChronoDate_(key) {
+    const entry = chronology.find(item => item.key === key);
+    if (!entry || !entry.column) {
+      return null;
+    }
+
+    const value = sh.getRange(r, entry.column).getValue();
+    return getDateOrNull_(value);
+  }
+
+  function computeDateFromPrevious_(key) {
+    const index = findChronologyIndex_(key);
+    if (index <= 0) {
+      return getTomorrow_();
+    }
+
+    const previous = chronology[index - 1];
+    const baseDate = getChronoDate_(previous.key);
+    if (baseDate) {
+      const shifted = addDays_(baseDate, 1);
+      if (shifted) {
+        return shifted;
+      }
+    }
+
+    return getTomorrow_();
+  }
+
+  function setChronoDateFromPrevious_(key) {
+    const entry = chronology.find(item => item.key === key);
+    if (!entry || !entry.column) {
+      return null;
+    }
+
+    const nextDate = computeDateFromPrevious_(key);
+    const cell = sh.getRange(r, entry.column);
+    cell.setValue(nextDate);
+    cell.setNumberFormat('dd/MM/yyyy');
+    return nextDate;
+  }
+
+  function propagateForwardFrom_(key) {
+    const startIndex = findChronologyIndex_(key);
+    if (startIndex < 0) {
+      return;
+    }
+
+    for (let i = startIndex + 1; i < chronology.length; i++) {
+      const entry = chronology[i];
+      if (!entry.column || !entry.statusCol) {
+        continue;
+      }
+
+      const statusValue = sh.getRange(r, entry.statusCol).getValue();
+      if (!isStatusActiveValue_(statusValue)) {
+        continue;
+      }
+
+      setChronoDateFromPrevious_(entry.key);
+    }
+  }
+
+  function getChronoKeyByColumn_(column) {
+    const match = chronology.find(entry => entry.column === column);
+    return match ? match.key : null;
+  }
+
   function setCellToFallback_(col, fallback) {
     if (!col) return;
     const cell = sh.getRange(r, col);
@@ -1500,11 +1593,15 @@ function handleStock(e) {
     || (!isCombinedMisCell && c === C_DMIS)
     || (!isCombinedPubCell && c === C_DPUB)
     || (!isCombinedVenduCell && c === C_DVENTE)) {
-    const key = c === C_DMS ? 'dms' : (c === C_DMIS ? 'dmis' : (c === C_DPUB ? 'dpub' : 'dvente'));
+    const key = getChronoKeyByColumn_(c);
+    if (!key) {
+      return;
+    }
     if (!ensureChronologyOrRevert_(key, e.oldValue)) {
       return;
     }
-    if (c !== C_DVENTE) {
+    propagateForwardFrom_(key);
+    if (key !== 'dvente') {
       return;
     }
   }
@@ -1541,14 +1638,13 @@ function handleStock(e) {
       if (wasCheckbox) {
         cell.clearDataValidations();
       }
-      const tomorrow = getTomorrow_();
-      cell.setValue(tomorrow);
-      cell.setNumberFormat('dd/MM/yyyy');
+      setChronoDateFromPrevious_('dmis');
       const info = { range: cell, oldValue };
       if (!ensureChronologyOrRevert_('dmis', oldValue, info)) {
         restoreCheckboxValidation_(cell, previousValidation);
         return;
       }
+      propagateForwardFrom_('dmis');
       return;
     }
 
@@ -1600,6 +1696,7 @@ function handleStock(e) {
         }
         return;
       }
+      propagateForwardFrom_('dmis');
       return;
     }
 
@@ -1645,14 +1742,13 @@ function handleStock(e) {
       if (wasCheckbox) {
         cell.clearDataValidations();
       }
-      const tomorrow = getTomorrow_();
-      cell.setValue(tomorrow);
-      cell.setNumberFormat('dd/MM/yyyy');
+      setChronoDateFromPrevious_('dpub');
       const info = { range: cell, oldValue };
       if (!ensureChronologyOrRevert_('dpub', oldValue, info)) {
         restoreCheckboxValidation_(cell, previousValidation);
         return;
       }
+      propagateForwardFrom_('dpub');
       return;
     }
 
@@ -1704,6 +1800,7 @@ function handleStock(e) {
         }
         return;
       }
+      propagateForwardFrom_('dpub');
       return;
     }
 
@@ -1738,12 +1835,12 @@ function handleStock(e) {
     if (turnedOn) {
       const cell = sh.getRange(r, C_DMIS);
       storePreviousCellValue_(sh, r, C_DMIS, cell.getValue());
-      const tomorrow = getTomorrow_();
-      cell.setValue(tomorrow);
+      setChronoDateFromPrevious_('dmis');
       const checkboxInfo = { range: sh.getRange(r, C_MIS), oldValue: e.oldValue };
       if (!ensureChronologyOrRevert_('dmis', null, checkboxInfo)) {
         return;
       }
+      propagateForwardFrom_('dmis');
       return;
     }
 
@@ -1773,12 +1870,12 @@ function handleStock(e) {
     if (turnedOn) {
       const cell = sh.getRange(r, C_DPUB);
       storePreviousCellValue_(sh, r, C_DPUB, cell.getValue());
-      const tomorrow = getTomorrow_();
-      cell.setValue(tomorrow);
+      setChronoDateFromPrevious_('dpub');
       const checkboxInfo = { range: sh.getRange(r, C_PUB), oldValue: e.oldValue };
       if (!ensureChronologyOrRevert_('dpub', null, checkboxInfo)) {
         return;
       }
+      propagateForwardFrom_('dpub');
       return;
     }
 
@@ -1805,9 +1902,7 @@ function handleStock(e) {
         cell.clearDataValidations();
       }
 
-      const tomorrow = getTomorrow_();
-      cell.setValue(tomorrow);
-      cell.setNumberFormat('dd/MM/yyyy');
+      setChronoDateFromPrevious_('dvente');
       const info = { range: cell, oldValue };
       if (!ensureChronologyOrRevert_('dvente', oldValue, info)) {
         if (C_PRIX) {
@@ -1817,6 +1912,7 @@ function handleStock(e) {
         return;
       }
 
+      propagateForwardFrom_('dvente');
       const fallbackValue = oldValueDate ? new Date(oldValueDate.getTime()) : '';
       storePreviousCellValue_(sh, r, C_DVENTE, fallbackValue);
       ensureValidPriceOrWarn_(sh, r, C_PRIX);
@@ -1906,6 +2002,7 @@ function handleStock(e) {
         return;
       }
 
+      propagateForwardFrom_('dvente');
       const fallbackValue = oldValueDate ? new Date(oldValueDate.getTime()) : '';
       storePreviousCellValue_(sh, r, C_DVENTE, fallbackValue);
       ensureValidPriceOrWarn_(sh, r, C_PRIX);
@@ -1935,11 +2032,7 @@ function handleStock(e) {
         storePreviousCellValue_(sh, r, C_PRIX, priceCell.getValue());
       }
 
-      let val = dv.getValue();
-      if (!(val instanceof Date) || isNaN(val)) {
-        const tomorrow = getTomorrow_();
-        dv.setValue(tomorrow);  // on date au moment du clic
-      }
+      setChronoDateFromPrevious_('dvente');
       const checkboxInfo = { range: sh.getRange(r, C_VENDU), oldValue: e.oldValue };
       if (!ensureChronologyOrRevert_('dvente', null, checkboxInfo)) {
         if (C_PRIX) {
@@ -1947,6 +2040,7 @@ function handleStock(e) {
         }
         return;
       }
+      propagateForwardFrom_('dvente');
       ensureValidPriceOrWarn_(sh, r, C_PRIX);
       return;
     }
@@ -1989,6 +2083,7 @@ function handleStock(e) {
     if (!vendu) return;
 
     ensureValidPriceOrWarn_(sh, r, C_PRIX);
+    propagateForwardFrom_('dpub');
     return;
   }
 
