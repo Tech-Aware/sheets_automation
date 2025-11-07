@@ -14,7 +14,11 @@ const HEADERS = Object.freeze({
     PRET_STOCK: 'PRËT POUR MISE EN STOCK',
     PRET_STOCK_ALT: 'PRÊT POUR MISE EN STOCK',
     DATE_MISE_EN_STOCK: 'MIS EN STOCK LE',
-    DATE_MISE_EN_STOCK_ALT: 'DATE DE MISE EN STOCK'
+    DATE_MISE_EN_STOCK_ALT: 'DATE DE MISE EN STOCK',
+    PRIX_TTC: 'PRIX TTC',
+    FRAIS_COLISSAGE_TAILLE: 'FRAIS DE COLISSAGE TAILLE',
+    FRAIS_COLISSAGE_LOT: 'FRAIS DE COLISSAGE LOT',
+    FRAIS_COLISSAGE_TOTAL: 'FRAIS DE COLISSAGE TOTAL'
   }),
   STOCK: Object.freeze({
     ID: 'ID',
@@ -35,7 +39,10 @@ const HEADERS = Object.freeze({
     VENDU: 'VENDU',
     DATE_VENTE: 'DATE DE VENTE',
     VENTE_EXPORTEE_LE: 'VENTE EXPORTEE LE',
-    VALIDER_SAISIE: 'VALIDER LA SAISIE'
+    VALIDER_SAISIE: 'VALIDER LA SAISIE',
+    FRAIS_COLISSAGE_TAILLE: 'FRAIS DE COLISSAGE TAILLE',
+    FRAIS_COLISSAGE_LOT: 'FRAIS DE COLISSAGE LOT',
+    FRAIS_COLISSAGE_TOTAL: 'FRAIS DE COLISSAGE TOTAL'
   }),
   VENTES: Object.freeze({
     ID: 'ID',
@@ -49,7 +56,10 @@ const HEADERS = Object.freeze({
     DELAI_MISE_EN_LIGNE: 'DELAI DE MISE EN LIGNE',
     DELAI_PUBLICATION: 'DELAI DE PUBLICATION',
     DELAI_VENTE: 'DELAI DE VENTE',
-    RETOUR: 'RETOUR'
+    RETOUR: 'RETOUR',
+    FRAIS_COLISSAGE_TAILLE: 'FRAIS DE COLISSAGE TAILLE',
+    FRAIS_COLISSAGE_LOT: 'FRAIS DE COLISSAGE LOT',
+    FRAIS_COLISSAGE_TOTAL: 'FRAIS DE COLISSAGE TOTAL'
   })
 });
 
@@ -82,6 +92,28 @@ function normText_(s) {
     .replace(/[\/]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
+}
+
+function parseAmount_(value) {
+  if (value === null || value === undefined || value === '') return null;
+  if (typeof value === 'number') {
+    return isFinite(value) ? value : null;
+  }
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+    const normalized = trimmed
+      .replace(/\s+/g, '')
+      .replace(/,/g, '.');
+    const parsed = parseFloat(normalized);
+    return isNaN(parsed) ? null : parsed;
+  }
+  return null;
+}
+
+function coalesceNumber_(value, fallback) {
+  const parsed = parseAmount_(value);
+  return parsed === null ? (fallback || 0) : parsed;
 }
 
 function makeHeaderResolver_(headers) {
@@ -385,6 +417,98 @@ function clearPriceAlertIfAny_(sh, row, C_PRIX) {
     cell.setBackground(null);
     cell.setFontColor(null);
   }
+}
+
+function syncAchatsPackagingFees_(ss, achatId, fraisTailleFromStock, fraisLotFromStock) {
+  if (!achatId && achatId !== 0) {
+    return null;
+  }
+
+  const achats = ss.getSheetByName('Achats');
+  if (!achats) {
+    return null;
+  }
+
+  const headers = achats.getRange(1, 1, 1, achats.getLastColumn()).getValues()[0];
+  const resolver = makeHeaderResolver_(headers);
+  const colExact = resolver.colExact.bind(resolver);
+  const colWhere = resolver.colWhere.bind(resolver);
+
+  const COL_ID = colExact(HEADERS.ACHATS.ID);
+  if (!COL_ID) {
+    return null;
+  }
+
+  const last = achats.getLastRow();
+  if (last < 2) {
+    return null;
+  }
+
+  const ids = achats.getRange(2, COL_ID, last - 1, 1).getValues();
+  const targetId = String(achatId).trim();
+  let rowIndex = -1;
+  for (let i = 0; i < ids.length; i++) {
+    if (String(ids[i][0]).trim() === targetId) {
+      rowIndex = i + 2;
+      break;
+    }
+  }
+
+  if (rowIndex < 0) {
+    return null;
+  }
+
+  const COL_PRIX_TTC = colExact(HEADERS.ACHATS.PRIX_TTC)
+    || colWhere(h => h.includes('prix') && h.includes('ttc'));
+  if (!COL_PRIX_TTC) {
+    return null;
+  }
+
+  const COL_FRAIS_TAILLE = colExact(HEADERS.ACHATS.FRAIS_COLISSAGE_TAILLE)
+    || colWhere(h => h.includes('coliss') && h.includes('taille'))
+    || colWhere(h => h.includes('colis') && h.includes('taille'));
+  const COL_FRAIS_LOT = colExact(HEADERS.ACHATS.FRAIS_COLISSAGE_LOT)
+    || colWhere(h => h.includes('coliss') && h.includes('lot'))
+    || colWhere(h => h.includes('colis') && h.includes('lot'));
+  const COL_FRAIS_TOTAL = colExact(HEADERS.ACHATS.FRAIS_COLISSAGE_TOTAL)
+    || colWhere(h => h.includes('coliss') && h.includes('total'))
+    || colWhere(h => h.includes('colis') && h.includes('total'));
+
+  const prixCell = achats.getRange(rowIndex, COL_PRIX_TTC);
+  const prixActuel = parseAmount_(prixCell.getValue()) || 0;
+
+  const tailleActuelle = COL_FRAIS_TAILLE ? parseAmount_(achats.getRange(rowIndex, COL_FRAIS_TAILLE).getValue()) || 0 : 0;
+  const lotActuel = COL_FRAIS_LOT ? parseAmount_(achats.getRange(rowIndex, COL_FRAIS_LOT).getValue()) || 0 : 0;
+
+  const fraisTaille = fraisTailleFromStock !== undefined && fraisTailleFromStock !== null
+    ? coalesceNumber_(fraisTailleFromStock, tailleActuelle)
+    : tailleActuelle;
+  const fraisLot = fraisLotFromStock !== undefined && fraisLotFromStock !== null
+    ? coalesceNumber_(fraisLotFromStock, lotActuel)
+    : lotActuel;
+
+  const baseSansFrais = prixActuel - (tailleActuelle + lotActuel);
+  const baseReference = isNaN(baseSansFrais) ? prixActuel : baseSansFrais;
+  const nouveauTotal = baseReference + fraisTaille + fraisLot;
+
+  prixCell.setValue(nouveauTotal);
+  if (COL_FRAIS_TAILLE) {
+    achats.getRange(rowIndex, COL_FRAIS_TAILLE).setValue(fraisTaille);
+  }
+  if (COL_FRAIS_LOT) {
+    achats.getRange(rowIndex, COL_FRAIS_LOT).setValue(fraisLot);
+  }
+  if (COL_FRAIS_TOTAL) {
+    achats.getRange(rowIndex, COL_FRAIS_TOTAL).setValue(fraisTaille + fraisLot);
+  }
+
+  return {
+    row: rowIndex,
+    prixTotal: nouveauTotal,
+    fraisTaille,
+    fraisLot,
+    fraisTotal: fraisTaille + fraisLot
+  };
 }
 
 // === ACHATS → synchro + ajout lignes dans Stock ===
@@ -876,6 +1000,15 @@ function handleStock(e) {
   const C_STAMPV  = colExact(HEADERS.STOCK.VENTE_EXPORTEE_LE);
   const C_VALIDE  = colExact(HEADERS.STOCK.VALIDER_SAISIE)
     || colWhere(h => h.includes("valider") && h.includes("saisie"));
+  const C_FRAIS_TAILLE = colExact(HEADERS.STOCK.FRAIS_COLISSAGE_TAILLE)
+    || colWhere(h => h.includes('coliss') && h.includes('taille'))
+    || colWhere(h => h.includes('colis') && h.includes('taille'));
+  const C_FRAIS_LOT = colExact(HEADERS.STOCK.FRAIS_COLISSAGE_LOT)
+    || colWhere(h => h.includes('coliss') && h.includes('lot'))
+    || colWhere(h => h.includes('colis') && h.includes('lot'));
+  const C_FRAIS_TOTAL = colExact(HEADERS.STOCK.FRAIS_COLISSAGE_TOTAL)
+    || colWhere(h => h.includes('coliss') && h.includes('total'))
+    || colWhere(h => h.includes('colis') && h.includes('total'));
 
   const c = e.range.getColumn(), r = e.range.getRow();
 
@@ -1165,21 +1298,53 @@ function handleStock(e) {
     const valDate = sh.getRange(r, C_DVENTE).getValue();
     if (!(valDate instanceof Date) || isNaN(valDate.getTime())) return;
 
+    const idForAchats = C_ID ? sh.getRange(r, C_ID).getValue() : '';
+    const fraisTailleStock = C_FRAIS_TAILLE ? parseAmount_(sh.getRange(r, C_FRAIS_TAILLE).getValue()) : null;
+    const fraisLotStock = C_FRAIS_LOT ? parseAmount_(sh.getRange(r, C_FRAIS_LOT).getValue()) : null;
+    const fraisTotalStock = C_FRAIS_TOTAL ? parseAmount_(sh.getRange(r, C_FRAIS_TOTAL).getValue()) : null;
+
+    const syncResult = syncAchatsPackagingFees_(ss, idForAchats, fraisTailleStock, fraisLotStock);
+    const fraisTaille = syncResult ? syncResult.fraisTaille : (fraisTailleStock !== null ? fraisTailleStock : 0);
+    const fraisLot = syncResult ? syncResult.fraisLot : (fraisLotStock !== null ? fraisLotStock : 0);
+    let fraisTotal = syncResult ? syncResult.fraisTotal : null;
+    if (fraisTotal === null || fraisTotal === undefined) {
+      if (fraisTotalStock !== null && fraisTotalStock !== undefined) {
+        fraisTotal = fraisTotalStock;
+      } else {
+        fraisTotal = (fraisTaille || 0) + (fraisLot || 0);
+      }
+    }
+
     const baseToDmsMap = buildBaseToStockDate_(ss);
-    exportVente_(null, r, C_ID, C_LABEL, C_SKU, C_PRIX, C_DVENTE, C_STAMPV, baseToDmsMap);
+    exportVente_(
+      null,
+      r,
+      C_ID,
+      C_LABEL,
+      C_SKU,
+      C_PRIX,
+      C_DVENTE,
+      C_STAMPV,
+      baseToDmsMap,
+      {
+        fraisTaille,
+        fraisLot,
+        fraisTotal
+      }
+    );
     return;
   }
 }
 
 // Déplace la ligne de "Stock" vers "Ventes" (et calcule les délais)
-function exportVente_(e, row, C_ID, C_LABEL, C_SKU, C_PRIX, C_DVENTE, C_STAMPV, baseToDmsMap) {
+function exportVente_(e, row, C_ID, C_LABEL, C_SKU, C_PRIX, C_DVENTE, C_STAMPV, baseToDmsMap, packaging) {
   const ss = SpreadsheetApp.getActive();
   const sh = ss.getSheetByName("Stock");
   if (!sh) return;
 
   const ventes = ss.getSheetByName("Ventes") || ss.insertSheet("Ventes");
   if (ventes.getLastRow() === 0) {
-    ventes.getRange(1, 1, 1, 9).setValues([[
+    const defaultHeaders = [
       HEADERS.VENTES.ID,
       HEADERS.VENTES.DATE_VENTE,
       HEADERS.VENTES.ARTICLE,
@@ -1188,11 +1353,16 @@ function exportVente_(e, row, C_ID, C_LABEL, C_SKU, C_PRIX, C_DVENTE, C_STAMPV, 
       HEADERS.VENTES.DELAI_IMMOBILISATION,
       HEADERS.VENTES.DELAI_MISE_EN_LIGNE,
       HEADERS.VENTES.DELAI_PUBLICATION,
-      HEADERS.VENTES.DELAI_VENTE
-    ]]);
+      HEADERS.VENTES.DELAI_VENTE,
+      HEADERS.VENTES.FRAIS_COLISSAGE_TAILLE,
+      HEADERS.VENTES.FRAIS_COLISSAGE_LOT,
+      HEADERS.VENTES.FRAIS_COLISSAGE_TOTAL
+    ];
+    ventes.getRange(1, 1, 1, defaultHeaders.length).setValues([defaultHeaders]);
   }
 
-  const ventesHeaders = ventes.getRange(1, 1, 1, Math.max(9, ventes.getLastColumn())).getValues()[0];
+  const widthVentes = Math.max(ventes.getLastColumn(), 12);
+  const ventesHeaders = ventes.getRange(1, 1, 1, widthVentes).getValues()[0];
   const ventesResolver = makeHeaderResolver_(ventesHeaders);
   const ventesExact = ventesResolver.colExact.bind(ventesResolver);
   const ventesWhere = ventesResolver.colWhere.bind(ventesResolver);
@@ -1215,7 +1385,15 @@ function exportVente_(e, row, C_ID, C_LABEL, C_SKU, C_PRIX, C_DVENTE, C_STAMPV, 
     || ventesWhere(h => h.includes('publication'));
   const COL_DELAI_VENTE = ventesExact(HEADERS.VENTES.DELAI_VENTE)
     || ventesWhere(h => h.includes('delai') && h.includes('vente'));
-  const widthVentes     = Math.max(ventes.getLastColumn(), 9);
+  const COL_FRAIS_TAILLE = ventesExact(HEADERS.VENTES.FRAIS_COLISSAGE_TAILLE)
+    || ventesWhere(h => h.includes('coliss') && h.includes('taille'))
+    || ventesWhere(h => h.includes('colis') && h.includes('taille'));
+  const COL_FRAIS_LOT = ventesExact(HEADERS.VENTES.FRAIS_COLISSAGE_LOT)
+    || ventesWhere(h => h.includes('coliss') && h.includes('lot'))
+    || ventesWhere(h => h.includes('colis') && h.includes('lot'));
+  const COL_FRAIS_TOTAL = ventesExact(HEADERS.VENTES.FRAIS_COLISSAGE_TOTAL)
+    || ventesWhere(h => h.includes('coliss') && h.includes('total'))
+    || ventesWhere(h => h.includes('colis') && h.includes('total'));
 
   const dateCell = sh.getRange(row, C_DVENTE);
   const dateV = dateCell.getValue();
@@ -1225,6 +1403,11 @@ function exportVente_(e, row, C_ID, C_LABEL, C_SKU, C_PRIX, C_DVENTE, C_STAMPV, 
   const label = C_LABEL ? sh.getRange(row, C_LABEL).getDisplayValue() : "";
   const sku   = C_SKU  ? sh.getRange(row, C_SKU).getDisplayValue() : "";
   const prix  = C_PRIX ? sh.getRange(row, C_PRIX).getValue() : "";
+
+  const packagingInfo = packaging || {};
+  const fraisTaille = parseAmount_(packagingInfo.fraisTaille);
+  const fraisLot = parseAmount_(packagingInfo.fraisLot);
+  const fraisTotal = parseAmount_(packagingInfo.fraisTotal !== undefined ? packagingInfo.fraisTotal : ((fraisTaille || 0) + (fraisLot || 0)));
 
   const headersS = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0];
   const resolverS = makeHeaderResolver_(headersS);
@@ -1283,6 +1466,9 @@ function exportVente_(e, row, C_ID, C_LABEL, C_SKU, C_PRIX, C_DVENTE, C_STAMPV, 
   if (COL_DELAI_ML) newRow[COL_DELAI_ML - 1] = delaiML;
   if (COL_DELAI_PUB) newRow[COL_DELAI_PUB - 1] = delaiPub;
   if (COL_DELAI_VENTE) newRow[COL_DELAI_VENTE - 1] = delaiVte;
+  if (COL_FRAIS_TAILLE && fraisTaille !== null) newRow[COL_FRAIS_TAILLE - 1] = fraisTaille;
+  if (COL_FRAIS_LOT && fraisLot !== null) newRow[COL_FRAIS_LOT - 1] = fraisLot;
+  if (COL_FRAIS_TOTAL && fraisTotal !== null) newRow[COL_FRAIS_TOTAL - 1] = fraisTotal;
 
   ventes.getRange(start, 1, 1, newRow.length).setValues([newRow]);
 
