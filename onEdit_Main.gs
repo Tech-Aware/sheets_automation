@@ -224,6 +224,12 @@ function getDateOrNull_(value) {
   return null;
 }
 
+function getTomorrow_() {
+  const date = new Date();
+  date.setDate(date.getDate() + 1);
+  return date;
+}
+
 function resolveCombinedMisEnLigneColumn_(resolver) {
   if (!resolver) return 0;
   const colExact = resolver.colExact ? resolver.colExact.bind(resolver) : () => 0;
@@ -1535,8 +1541,8 @@ function handleStock(e) {
       if (wasCheckbox) {
         cell.clearDataValidations();
       }
-      const now = new Date();
-      cell.setValue(now);
+      const tomorrow = getTomorrow_();
+      cell.setValue(tomorrow);
       cell.setNumberFormat('dd/MM/yyyy');
       const info = { range: cell, oldValue };
       if (!ensureChronologyOrRevert_('dmis', oldValue, info)) {
@@ -1639,8 +1645,8 @@ function handleStock(e) {
       if (wasCheckbox) {
         cell.clearDataValidations();
       }
-      const now = new Date();
-      cell.setValue(now);
+      const tomorrow = getTomorrow_();
+      cell.setValue(tomorrow);
       cell.setNumberFormat('dd/MM/yyyy');
       const info = { range: cell, oldValue };
       if (!ensureChronologyOrRevert_('dpub', oldValue, info)) {
@@ -1732,7 +1738,8 @@ function handleStock(e) {
     if (turnedOn) {
       const cell = sh.getRange(r, C_DMIS);
       storePreviousCellValue_(sh, r, C_DMIS, cell.getValue());
-      cell.setValue(new Date());
+      const tomorrow = getTomorrow_();
+      cell.setValue(tomorrow);
       const checkboxInfo = { range: sh.getRange(r, C_MIS), oldValue: e.oldValue };
       if (!ensureChronologyOrRevert_('dmis', null, checkboxInfo)) {
         return;
@@ -1766,7 +1773,8 @@ function handleStock(e) {
     if (turnedOn) {
       const cell = sh.getRange(r, C_DPUB);
       storePreviousCellValue_(sh, r, C_DPUB, cell.getValue());
-      cell.setValue(new Date());
+      const tomorrow = getTomorrow_();
+      cell.setValue(tomorrow);
       const checkboxInfo = { range: sh.getRange(r, C_PUB), oldValue: e.oldValue };
       if (!ensureChronologyOrRevert_('dpub', null, checkboxInfo)) {
         return;
@@ -1797,8 +1805,8 @@ function handleStock(e) {
         cell.clearDataValidations();
       }
 
-      const now = new Date();
-      cell.setValue(now);
+      const tomorrow = getTomorrow_();
+      cell.setValue(tomorrow);
       cell.setNumberFormat('dd/MM/yyyy');
       const info = { range: cell, oldValue };
       if (!ensureChronologyOrRevert_('dvente', oldValue, info)) {
@@ -1929,7 +1937,8 @@ function handleStock(e) {
 
       let val = dv.getValue();
       if (!(val instanceof Date) || isNaN(val)) {
-        dv.setValue(new Date());  // on date au moment du clic
+        const tomorrow = getTomorrow_();
+        dv.setValue(tomorrow);  // on date au moment du clic
       }
       const checkboxInfo = { range: sh.getRange(r, C_VENDU), oldValue: e.oldValue };
       if (!ensureChronologyOrRevert_('dvente', null, checkboxInfo)) {
