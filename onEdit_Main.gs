@@ -13,6 +13,7 @@ const HEADERS = Object.freeze({
     QUANTITE_RECUE_ALT: 'QUANTITE RECUE',
     PRET_STOCK: 'PRËT POUR MISE EN STOCK',
     PRET_STOCK_ALT: 'PRÊT POUR MISE EN STOCK',
+    PRET_STOCK_COMBINED: 'PRÊT POUR MISE EN STOCK | DATE',
     DATE_MISE_EN_STOCK: 'MIS EN STOCK LE',
     DATE_MISE_EN_STOCK_ALT: 'DATE DE MISE EN STOCK',
     FRAIS_COLISSAGE: 'FRAIS DE COLISSAGE',
@@ -243,6 +244,16 @@ function getTomorrow_() {
   const date = new Date();
   date.setDate(date.getDate() + 1);
   return date;
+}
+
+function resolveCombinedPretPourStockColumn_(resolver) {
+  if (!resolver) return 0;
+  const colExact = resolver.colExact ? resolver.colExact.bind(resolver) : () => 0;
+  const colWhere = resolver.colWhere ? resolver.colWhere.bind(resolver) : () => 0;
+
+  const combined = colExact(HEADERS.ACHATS.PRET_STOCK_COMBINED)
+    || colWhere(h => h.includes('pret') && h.includes('mise en stock') && h.includes('date'));
+  return combined || 0;
 }
 
 function resolveCombinedMisEnLigneColumn_(resolver) {
@@ -819,6 +830,8 @@ function handleAchats(e) {
   const ss = e.source;
   const col = e.range.getColumn();
   const row = e.range.getRow();
+  const turnedOn = (e.value === "TRUE") || (e.value === true);
+  const turnedOff = (e.value === "FALSE") || (e.value === false);
 
   const achatsHeaders = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0];
   const resolver = makeHeaderResolver_(achatsHeaders);
@@ -840,19 +853,114 @@ function handleAchats(e) {
   const COL_QTY  = colExact(HEADERS.ACHATS.QUANTITE_RECUE)
     || colExact(HEADERS.ACHATS.QUANTITE_RECUE_ALT)
     || colWhere(h => h.includes('quantite') && (h.includes('recu') || h.includes('recue')));
-  const COL_READY= colExact(HEADERS.ACHATS.PRET_STOCK)
+  const legacyReadyCol = colExact(HEADERS.ACHATS.PRET_STOCK)
     || colExact(HEADERS.ACHATS.PRET_STOCK_ALT)
     || colWhere(h => h.includes('pret') && h.includes('stock'));
-  const COL_STP  = colExact(HEADERS.ACHATS.DATE_MISE_EN_STOCK)
+  const legacyStpCol = colExact(HEADERS.ACHATS.DATE_MISE_EN_STOCK)
     || colExact(HEADERS.ACHATS.DATE_MISE_EN_STOCK_ALT)
     || colWhere(h => h.includes('mis en stock'))
     || colWhere(h => h.includes('mise en stock'));
+  const combinedReadyCol = resolveCombinedPretPourStockColumn_(resolver);
+  const useCombinedReadyCol = !!combinedReadyCol;
+  const COL_READY = useCombinedReadyCol ? combinedReadyCol : legacyReadyCol;
+  const COL_STP = useCombinedReadyCol ? combinedReadyCol : legacyStpCol;
   const COL_FRAIS = colExact(HEADERS.ACHATS.FRAIS_COLISSAGE)
     || colWhere(h => h.includes('frais') && h.includes('colis'));
   const COL_PRIX_TTC = colExact(HEADERS.ACHATS.PRIX_UNITAIRE_TTC)
     || colWhere(h => h.includes('prix') && h.includes('ttc') && h.includes('unit'));
   const COL_TOTAL_TTC = colExact(HEADERS.ACHATS.TOTAL_TTC)
     || colWhere(h => h.includes('total') && h.includes('ttc'));
+  const isCombinedReadyCell = useCombinedReadyCol && COL_READY && COL_STP && COL_READY === COL_STP;
+
+  function buildCheckboxRule_() {
+    return SpreadsheetApp
+      .newDataValidation()
+      .requireCheckbox()
+      .setAllowInvalid(false)
+      .build();
+  }
+
+  function isCheckboxValidation_(validation) {
+    return !!(validation
+      && typeof validation.getCriteriaType === 'function'
+      && validation.getCriteriaType() === SpreadsheetApp.DataValidationCriteria.CHECKBOX);
+  }
+
+  function restoreCheckboxValidation_(range, previousValidation) {
+    if (!range) return;
+    if (previousValidation && isCheckboxValidation_(previousValidation)) {
+      range.setDataValidation(previousValidation);
+    } else {
+      range.setDataValidation(buildCheckboxRule_());
+    }
+    const current = range.getValue();
+    if (current === '' || current === null) {
+      range.setValue(false);
+    }
+  }
+
+  function revertCheckbox_(range, oldValue) {
+    if (!range) return;
+    let valueToSet = oldValue;
+    if (oldValue === 'TRUE') valueToSet = true;
+    if (oldValue === 'FALSE' || oldValue === undefined) valueToSet = false;
+    if (valueToSet === null || valueToSet === '') {
+      range.clearContent();
+      return;
+    }
+    range.setValue(valueToSet);
+  }
+
+  function syncReadyDateToStock_() {
+    if (!COL_STP || !COL_REF) return;
+    const refBase = String(sh.getRange(row, COL_REF).getDisplayValue() || '').trim();
+    if (!refBase) return;
+
+    const cell = sh.getRange(row, COL_STP);
+    const rawVal = cell.getValue();
+    let dms = null;
+
+    if (rawVal instanceof Date && !isNaN(rawVal)) {
+      dms = rawVal;
+    } else {
+      const s = cell.getDisplayValue();
+      if (s) {
+        const m = s.match(/^\s*(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{2,4})\s*$/);
+        if (m) {
+          const d  = +m[1];
+          const mo = +m[2];
+          const y  = +(m[3].length === 2 ? ('20' + m[3]) : m[3]);
+          dms = new Date(y, mo - 1, d);
+        }
+      }
+    }
+
+    const stock = ss.getSheetByName('Stock');
+    if (!stock) return;
+
+    const headersS = stock.getRange(1,1,1,stock.getLastColumn()).getValues()[0];
+    const resolverS = makeHeaderResolver_(headersS);
+    const C_SKU_STOCK = resolverS.colExact(HEADERS.STOCK.SKU)
+      || resolverS.colExact(HEADERS.STOCK.REFERENCE);
+    const C_DMS_STOCK = resolverS.colExact(HEADERS.STOCK.DATE_MISE_EN_STOCK);
+    if (!C_SKU_STOCK || !C_DMS_STOCK) return;
+
+    const lastS = stock.getLastRow();
+    if (lastS < 2) return;
+
+    const skuVals = stock.getRange(2, C_SKU_STOCK, lastS - 1, 1).getValues();
+    const dmsVals = stock.getRange(2, C_DMS_STOCK, lastS - 1, 1).getValues();
+
+    for (let i = 0; i < skuVals.length; i++) {
+      const base = extractSkuBase_(skuVals[i][0]);
+      if (!base) continue;
+      if (base === refBase) {
+        dmsVals[i][0] = dms;
+      }
+    }
+
+    stock.getRange(2, C_DMS_STOCK, lastS - 1, 1).setValues(dmsVals);
+  }
 
   // -------------------------
   // 0) MODIF REFERENCE (F) → MAJ PRÉFIXE DES SKU DANS STOCK
@@ -915,63 +1023,66 @@ function handleAchats(e) {
   // -------------------------
   // 1) ÉDITION DE LA COLONNE V (DATE DE MISE EN STOCK) → SYNC VERS STOCK
   // -------------------------
-  if (COL_STP && col === COL_STP) {
-    // Base de SKU (Achats!F)
-    if (!COL_REF) return;
-    const refBase = String(sh.getRange(row, COL_REF).getDisplayValue() || "").trim();
-    if (!refBase) return;
-
-    // Nouvelle valeur de date saisie en V (on accepte vraie Date ou texte dd/MM/yyyy)
-    const cell = sh.getRange(row, COL_STP);
-    const rawVal = cell.getValue();
-    let dms = null;
-
-    if (rawVal instanceof Date && !isNaN(rawVal)) {
-      dms = rawVal;
-    } else {
-      const s = cell.getDisplayValue();
-      if (s) {
-        const m = s.match(/^\s*(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{2,4})\s*$/);
-        if (m) {
-          const d  = +m[1];
-          const mo = +m[2];
-          const y  = +(m[3].length === 2 ? ("20" + m[3]) : m[3]);
-          dms = new Date(y, mo - 1, d);
-        } else {
-          dms = null;
-        }
-      } else {
-        dms = null;
-      }
-    }
-
-    const stock = ss.getSheetByName("Stock");
-    if (!stock) return;
-
-    const headersS = stock.getRange(1,1,1,stock.getLastColumn()).getValues()[0];
-    const resolverS = makeHeaderResolver_(headersS);
-    const C_SKU_STOCK = resolverS.colExact(HEADERS.STOCK.SKU)
-      || resolverS.colExact(HEADERS.STOCK.REFERENCE);
-    const C_DMS_STOCK = resolverS.colExact(HEADERS.STOCK.DATE_MISE_EN_STOCK); // ta colonne E
-    if (!C_SKU_STOCK || !C_DMS_STOCK) return;
-
-    const lastS = stock.getLastRow();
-    if (lastS < 2) return;
-
-    const skuVals = stock.getRange(2, C_SKU_STOCK, lastS - 1, 1).getValues();
-    const dmsVals = stock.getRange(2, C_DMS_STOCK, lastS - 1, 1).getValues();
-
-    for (let i = 0; i < skuVals.length; i++) {
-      const base = extractSkuBase_(skuVals[i][0]);
-      if (!base) continue;
-
-      if (base === refBase) {
-        dmsVals[i][0] = dms; // peut être Date ou null
-      }
-    }
-
-    stock.getRange(2, C_DMS_STOCK, lastS - 1, 1).setValues(dmsVals);
+  if (COL_STP && col === COL_STP && !(isCombinedReadyCell && (turnedOn || turnedOff))) {
+    syncReadyDateToStock_();
     return;
+  }
+
+  if (isCombinedReadyCell && COL_READY && col === COL_READY) {
+    const cell = sh.getRange(row, COL_READY);
+    const previousValidation = typeof cell.getDataValidation === 'function' ? cell.getDataValidation() : null;
+    const wasCheckbox = isCheckboxValidation_(previousValidation);
+    const oldValue = e.oldValue;
+    const oldValueDate = getDateOrNull_(oldValue);
+    const value = cell.getValue();
+    const displayValue = cell.getDisplayValue();
+    const parsedValue = getDateOrNull_(value) || getDateOrNull_(displayValue);
+    let shouldSync = false;
+
+    if (turnedOn) {
+      if (wasCheckbox && typeof cell.clearDataValidations === 'function') {
+        cell.clearDataValidations();
+      }
+      const stamp = parsedValue || new Date();
+      cell.setValue(stamp);
+      cell.setNumberFormat('dd/MM/yyyy');
+      shouldSync = true;
+    } else if (turnedOff) {
+      restoreCheckboxValidation_(cell, previousValidation);
+      cell.setValue(false);
+      shouldSync = true;
+    } else if (value === '' || value === null) {
+      restoreCheckboxValidation_(cell, previousValidation);
+      cell.clearContent();
+      shouldSync = true;
+    } else if (parsedValue) {
+      if (wasCheckbox && typeof cell.clearDataValidations === 'function') {
+        cell.clearDataValidations();
+      }
+      cell.setValue(parsedValue);
+      cell.setNumberFormat('dd/MM/yyyy');
+      shouldSync = true;
+    } else {
+      if (oldValueDate) {
+        if (wasCheckbox && typeof cell.clearDataValidations === 'function') {
+          cell.clearDataValidations();
+        }
+        cell.setValue(oldValueDate);
+        cell.setNumberFormat('dd/MM/yyyy');
+      } else {
+        restoreCheckboxValidation_(cell, previousValidation);
+        revertCheckbox_(cell, oldValue);
+      }
+      return;
+    }
+
+    if (shouldSync) {
+      syncReadyDateToStock_();
+    }
+
+    if (!turnedOn) {
+      return;
+    }
   }
 
   if (COL_FRAIS && col === COL_FRAIS && COL_TOTAL_TTC) {
@@ -1017,7 +1128,6 @@ function handleAchats(e) {
   // -------------------------
   if (!COL_READY || col !== COL_READY) return; // pas V → on sort
 
-  const turnedOn = (e.value === "TRUE") || (e.value === true);
   if (!turnedOn) return;
 
   if (!COL_STP) return;
