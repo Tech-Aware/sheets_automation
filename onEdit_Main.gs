@@ -244,6 +244,43 @@ function toNumber_(value) {
   return Number.isFinite(coerced) ? coerced : NaN;
 }
 
+function parseLotCount_(lotValue) {
+  if (lotValue === null || lotValue === undefined) {
+    return NaN;
+  }
+
+  const direct = toNumber_(lotValue);
+  if (Number.isFinite(direct)) {
+    return direct;
+  }
+
+  const text = String(lotValue || '').trim();
+  if (!text) {
+    return NaN;
+  }
+
+  const match = text.match(/(\d+[\d.,]*)/);
+  if (!match) {
+    return NaN;
+  }
+
+  const parsed = toNumber_(match[1]);
+  return Number.isFinite(parsed) ? parsed : NaN;
+}
+
+function computePerItemShippingFee_(rawFee, lotValue) {
+  if (!Number.isFinite(rawFee)) {
+    return rawFee;
+  }
+
+  const lotCount = parseLotCount_(lotValue);
+  if (Number.isFinite(lotCount) && lotCount > 1) {
+    return rawFee / lotCount;
+  }
+
+  return rawFee;
+}
+
 function buildShippingFeeLookup_(ss) {
   const frais = ss && typeof ss.getSheetByName === 'function' ? ss.getSheetByName('Frais') : null;
   if (!frais) return null;
@@ -334,6 +371,17 @@ function applyShippingFeeToAchats_(ss, achatId, fee) {
   const COL_ID = colExact(HEADERS.ACHATS.ID);
   if (!COL_ID) return;
 
+  const COL_FRAIS = colExact(HEADERS.ACHATS.FRAIS_COLISSAGE)
+    || colWhere(h => h.includes('frais') && h.includes('colis'));
+  const COL_TOTAL = colExact(HEADERS.ACHATS.TOTAL_TTC)
+    || colWhere(h => h.includes('total') && h.includes('ttc'));
+  const COL_QTY = colExact(HEADERS.ACHATS.QUANTITE_RECUE)
+    || colExact(HEADERS.ACHATS.QUANTITE_RECUE_ALT)
+    || colWhere(h => h.includes('quantite'));
+  const COL_PRIX = colExact(HEADERS.ACHATS.PRIX_UNITAIRE_TTC)
+    || colWhere(h => h.includes('prix') && h.includes('ttc'));
+  const COL_COMMANDE = colWhere(h => h.includes('commande'));
+
   const idValues = achats.getRange(2, COL_ID, lastRow - 1, 1).getValues();
   const targetId = String(achatId || '').trim();
   if (!targetId) return;
@@ -349,15 +397,75 @@ function applyShippingFeeToAchats_(ss, achatId, fee) {
 
   if (rowIndex < 2) return;
 
-  const COL_FRAIS = colExact(HEADERS.ACHATS.FRAIS_COLISSAGE)
-    || colWhere(h => h.includes('frais') && h.includes('colis'));
-  const COL_TOTAL = colExact(HEADERS.ACHATS.TOTAL_TTC)
-    || colWhere(h => h.includes('total') && h.includes('ttc'));
-  const COL_QTY = colExact(HEADERS.ACHATS.QUANTITE_RECUE)
-    || colExact(HEADERS.ACHATS.QUANTITE_RECUE_ALT)
-    || colWhere(h => h.includes('quantite'));
-  const COL_PRIX = colExact(HEADERS.ACHATS.PRIX_UNITAIRE_TTC)
-    || colWhere(h => h.includes('prix') && h.includes('ttc'));
+  let commandeValues = null;
+  let totalValues = null;
+  let targetCommandeId = '';
+  if (COL_COMMANDE) {
+    commandeValues = achats.getRange(2, COL_COMMANDE, lastRow - 1, 1).getValues();
+    targetCommandeId = String(commandeValues[rowIndex - 2][0] || '').trim();
+  }
+  if (COL_TOTAL) {
+    totalValues = achats.getRange(2, COL_TOTAL, lastRow - 1, 1).getValues();
+  }
+
+  updateAchatsTotalsWithFee_(achats, rowIndex, fee, {
+    COL_FRAIS,
+    COL_TOTAL,
+    COL_QTY,
+    COL_PRIX
+  });
+
+  if (!COL_COMMANDE || !targetCommandeId) {
+    return;
+  }
+
+  let commandeRowIndex = -1;
+  let fallbackRowIndex = -1;
+
+  for (let i = 0; i < commandeValues.length; i++) {
+    const candidateCommande = String(commandeValues[i][0] || '').trim();
+    if (!candidateCommande || candidateCommande !== targetCommandeId) {
+      continue;
+    }
+
+    const candidateRowIndex = i + 2;
+    if (candidateRowIndex === rowIndex) {
+      continue;
+    }
+
+    if (COL_TOTAL && totalValues) {
+      const rawTotal = totalValues[i][0];
+      const hasMeaningfulTotal = !(rawTotal === null || rawTotal === undefined || (typeof rawTotal === 'string' && rawTotal.trim() === ''));
+      if (hasMeaningfulTotal) {
+        commandeRowIndex = candidateRowIndex;
+        break;
+      }
+    }
+
+    if (fallbackRowIndex < 0) {
+      fallbackRowIndex = candidateRowIndex;
+    }
+  }
+
+  if (commandeRowIndex < 2) {
+    commandeRowIndex = fallbackRowIndex;
+  }
+
+  if (commandeRowIndex >= 2) {
+    updateAchatsTotalsWithFee_(achats, commandeRowIndex, fee, {
+      COL_FRAIS,
+      COL_TOTAL,
+      COL_QTY,
+      COL_PRIX
+    });
+  }
+}
+
+function updateAchatsTotalsWithFee_(achats, rowIndex, fee, cols) {
+  const COL_FRAIS = cols.COL_FRAIS;
+  const COL_TOTAL = cols.COL_TOTAL;
+  const COL_QTY = cols.COL_QTY;
+  const COL_PRIX = cols.COL_PRIX;
 
   let previousFrais = 0;
   if (COL_FRAIS) {
@@ -1444,6 +1552,8 @@ function handleStock(e) {
       return;
     }
 
+    const perItemFee = computePerItemShippingFee_(fraisColis, lotValue);
+
     const valDate = sh.getRange(r, C_DVENTE).getValue();
     if (!(valDate instanceof Date) || isNaN(valDate.getTime())) return;
 
@@ -1458,7 +1568,7 @@ function handleStock(e) {
       C_DVENTE,
       C_STAMPV,
       baseToDmsMap,
-      { shipping: { size: tailleValue, lot: lotValue, fee: fraisColis } }
+      { shipping: { size: tailleValue, lot: lotValue, fee: perItemFee } }
     );
     return;
   }
@@ -2066,6 +2176,8 @@ function validateAllSales() {
       continue;
     }
 
+    const perItemFee = computePerItemShippingFee_(fraisColis, lotVal);
+
     let dateMiseStock = C_DMS  ? row[C_DMS  - 1] : null;
     if (!(dateMiseStock instanceof Date) || isNaN(dateMiseStock)) {
       const base = extractSkuBase_(sku);
@@ -2090,7 +2202,7 @@ function validateAllSales() {
     if (COL_ARTICLE) newRow[COL_ARTICLE - 1] = label;
     if (COL_SKU_VENTE) newRow[COL_SKU_VENTE - 1] = sku;
     if (COL_PRIX_VENTE) newRow[COL_PRIX_VENTE - 1] = prix;
-    if (COL_FRAIS_VENTE) newRow[COL_FRAIS_VENTE - 1] = fraisColis;
+    if (COL_FRAIS_VENTE) newRow[COL_FRAIS_VENTE - 1] = perItemFee;
     if (COL_TAILLE_VENTE) newRow[COL_TAILLE_VENTE - 1] = tailleVal;
     if (COL_LOT_VENTE && lotVal) newRow[COL_LOT_VENTE - 1] = lotVal;
     if (COL_DELAI_IMM) newRow[COL_DELAI_IMM - 1] = dImmobil;
@@ -2100,7 +2212,7 @@ function validateAllSales() {
 
     toAppend.push(newRow);
 
-    applyShippingFeeToAchats_(ss, idValue, fraisColis);
+    applyShippingFeeToAchats_(ss, idValue, perItemFee);
 
     rowsToDel.push(rowIndex);
     moved++;
