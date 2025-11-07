@@ -244,6 +244,43 @@ function toNumber_(value) {
   return Number.isFinite(coerced) ? coerced : NaN;
 }
 
+function parseLotCount_(lotValue) {
+  if (lotValue === null || lotValue === undefined) {
+    return NaN;
+  }
+
+  const direct = toNumber_(lotValue);
+  if (Number.isFinite(direct)) {
+    return direct;
+  }
+
+  const text = String(lotValue || '').trim();
+  if (!text) {
+    return NaN;
+  }
+
+  const match = text.match(/(\d+[\d.,]*)/);
+  if (!match) {
+    return NaN;
+  }
+
+  const parsed = toNumber_(match[1]);
+  return Number.isFinite(parsed) ? parsed : NaN;
+}
+
+function computePerItemShippingFee_(rawFee, lotValue) {
+  if (!Number.isFinite(rawFee)) {
+    return rawFee;
+  }
+
+  const lotCount = parseLotCount_(lotValue);
+  if (Number.isFinite(lotCount) && lotCount > 1) {
+    return rawFee / lotCount;
+  }
+
+  return rawFee;
+}
+
 function buildShippingFeeLookup_(ss) {
   const frais = ss && typeof ss.getSheetByName === 'function' ? ss.getSheetByName('Frais') : null;
   if (!frais) return null;
@@ -1444,6 +1481,8 @@ function handleStock(e) {
       return;
     }
 
+    const perItemFee = computePerItemShippingFee_(fraisColis, lotValue);
+
     const valDate = sh.getRange(r, C_DVENTE).getValue();
     if (!(valDate instanceof Date) || isNaN(valDate.getTime())) return;
 
@@ -1458,7 +1497,7 @@ function handleStock(e) {
       C_DVENTE,
       C_STAMPV,
       baseToDmsMap,
-      { shipping: { size: tailleValue, lot: lotValue, fee: fraisColis } }
+      { shipping: { size: tailleValue, lot: lotValue, fee: perItemFee } }
     );
     return;
   }
@@ -2066,6 +2105,8 @@ function validateAllSales() {
       continue;
     }
 
+    const perItemFee = computePerItemShippingFee_(fraisColis, lotVal);
+
     let dateMiseStock = C_DMS  ? row[C_DMS  - 1] : null;
     if (!(dateMiseStock instanceof Date) || isNaN(dateMiseStock)) {
       const base = extractSkuBase_(sku);
@@ -2090,7 +2131,7 @@ function validateAllSales() {
     if (COL_ARTICLE) newRow[COL_ARTICLE - 1] = label;
     if (COL_SKU_VENTE) newRow[COL_SKU_VENTE - 1] = sku;
     if (COL_PRIX_VENTE) newRow[COL_PRIX_VENTE - 1] = prix;
-    if (COL_FRAIS_VENTE) newRow[COL_FRAIS_VENTE - 1] = fraisColis;
+    if (COL_FRAIS_VENTE) newRow[COL_FRAIS_VENTE - 1] = perItemFee;
     if (COL_TAILLE_VENTE) newRow[COL_TAILLE_VENTE - 1] = tailleVal;
     if (COL_LOT_VENTE && lotVal) newRow[COL_LOT_VENTE - 1] = lotVal;
     if (COL_DELAI_IMM) newRow[COL_DELAI_IMM - 1] = dImmobil;
@@ -2100,7 +2141,7 @@ function validateAllSales() {
 
     toAppend.push(newRow);
 
-    applyShippingFeeToAchats_(ss, idValue, fraisColis);
+    applyShippingFeeToAchats_(ss, idValue, perItemFee);
 
     rowsToDel.push(rowIndex);
     moved++;
