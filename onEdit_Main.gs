@@ -48,7 +48,8 @@ const HEADERS = Object.freeze({
     DATE_VENTE: 'VENDU | DATE DE VENTE',
     DATE_VENTE_ALT: 'DATE DE VENTE',
     VENTE_EXPORTEE_LE: 'VENTE EXPORTEE LE',
-    VALIDER_SAISIE: 'VALIDER LA SAISIE'
+    VALIDER_SAISIE: 'VALIDER LA SAISIE',
+    VALIDER_SAISIE_ALT: 'VALIDER'
   }),
   VENTES: Object.freeze({
     ID: 'ID',
@@ -1467,7 +1468,8 @@ function handleStock(e) {
   if (!C_DVENTE) C_DVENTE = colExact(HEADERS.STOCK.DATE_VENTE_ALT) || 10;
   const C_STAMPV  = colExact(HEADERS.STOCK.VENTE_EXPORTEE_LE);
   const C_VALIDE  = colExact(HEADERS.STOCK.VALIDER_SAISIE)
-    || colWhere(h => h.includes("valider") && h.includes("saisie"));
+    || colExact(HEADERS.STOCK.VALIDER_SAISIE_ALT)
+    || colWhere(h => h.includes("valider"));
 
   const c = e.range.getColumn(), r = e.range.getRow();
 
@@ -2722,7 +2724,8 @@ function validateAllSales() {
     C_DVENTE = colExact(HEADERS.STOCK.DATE_VENTE_ALT) || 10;
   }
   const C_VALIDATE = colExact(HEADERS.STOCK.VALIDER_SAISIE)
-    || colWhere(h => h.includes("valider") && h.includes("saisie"));
+    || colExact(HEADERS.STOCK.VALIDER_SAISIE_ALT)
+    || colWhere(h => h.includes("valider"));
   const C_DMS      = colExact(HEADERS.STOCK.DATE_MISE_EN_STOCK)
     || colWhere(h => h.includes("mise en stock"));
   const combinedMisValidation = resolveCombinedMisEnLigneColumn_(resolver);
