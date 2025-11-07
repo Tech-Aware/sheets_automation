@@ -34,8 +34,10 @@ const HEADERS = Object.freeze({
     LOT: 'LOT',
     DATE_LIVRAISON: 'DATE DE LIVRAISON',
     DATE_MISE_EN_STOCK: 'DATE DE MISE EN STOCK',
-    MIS_EN_LIGNE: 'MIS EN LIGNE',
-    DATE_MISE_EN_LIGNE: 'DATE DE MISE EN LIGNE',
+    MIS_EN_LIGNE: 'MIS EN LIGNE | DATE DE MISE EN LIGNE',
+    MIS_EN_LIGNE_ALT: 'MIS EN LIGNE',
+    DATE_MISE_EN_LIGNE: 'MIS EN LIGNE | DATE DE MISE EN LIGNE',
+    DATE_MISE_EN_LIGNE_ALT: 'DATE DE MISE EN LIGNE',
     PUBLIE: 'PUBLIÉ',
     DATE_PUBLICATION: 'DATE DE PUBLICATION',
     VENDU: 'VENDU',
@@ -216,6 +218,33 @@ function getDateOrNull_(value) {
   }
 
   return null;
+}
+
+function resolveCombinedMisEnLigneColumn_(resolver) {
+  if (!resolver) return 0;
+  const colExact = resolver.colExact ? resolver.colExact.bind(resolver) : () => 0;
+  const colWhere = resolver.colWhere ? resolver.colWhere.bind(resolver) : () => 0;
+
+  const combined = colExact(HEADERS.STOCK.MIS_EN_LIGNE)
+    || colWhere(h => h.includes('mis en ligne') && h.includes('date'));
+  if (combined) {
+    return combined;
+  }
+
+  return 0;
+}
+
+function resolveLegacyMisEnLigneColumn_(resolver) {
+  if (!resolver) return 0;
+  const colExact = resolver.colExact ? resolver.colExact.bind(resolver) : () => 0;
+  const colWhere = resolver.colWhere ? resolver.colWhere.bind(resolver) : () => 0;
+
+  const checkboxCol = colExact(HEADERS.STOCK.MIS_EN_LIGNE_ALT)
+    || colWhere(h => h.includes('mis') && h.includes('ligne') && !h.includes('date'));
+  const dateCol = colExact(HEADERS.STOCK.DATE_MISE_EN_LIGNE_ALT)
+    || colWhere(h => h.includes('date') && h.includes('mise en ligne'));
+
+  return { checkboxCol, dateCol };
 }
 
 function toNumber_(value) {
@@ -1227,8 +1256,13 @@ function handleStock(e) {
     || colWhere(h => h.includes('taille') && h.includes('colis'));
   const C_LOT     = colExact(HEADERS.STOCK.LOT) || colWhere(h => h.includes('lot'));
   const C_DMS     = colExact(HEADERS.STOCK.DATE_MISE_EN_STOCK);
-  const C_MIS     = colExact(HEADERS.STOCK.MIS_EN_LIGNE);
-  const C_DMIS    = colExact(HEADERS.STOCK.DATE_MISE_EN_LIGNE);
+
+  const combinedMisCol = resolveCombinedMisEnLigneColumn_(resolver);
+  const legacyMisCols = combinedMisCol ? { checkboxCol: 0, dateCol: 0 } : resolveLegacyMisEnLigneColumn_(resolver);
+  const useCombinedMisCol = !!combinedMisCol;
+
+  const C_MIS     = useCombinedMisCol ? combinedMisCol : legacyMisCols.checkboxCol;
+  const C_DMIS    = useCombinedMisCol ? combinedMisCol : legacyMisCols.dateCol;
   const C_PUB     = colExact(HEADERS.STOCK.PUBLIE);
   const C_DPUB    = colExact(HEADERS.STOCK.DATE_PUBLICATION);
   const C_VENDU   = colExact(HEADERS.STOCK.VENDU);
@@ -1293,6 +1327,32 @@ function handleStock(e) {
       return;
     }
     range.setValue(valueToSet);
+  }
+
+  function buildCheckboxRule_() {
+    return SpreadsheetApp
+      .newDataValidation()
+      .requireCheckbox()
+      .setAllowInvalid(false)
+      .build();
+  }
+
+  function isCheckboxValidation_(validation) {
+    return !!(validation
+      && typeof validation.getCriteriaType === 'function'
+      && validation.getCriteriaType() === SpreadsheetApp.DataValidationCriteria.CHECKBOX);
+  }
+
+  function restoreCheckboxValidation_(range, previousValidation) {
+    if (!range) return;
+    if (previousValidation && isCheckboxValidation_(previousValidation)) {
+      range.setDataValidation(previousValidation);
+    } else {
+      range.setDataValidation(buildCheckboxRule_());
+    }
+    if (range.getValue() === '' || range.getValue() === null) {
+      range.setValue(false);
+    }
   }
 
   function ensureChronologyOrRevert_(changedKey, fallback, checkboxInfo) {
@@ -1360,7 +1420,9 @@ function handleStock(e) {
     return;
   }
 
-  if (c === C_DMS || c === C_DMIS || c === C_DPUB || c === C_DVENTE) {
+  const isCombinedMisCell = useCombinedMisCol && C_MIS && C_DMIS && C_MIS === C_DMIS;
+
+  if (c === C_DMS || (!isCombinedMisCell && c === C_DMIS) || c === C_DPUB || c === C_DVENTE) {
     const key = c === C_DMS ? 'dms' : (c === C_DMIS ? 'dmis' : (c === C_DPUB ? 'dpub' : 'dvente'));
     if (!ensureChronologyOrRevert_(key, e.oldValue)) {
       return;
@@ -1371,12 +1433,116 @@ function handleStock(e) {
   }
 
   // 1) MIS EN LIGNE → horodate
-  if (C_MIS && C_DMIS && c === C_MIS) {
+  if (isCombinedMisCell && C_MIS && c === C_MIS) {
+    const cell = sh.getRange(r, C_MIS);
+    const headerLabel = stockHeaders[C_MIS - 1] || HEADERS.STOCK.MIS_EN_LIGNE;
+    const previousValidation = cell.getDataValidation();
+    const wasCheckbox = isCheckboxValidation_(previousValidation);
+    const published = C_PUB ? (sh.getRange(r, C_PUB).getValue() === true) : false;
+    const value = cell.getValue();
+    const oldValue = e.oldValue;
+    const oldValueDate = getDateOrNull_(oldValue);
+    const checkboxInfo = !oldValueDate ? { range: cell, oldValue } : null;
+
+    if (turnedOff) {
+      if (published) {
+        cell.setValue(true);
+        ss.toast(
+          `Impossible de décocher "${headerLabel}" tant que "${HEADERS.STOCK.PUBLIE}" est coché.`,
+          'Stock',
+          5
+        );
+        return;
+      }
+      if (!ensureChronologyOrRevert_('dmis', oldValue, checkboxInfo) && wasCheckbox) {
+        restoreCheckboxValidation_(cell, previousValidation);
+      }
+      return;
+    }
+
+    if (turnedOn) {
+      if (wasCheckbox) {
+        cell.clearDataValidations();
+      }
+      const now = new Date();
+      cell.setValue(now);
+      cell.setNumberFormat('dd/MM/yyyy');
+      const info = { range: cell, oldValue };
+      if (!ensureChronologyOrRevert_('dmis', oldValue, info)) {
+        restoreCheckboxValidation_(cell, previousValidation);
+        return;
+      }
+      return;
+    }
+
+    if (value === '' || value === null) {
+      if (published) {
+        setCellToFallback_(C_DMIS, oldValue);
+        if (oldValueDate) {
+          cell.clearDataValidations();
+          cell.setNumberFormat('dd/MM/yyyy');
+        } else if (wasCheckbox) {
+          restoreCheckboxValidation_(cell, previousValidation);
+        }
+        ss.toast(
+          `Impossible de vider "${headerLabel}" tant que "${HEADERS.STOCK.PUBLIE}" est coché.`,
+          'Stock',
+          5
+        );
+        return;
+      }
+
+      if (!ensureChronologyOrRevert_('dmis', oldValue, checkboxInfo)) {
+        if (oldValueDate) {
+          cell.clearDataValidations();
+          cell.setNumberFormat('dd/MM/yyyy');
+        } else if (wasCheckbox) {
+          restoreCheckboxValidation_(cell, previousValidation);
+        }
+        return;
+      }
+
+      restoreCheckboxValidation_(cell, previousValidation);
+      cell.clearContent();
+      return;
+    }
+
+    const parsedValue = getDateOrNull_(value);
+    if (parsedValue) {
+      if (wasCheckbox) {
+        cell.clearDataValidations();
+      }
+      cell.setValue(parsedValue);
+      cell.setNumberFormat('dd/MM/yyyy');
+      if (!ensureChronologyOrRevert_('dmis', oldValue, checkboxInfo)) {
+        if (oldValueDate) {
+          cell.clearDataValidations();
+          cell.setNumberFormat('dd/MM/yyyy');
+        } else if (wasCheckbox) {
+          restoreCheckboxValidation_(cell, previousValidation);
+        }
+        return;
+      }
+      return;
+    }
+
+    setCellToFallback_(C_DMIS, oldValue);
+    if (oldValueDate) {
+      cell.clearDataValidations();
+      cell.setNumberFormat('dd/MM/yyyy');
+    } else if (wasCheckbox) {
+      restoreCheckboxValidation_(cell, previousValidation);
+    }
+    return;
+  }
+
+  if (!isCombinedMisCell && C_MIS && C_DMIS && c === C_MIS) {
+    const legacyHeaderLabel = stockHeaders[C_MIS - 1] || HEADERS.STOCK.MIS_EN_LIGNE_ALT;
     if (turnedOff) {
       if (C_PUB && sh.getRange(r, C_PUB).getValue() === true) {
         sh.getRange(r, C_MIS).setValue(true);
         ss.toast(
-          `Impossible de décocher "${HEADERS.STOCK.MIS_EN_LIGNE}" tant que "${HEADERS.STOCK.PUBLIE}" est coché.`,
+          `Impossible de décocher "${legacyHeaderLabel}" tant que "${HEADERS.STOCK.PUBLIE}" est coché.`,
           'Stock',
           5
         );
@@ -1645,7 +1811,9 @@ function exportVente_(e, row, C_ID, C_LABEL, C_SKU, C_PRIX, C_DVENTE, C_STAMPV, 
   const resolverS = makeHeaderResolver_(headersS);
 
   const C_DMS   = resolverS.colExact(HEADERS.STOCK.DATE_MISE_EN_STOCK);
-  const C_DMIS  = resolverS.colExact(HEADERS.STOCK.DATE_MISE_EN_LIGNE);
+  const combinedMisForRow = resolveCombinedMisEnLigneColumn_(resolverS);
+  const legacyMisForRow = combinedMisForRow ? { checkboxCol: 0, dateCol: 0 } : resolveLegacyMisEnLigneColumn_(resolverS);
+  const C_DMIS  = combinedMisForRow || legacyMisForRow.dateCol;
   const C_DPUB  = resolverS.colExact(HEADERS.STOCK.DATE_PUBLICATION);
 
   const chronoCheck = enforceChronologicalDates_(sh, row, {
@@ -2019,7 +2187,9 @@ function validateAllSales() {
     || colWhere(h => h.includes("valider") && h.includes("saisie"));
   const C_DMS      = colExact(HEADERS.STOCK.DATE_MISE_EN_STOCK)
     || colWhere(h => h.includes("mise en stock"));
-  const C_DMIS     = colExact(HEADERS.STOCK.DATE_MISE_EN_LIGNE);
+  const combinedMisValidation = resolveCombinedMisEnLigneColumn_(resolver);
+  const legacyMisValidation = combinedMisValidation ? { checkboxCol: 0, dateCol: 0 } : resolveLegacyMisEnLigneColumn_(resolver);
+  const C_DMIS     = combinedMisValidation || legacyMisValidation.dateCol;
   const C_DPUB     = colExact(HEADERS.STOCK.DATE_PUBLICATION);
 
   if (!C_SKU || !C_PRIX || !C_DVENTE) {
