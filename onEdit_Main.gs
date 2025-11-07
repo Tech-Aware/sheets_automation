@@ -14,7 +14,10 @@ const HEADERS = Object.freeze({
     PRET_STOCK: 'PRËT POUR MISE EN STOCK',
     PRET_STOCK_ALT: 'PRÊT POUR MISE EN STOCK',
     DATE_MISE_EN_STOCK: 'MIS EN STOCK LE',
-    DATE_MISE_EN_STOCK_ALT: 'DATE DE MISE EN STOCK'
+    DATE_MISE_EN_STOCK_ALT: 'DATE DE MISE EN STOCK',
+    FRAIS_COLISSAGE: 'FRAIS DE COLISSAGE',
+    PRIX_UNITAIRE_TTC: 'PRIX UNITAIRE TTC',
+    TOTAL_TTC: 'TOTAL TTC'
   }),
   STOCK: Object.freeze({
     ID: 'ID',
@@ -192,6 +195,32 @@ function getDateOrNull_(value) {
   }
 
   return null;
+}
+
+function toNumber_(value) {
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? value : NaN;
+  }
+
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (!trimmed) return NaN;
+
+    const normalized = trimmed
+      .replace(/\u00A0/g, '')
+      .replace(/\s+/g, '')
+      .replace(/,/g, '.');
+
+    const parsed = Number(normalized);
+    return Number.isFinite(parsed) ? parsed : NaN;
+  }
+
+  if (value === null || value === undefined) {
+    return NaN;
+  }
+
+  const coerced = Number(value);
+  return Number.isFinite(coerced) ? coerced : NaN;
 }
 
 function enforceChronologicalDates_(sheet, row, cols, options) {
@@ -426,6 +455,12 @@ function handleAchats(e) {
     || colExact(HEADERS.ACHATS.DATE_MISE_EN_STOCK_ALT)
     || colWhere(h => h.includes('mis en stock'))
     || colWhere(h => h.includes('mise en stock'));
+  const COL_FRAIS = colExact(HEADERS.ACHATS.FRAIS_COLISSAGE)
+    || colWhere(h => h.includes('frais') && h.includes('colis'));
+  const COL_PRIX_TTC = colExact(HEADERS.ACHATS.PRIX_UNITAIRE_TTC)
+    || colWhere(h => h.includes('prix') && h.includes('ttc') && h.includes('unit'));
+  const COL_TOTAL_TTC = colExact(HEADERS.ACHATS.TOTAL_TTC)
+    || colWhere(h => h.includes('total') && h.includes('ttc'));
 
   // -------------------------
   // 0) MODIF REFERENCE (F) → MAJ PRÉFIXE DES SKU DANS STOCK
@@ -544,6 +579,44 @@ function handleAchats(e) {
     }
 
     stock.getRange(2, C_DMS_STOCK, lastS - 1, 1).setValues(dmsVals);
+    return;
+  }
+
+  if (COL_FRAIS && col === COL_FRAIS && COL_TOTAL_TTC) {
+    const fraisCell = sh.getRange(row, COL_FRAIS);
+    let frais = toNumber_(fraisCell.getValue());
+    if (!Number.isFinite(frais)) {
+      frais = 0;
+    }
+
+    let baseTotal = NaN;
+    if (COL_QTY && COL_PRIX_TTC) {
+      const qtyVal = toNumber_(sh.getRange(row, COL_QTY).getValue());
+      const priceVal = toNumber_(sh.getRange(row, COL_PRIX_TTC).getValue());
+      if (Number.isFinite(qtyVal) && Number.isFinite(priceVal)) {
+        baseTotal = qtyVal * priceVal;
+      }
+    }
+
+    const totalCell = sh.getRange(row, COL_TOTAL_TTC);
+    if (!Number.isFinite(baseTotal)) {
+      const currentTotal = toNumber_(totalCell.getValue());
+      if (Number.isFinite(currentTotal)) {
+        const previousFrais = toNumber_(e.oldValue);
+        baseTotal = Number.isFinite(previousFrais) ? currentTotal - previousFrais : currentTotal;
+      }
+    }
+
+    if (!Number.isFinite(baseTotal)) {
+      return;
+    }
+
+    const newTotal = baseTotal + frais;
+    if (!Number.isFinite(newTotal)) {
+      return;
+    }
+
+    totalCell.setValue(newTotal);
     return;
   }
 

@@ -7,8 +7,8 @@ class MockRange {
     this.sheet = sheet;
     this.row = row;
     this.col = col;
-    this.numRows = numRows;
-    this.numCols = numCols;
+    this.numRows = numRows || 1;
+    this.numCols = numCols || 1;
   }
 
   _ensureRow(rowIdx) {
@@ -43,6 +43,16 @@ class MockRange {
     return values;
   }
 
+  getValue() {
+    const values = this.getValues();
+    return values.length && values[0].length ? values[0][0] : '';
+  }
+
+  getDisplayValue() {
+    const value = this.getValue();
+    return value === null || value === undefined ? '' : String(value);
+  }
+
   setValues(values) {
     for (let r = 0; r < values.length; r++) {
       const rowIdx = this.row + r;
@@ -56,6 +66,45 @@ class MockRange {
       }
     }
     return this;
+  }
+
+  setValue(value) {
+    return this.setValues([[value]]);
+  }
+
+  clearContent() {
+    for (let r = 0; r < this.numRows; r++) {
+      const rowIdx = this.row + r;
+      const targetIdx = rowIdx - 2;
+      if (!this.sheet.rows[targetIdx]) {
+        continue;
+      }
+      for (let c = 0; c < this.numCols; c++) {
+        const colIdx = this.col + c - 1;
+        this.sheet.rows[targetIdx][colIdx] = '';
+      }
+    }
+    return this;
+  }
+
+  setBackground() {
+    return this;
+  }
+
+  setFontColor() {
+    return this;
+  }
+
+  setNumberFormat() {
+    return this;
+  }
+
+  getRow() {
+    return this.row;
+  }
+
+  getColumn() {
+    return this.col;
   }
 }
 
@@ -201,3 +250,139 @@ const preservedValues = stockSheetExisting.rows.map(row => row[2]);
 console.log('Existing numbered SKUs scenario:', preservedValues);
 assert.deepStrictEqual(preservedValues, ['JLF-54', 'JLF-55', 'JLF-56']);
 console.log('Existing SKUs preserved and new suffix assigned correctly.');
+
+// --- handleAchats FRAIS DE COLISSAGE → TOTAL TTC recalculation ---
+(() => {
+  const headers = [
+    HEADERS.ACHATS.ID,
+    HEADERS.ACHATS.REFERENCE,
+    HEADERS.ACHATS.QUANTITE_RECUE,
+    HEADERS.ACHATS.PRIX_UNITAIRE_TTC,
+    HEADERS.ACHATS.TOTAL_TTC,
+    HEADERS.ACHATS.FRAIS_COLISSAGE
+  ];
+
+  const rows = [[
+    'ID-20',
+    'PCF',
+    2,
+    50,
+    100,
+    5
+  ]];
+
+  const sheet = new MockSheet('Achats', headers, rows);
+  const fraisCol = headers.indexOf(HEADERS.ACHATS.FRAIS_COLISSAGE) + 1;
+  const totalCol = headers.indexOf(HEADERS.ACHATS.TOTAL_TTC);
+  const prixCol = headers.indexOf(HEADERS.ACHATS.PRIX_UNITAIRE_TTC);
+
+  sheet.rows[0][fraisCol - 1] = 10;
+
+  const event = {
+    source: {
+      getActiveSheet() { return sheet; },
+      getSheetByName(name) {
+        if (name === 'Achats') return sheet;
+        return null;
+      }
+    },
+    range: sheet.getRange(2, fraisCol),
+    value: '10',
+    oldValue: '5'
+  };
+
+  sandbox.handleAchats(event);
+
+  assert.strictEqual(sheet.rows[0][totalCol], 110);
+  assert.strictEqual(sheet.rows[0][prixCol], 50);
+  console.log('handleAchats recalculates TOTAL TTC when frais increase.');
+})();
+
+(() => {
+  const headers = [
+    HEADERS.ACHATS.ID,
+    HEADERS.ACHATS.REFERENCE,
+    HEADERS.ACHATS.QUANTITE_RECUE,
+    HEADERS.ACHATS.PRIX_UNITAIRE_TTC,
+    HEADERS.ACHATS.TOTAL_TTC,
+    HEADERS.ACHATS.FRAIS_COLISSAGE
+  ];
+
+  const rows = [[
+    'ID-21',
+    'PCF',
+    2,
+    50,
+    110,
+    10
+  ]];
+
+  const sheet = new MockSheet('Achats', headers, rows);
+  const fraisCol = headers.indexOf(HEADERS.ACHATS.FRAIS_COLISSAGE) + 1;
+  const totalCol = headers.indexOf(HEADERS.ACHATS.TOTAL_TTC);
+
+  sheet.rows[0][fraisCol - 1] = '';
+
+  const event = {
+    source: {
+      getActiveSheet() { return sheet; },
+      getSheetByName(name) {
+        if (name === 'Achats') return sheet;
+        return null;
+      }
+    },
+    range: sheet.getRange(2, fraisCol),
+    value: '',
+    oldValue: '10'
+  };
+
+  sandbox.handleAchats(event);
+
+  assert.strictEqual(sheet.rows[0][totalCol], 100);
+  console.log('handleAchats removes frais from TOTAL TTC when cleared.');
+})();
+
+(() => {
+  const headers = [
+    HEADERS.ACHATS.ID,
+    HEADERS.ACHATS.REFERENCE,
+    HEADERS.ACHATS.QUANTITE_RECUE,
+    HEADERS.ACHATS.PRIX_UNITAIRE_TTC,
+    HEADERS.ACHATS.TOTAL_TTC,
+    HEADERS.ACHATS.FRAIS_COLISSAGE
+  ];
+
+  const rows = [[
+    'ID-22',
+    'PCF',
+    '',
+    '',
+    150,
+    20
+  ]];
+
+  const sheet = new MockSheet('Achats', headers, rows);
+  const fraisCol = headers.indexOf(HEADERS.ACHATS.FRAIS_COLISSAGE) + 1;
+  const totalCol = headers.indexOf(HEADERS.ACHATS.TOTAL_TTC);
+
+  sheet.rows[0][totalCol] = 150;
+  sheet.rows[0][fraisCol - 1] = 30;
+
+  const event = {
+    source: {
+      getActiveSheet() { return sheet; },
+      getSheetByName(name) {
+        if (name === 'Achats') return sheet;
+        return null;
+      }
+    },
+    range: sheet.getRange(2, fraisCol),
+    value: '30',
+    oldValue: '20'
+  };
+
+  sandbox.handleAchats(event);
+
+  assert.strictEqual(sheet.rows[0][totalCol], 160);
+  console.log('handleAchats keeps existing total baseline when price/qty are missing.');
+})();
