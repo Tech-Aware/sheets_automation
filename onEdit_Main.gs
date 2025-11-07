@@ -38,6 +38,14 @@ const HEADERS = Object.freeze({
     MIS_EN_LIGNE_ALT: 'MIS EN LIGNE',
     DATE_MISE_EN_LIGNE: 'MIS EN LIGNE | DATE DE MISE EN LIGNE',
     DATE_MISE_EN_LIGNE_ALT: 'DATE DE MISE EN LIGNE',
+    PUBLIE: 'PUBLIÉ | DATE DE PUBLICATION',
+    PUBLIE_ALT: 'PUBLIÉ',
+    DATE_PUBLICATION: 'PUBLIÉ | DATE DE PUBLICATION',
+    DATE_PUBLICATION_ALT: 'DATE DE PUBLICATION',
+    VENDU: 'VENDU | DATE DE VENTE',
+    VENDU_ALT: 'VENDU',
+    DATE_VENTE: 'VENDU | DATE DE VENTE',
+    DATE_VENTE_ALT: 'DATE DE VENTE',
     PUBLIE: 'PUBLIÉ',
     DATE_PUBLICATION: 'DATE DE PUBLICATION',
     VENDU: 'VENDU',
@@ -82,8 +90,8 @@ const DEFAULT_VENTES_HEADERS = Object.freeze([
 const HEADER_LABELS = Object.freeze({
   dms: HEADERS.STOCK.DATE_MISE_EN_STOCK,
   dmis: HEADERS.STOCK.DATE_MISE_EN_LIGNE,
-  dpub: HEADERS.STOCK.DATE_PUBLICATION,
-  dvente: HEADERS.STOCK.DATE_VENTE
+  dpub: HEADERS.STOCK.DATE_PUBLICATION_ALT,
+  dvente: HEADERS.STOCK.DATE_VENTE_ALT
 });
 
 function onEdit(e) {
@@ -245,6 +253,60 @@ function resolveLegacyMisEnLigneColumn_(resolver) {
     || colWhere(h => h.includes('date') && h.includes('mise en ligne'));
 
   return { checkboxCol, dateCol };
+}
+
+function resolveCombinedPublicationColumn_(resolver) {
+  if (!resolver) return 0;
+  const colExact = resolver.colExact ? resolver.colExact.bind(resolver) : () => 0;
+  const colWhere = resolver.colWhere ? resolver.colWhere.bind(resolver) : () => 0;
+
+  const combined = colExact(HEADERS.STOCK.PUBLIE)
+    || colWhere(h => h.includes('publi') && h.includes('date'));
+  return combined || 0;
+}
+
+function resolveLegacyPublicationColumns_(resolver) {
+  if (!resolver) return { checkboxCol: 0, dateCol: 0 };
+  const colExact = resolver.colExact ? resolver.colExact.bind(resolver) : () => 0;
+  const colWhere = resolver.colWhere ? resolver.colWhere.bind(resolver) : () => 0;
+
+  const checkboxCol = colExact(HEADERS.STOCK.PUBLIE_ALT)
+    || colWhere(h => h.includes('publi') && !h.includes('date'));
+  const dateCol = colExact(HEADERS.STOCK.DATE_PUBLICATION_ALT)
+    || colWhere(h => h.includes('date') && h.includes('publi'));
+
+  return { checkboxCol, dateCol };
+}
+
+function resolveCombinedVenduColumn_(resolver) {
+  if (!resolver) return 0;
+  const colExact = resolver.colExact ? resolver.colExact.bind(resolver) : () => 0;
+  const colWhere = resolver.colWhere ? resolver.colWhere.bind(resolver) : () => 0;
+
+  const combined = colExact(HEADERS.STOCK.VENDU)
+    || colWhere(h => h.includes('vendu') && h.includes('date'));
+  return combined || 0;
+}
+
+function resolveLegacyVenduColumns_(resolver) {
+  if (!resolver) return { checkboxCol: 0, dateCol: 0 };
+  const colExact = resolver.colExact ? resolver.colExact.bind(resolver) : () => 0;
+  const colWhere = resolver.colWhere ? resolver.colWhere.bind(resolver) : () => 0;
+
+  const checkboxCol = colExact(HEADERS.STOCK.VENDU_ALT)
+    || colWhere(h => h.includes('vendu') && !h.includes('date'));
+  const dateCol = colExact(HEADERS.STOCK.DATE_VENTE_ALT)
+    || colWhere(h => h.includes('date') && (h.includes('vente') || h.includes('vendu')));
+
+  return { checkboxCol, dateCol };
+}
+
+function isStatusActiveValue_(value) {
+  if (value === true) {
+    return true;
+  }
+  const date = getDateOrNull_(value);
+  return !!date;
 }
 
 function toNumber_(value) {
@@ -1263,6 +1325,19 @@ function handleStock(e) {
 
   const C_MIS     = useCombinedMisCol ? combinedMisCol : legacyMisCols.checkboxCol;
   const C_DMIS    = useCombinedMisCol ? combinedMisCol : legacyMisCols.dateCol;
+  const combinedPubCol = resolveCombinedPublicationColumn_(resolver);
+  const legacyPubCols = combinedPubCol ? { checkboxCol: 0, dateCol: 0 } : resolveLegacyPublicationColumns_(resolver);
+  const useCombinedPubCol = !!combinedPubCol;
+
+  const combinedVenduCol = resolveCombinedVenduColumn_(resolver);
+  const legacyVenduCols = combinedVenduCol ? { checkboxCol: 0, dateCol: 0 } : resolveLegacyVenduColumns_(resolver);
+  const useCombinedVenduCol = !!combinedVenduCol;
+
+  const C_PUB     = useCombinedPubCol ? combinedPubCol : legacyPubCols.checkboxCol;
+  const C_DPUB    = useCombinedPubCol ? combinedPubCol : legacyPubCols.dateCol;
+  const C_VENDU   = useCombinedVenduCol ? combinedVenduCol : legacyVenduCols.checkboxCol;
+  let   C_DVENTE  = useCombinedVenduCol ? combinedVenduCol : legacyVenduCols.dateCol;
+  if (!C_DVENTE) C_DVENTE = colExact(HEADERS.STOCK.DATE_VENTE_ALT) || 10;
   const C_PUB     = colExact(HEADERS.STOCK.PUBLIE);
   const C_DPUB    = colExact(HEADERS.STOCK.DATE_PUBLICATION);
   const C_VENDU   = colExact(HEADERS.STOCK.VENDU);
@@ -1377,7 +1452,7 @@ function handleStock(e) {
 
   // 0bis) Modification du PRIX DE VENTE
   if (C_PRIX && c === C_PRIX) {
-    const vendu = C_VENDU ? (sh.getRange(r, C_VENDU).getValue() === true) : false;
+    const vendu = C_VENDU ? isStatusActiveValue_(sh.getRange(r, C_VENDU).getValue()) : false;
     const priceCell = sh.getRange(r, C_PRIX);
     const priceValue = priceCell.getValue();
     const priceDisplay = priceCell.getDisplayValue();
@@ -1421,6 +1496,10 @@ function handleStock(e) {
   }
 
   const isCombinedMisCell = useCombinedMisCol && C_MIS && C_DMIS && C_MIS === C_DMIS;
+  const isCombinedPubCell = useCombinedPubCol && C_PUB && C_DPUB && C_PUB === C_DPUB;
+  const isCombinedVenduCell = useCombinedVenduCol && C_VENDU && C_DVENTE && C_VENDU === C_DVENTE;
+
+  if (c === C_DMS || (!isCombinedMisCell && c === C_DMIS) || (!isCombinedPubCell && c === C_DPUB) || (!isCombinedVenduCell && c === C_DVENTE)) {
 
   if (c === C_DMS || (!isCombinedMisCell && c === C_DMIS) || c === C_DPUB || c === C_DVENTE) {
     const key = c === C_DMS ? 'dms' : (c === C_DMIS ? 'dmis' : (c === C_DPUB ? 'dpub' : 'dvente'));
@@ -1438,6 +1517,7 @@ function handleStock(e) {
     const headerLabel = stockHeaders[C_MIS - 1] || HEADERS.STOCK.MIS_EN_LIGNE;
     const previousValidation = cell.getDataValidation();
     const wasCheckbox = isCheckboxValidation_(previousValidation);
+    const published = C_PUB ? isStatusActiveValue_(sh.getRange(r, C_PUB).getValue()) : false;
     const published = C_PUB ? (sh.getRange(r, C_PUB).getValue() === true) : false;
     const value = cell.getValue();
     const oldValue = e.oldValue;
@@ -1536,10 +1616,114 @@ function handleStock(e) {
     return;
   }
 
+  if (isCombinedPubCell && C_PUB && c === C_PUB) {
+    const cell = sh.getRange(r, C_PUB);
+    const headerLabel = stockHeaders[C_PUB - 1] || HEADERS.STOCK.PUBLIE;
+    const previousValidation = cell.getDataValidation();
+    const wasCheckbox = isCheckboxValidation_(previousValidation);
+    const sold = C_VENDU ? isStatusActiveValue_(sh.getRange(r, C_VENDU).getValue()) : false;
+    const value = cell.getValue();
+    const oldValue = e.oldValue;
+    const oldValueDate = getDateOrNull_(oldValue);
+    const checkboxInfo = !oldValueDate ? { range: cell, oldValue } : null;
+
+    if (turnedOff) {
+      if (sold) {
+        cell.setValue(true);
+        ss.toast(
+          `Impossible de décocher "${headerLabel}" lorsqu'une vente est cochée.`,
+          'Stock',
+          5
+        );
+        return;
+      }
+
+      if (!ensureChronologyOrRevert_('dpub', oldValue, checkboxInfo) && wasCheckbox) {
+        restoreCheckboxValidation_(cell, previousValidation);
+      }
+      return;
+    }
+
+    if (turnedOn) {
+      if (wasCheckbox) {
+        cell.clearDataValidations();
+      }
+      const now = new Date();
+      cell.setValue(now);
+      cell.setNumberFormat('dd/MM/yyyy');
+      const info = { range: cell, oldValue };
+      if (!ensureChronologyOrRevert_('dpub', oldValue, info)) {
+        restoreCheckboxValidation_(cell, previousValidation);
+        return;
+      }
+      return;
+    }
+
+    if (value === '' || value === null) {
+      if (sold) {
+        setCellToFallback_(C_DPUB, oldValue);
+        if (oldValueDate) {
+          cell.clearDataValidations();
+          cell.setNumberFormat('dd/MM/yyyy');
+        } else if (wasCheckbox) {
+          restoreCheckboxValidation_(cell, previousValidation);
+        }
+        ss.toast(
+          `Impossible de vider "${headerLabel}" lorsqu'une vente est cochée.`,
+          'Stock',
+          5
+        );
+        return;
+      }
+
+      if (!ensureChronologyOrRevert_('dpub', oldValue, checkboxInfo)) {
+        if (oldValueDate) {
+          cell.clearDataValidations();
+          cell.setNumberFormat('dd/MM/yyyy');
+        } else if (wasCheckbox) {
+          restoreCheckboxValidation_(cell, previousValidation);
+        }
+        return;
+      }
+
+      restoreCheckboxValidation_(cell, previousValidation);
+      cell.clearContent();
+      return;
+    }
+
+    const parsedValue = getDateOrNull_(value);
+    if (parsedValue) {
+      if (wasCheckbox) {
+        cell.clearDataValidations();
+      }
+      cell.setValue(parsedValue);
+      cell.setNumberFormat('dd/MM/yyyy');
+      if (!ensureChronologyOrRevert_('dpub', oldValue, checkboxInfo)) {
+        if (oldValueDate) {
+          cell.clearDataValidations();
+          cell.setNumberFormat('dd/MM/yyyy');
+        } else if (wasCheckbox) {
+          restoreCheckboxValidation_(cell, previousValidation);
+        }
+        return;
+      }
+      return;
+    }
+
+    setCellToFallback_(C_DPUB, oldValue);
+    if (oldValueDate) {
+      cell.clearDataValidations();
+      cell.setNumberFormat('dd/MM/yyyy');
+    } else if (wasCheckbox) {
+      restoreCheckboxValidation_(cell, previousValidation);
+    }
+    return;
+  }
+
   if (!isCombinedMisCell && C_MIS && C_DMIS && c === C_MIS) {
     const legacyHeaderLabel = stockHeaders[C_MIS - 1] || HEADERS.STOCK.MIS_EN_LIGNE_ALT;
     if (turnedOff) {
-      if (C_PUB && sh.getRange(r, C_PUB).getValue() === true) {
+      if (C_PUB && isStatusActiveValue_(sh.getRange(r, C_PUB).getValue())) {
         sh.getRange(r, C_MIS).setValue(true);
         ss.toast(
           `Impossible de décocher "${legacyHeaderLabel}" tant que "${HEADERS.STOCK.PUBLIE}" est coché.`,
@@ -1569,9 +1753,9 @@ function handleStock(e) {
   }
 
   // 2) PUBLIÉ → horodate
-  if (C_PUB && C_DPUB && c === C_PUB) {
+  if (!isCombinedPubCell && C_PUB && C_DPUB && c === C_PUB) {
     if (turnedOff) {
-      const vendu = C_VENDU ? (sh.getRange(r, C_VENDU).getValue() === true) : false;
+      const vendu = C_VENDU ? isStatusActiveValue_(sh.getRange(r, C_VENDU).getValue()) : false;
       if (vendu) {
         sh.getRange(r, C_PUB).setValue(true);
         ss.toast(
@@ -1603,7 +1787,146 @@ function handleStock(e) {
   }
 
   // 3) VENDU → horodatage + alerte prix, déplacement seulement via "Valider la saisie"
-  if (C_VENDU && c === C_VENDU) {
+  if (isCombinedVenduCell && C_VENDU && c === C_VENDU) {
+    const cell = sh.getRange(r, C_VENDU);
+    const previousValidation = cell.getDataValidation();
+    const wasCheckbox = isCheckboxValidation_(previousValidation);
+    const value = cell.getValue();
+    const oldValue = e.oldValue;
+    const oldValueDate = getDateOrNull_(oldValue);
+    const checkboxInfo = !oldValueDate ? { range: cell, oldValue } : null;
+
+    if (turnedOn) {
+      if (C_PRIX) {
+        const priceCell = sh.getRange(r, C_PRIX);
+        storePreviousCellValue_(sh, r, C_PRIX, priceCell.getValue());
+      }
+
+      if (wasCheckbox) {
+        cell.clearDataValidations();
+      }
+
+      const now = new Date();
+      cell.setValue(now);
+      cell.setNumberFormat('dd/MM/yyyy');
+      const info = { range: cell, oldValue };
+      if (!ensureChronologyOrRevert_('dvente', oldValue, info)) {
+        if (C_PRIX) {
+          restorePreviousCellValue_(sh, r, C_PRIX);
+        }
+        restoreCheckboxValidation_(cell, previousValidation);
+        return;
+      }
+
+      const fallbackValue = oldValueDate ? new Date(oldValueDate.getTime()) : '';
+      storePreviousCellValue_(sh, r, C_DVENTE, fallbackValue);
+      ensureValidPriceOrWarn_(sh, r, C_PRIX);
+      return;
+    }
+
+    if (turnedOff) {
+      if (!restorePreviousCellValue_(sh, r, C_DVENTE)) {
+        cell.clearContent();
+      }
+
+      if (C_PRIX) {
+        restorePreviousCellValue_(sh, r, C_PRIX);
+        clearPriceAlertIfAny_(sh, r, C_PRIX);
+        const priceCell = sh.getRange(r, C_PRIX);
+        priceCell.clearContent();
+        priceCell.setBackground(null);
+        priceCell.setFontColor(null);
+      } else {
+        clearPriceAlertIfAny_(sh, r, C_PRIX);
+      }
+
+      if (C_VALIDE) {
+        const valCell = sh.getRange(r, C_VALIDE);
+        valCell.clearDataValidations();
+        valCell.clearContent();
+      }
+
+      restoreCheckboxValidation_(cell, previousValidation);
+      return;
+    }
+
+    if (value === '' || value === null) {
+      if (!ensureChronologyOrRevert_('dvente', oldValue, checkboxInfo)) {
+        if (C_PRIX) {
+          restorePreviousCellValue_(sh, r, C_PRIX);
+        }
+        if (oldValueDate) {
+          cell.clearDataValidations();
+          cell.setNumberFormat('dd/MM/yyyy');
+        } else if (wasCheckbox) {
+          restoreCheckboxValidation_(cell, previousValidation);
+        }
+        return;
+      }
+
+      restorePreviousCellValue_(sh, r, C_DVENTE);
+      if (C_PRIX) {
+        restorePreviousCellValue_(sh, r, C_PRIX);
+        clearPriceAlertIfAny_(sh, r, C_PRIX);
+        const priceCell = sh.getRange(r, C_PRIX);
+        priceCell.clearContent();
+        priceCell.setBackground(null);
+        priceCell.setFontColor(null);
+      } else {
+        clearPriceAlertIfAny_(sh, r, C_PRIX);
+      }
+
+      if (C_VALIDE) {
+        const valCell = sh.getRange(r, C_VALIDE);
+        valCell.clearDataValidations();
+        valCell.clearContent();
+      }
+
+      restoreCheckboxValidation_(cell, previousValidation);
+      cell.clearContent();
+      return;
+    }
+
+    const parsedValue = getDateOrNull_(value);
+    if (parsedValue) {
+      if (wasCheckbox) {
+        cell.clearDataValidations();
+      }
+      cell.setValue(parsedValue);
+      cell.setNumberFormat('dd/MM/yyyy');
+      if (!ensureChronologyOrRevert_('dvente', oldValue, checkboxInfo)) {
+        if (C_PRIX) {
+          restorePreviousCellValue_(sh, r, C_PRIX);
+        }
+        if (oldValueDate) {
+          cell.clearDataValidations();
+          cell.setNumberFormat('dd/MM/yyyy');
+        } else if (wasCheckbox) {
+          restoreCheckboxValidation_(cell, previousValidation);
+        }
+        return;
+      }
+
+      const fallbackValue = oldValueDate ? new Date(oldValueDate.getTime()) : '';
+      storePreviousCellValue_(sh, r, C_DVENTE, fallbackValue);
+      ensureValidPriceOrWarn_(sh, r, C_PRIX);
+      return;
+    }
+
+    setCellToFallback_(C_DVENTE, oldValue);
+    if (C_PRIX) {
+      ensureValidPriceOrWarn_(sh, r, C_PRIX);
+    }
+    if (oldValueDate) {
+      cell.clearDataValidations();
+      cell.setNumberFormat('dd/MM/yyyy');
+    } else if (wasCheckbox) {
+      restoreCheckboxValidation_(cell, previousValidation);
+    }
+    return;
+  }
+
+  if (!isCombinedVenduCell && C_VENDU && c === C_VENDU) {
     const dv = sh.getRange(r, C_DVENTE);
 
     if (turnedOn) {
@@ -1657,12 +1980,12 @@ function handleStock(e) {
   }
 
   // 5) Saisie directe d’une DATE DE VENTE → juste contrôle prix si VENDU coché
-  if (c === C_DVENTE) {
+  if (!isCombinedVenduCell && c === C_DVENTE) {
     const val = sh.getRange(r, C_DVENTE).getValue();
     const isDate = val instanceof Date && !isNaN(val.getTime());
     if (!isDate) return;
 
-    const vendu = C_VENDU ? (sh.getRange(r, C_VENDU).getValue() === true) : false;
+    const vendu = C_VENDU ? isStatusActiveValue_(sh.getRange(r, C_VENDU).getValue()) : false;
     if (!vendu) return;
 
     ensureValidPriceOrWarn_(sh, r, C_PRIX);
@@ -1682,7 +2005,7 @@ function handleStock(e) {
       return;
     }
 
-    const vendu = C_VENDU ? (sh.getRange(r, C_VENDU).getValue() === true) : false;
+    const vendu = C_VENDU ? isStatusActiveValue_(sh.getRange(r, C_VENDU).getValue()) : false;
     if (!vendu) {
       return;
     }
@@ -1814,6 +2137,9 @@ function exportVente_(e, row, C_ID, C_LABEL, C_SKU, C_PRIX, C_DVENTE, C_STAMPV, 
   const combinedMisForRow = resolveCombinedMisEnLigneColumn_(resolverS);
   const legacyMisForRow = combinedMisForRow ? { checkboxCol: 0, dateCol: 0 } : resolveLegacyMisEnLigneColumn_(resolverS);
   const C_DMIS  = combinedMisForRow || legacyMisForRow.dateCol;
+  const combinedPubForRow = resolveCombinedPublicationColumn_(resolverS);
+  const legacyPubForRow = combinedPubForRow ? { checkboxCol: 0, dateCol: 0 } : resolveLegacyPublicationColumns_(resolverS);
+  const C_DPUB  = combinedPubForRow || legacyPubForRow.dateCol;
   const C_DPUB  = resolverS.colExact(HEADERS.STOCK.DATE_PUBLICATION);
 
   const chronoCheck = enforceChronologicalDates_(sh, row, {
@@ -2181,8 +2507,16 @@ function validateAllSales() {
     || colExact(HEADERS.STOCK.TAILLE_COLIS_ALT)
     || colWhere(h => h.includes('taille') && h.includes('colis'));
   const C_LOT      = colExact(HEADERS.STOCK.LOT) || colWhere(h => h.includes('lot'));
-  const C_DVENTE   = colExact(HEADERS.STOCK.DATE_VENTE) || 10;
-  const C_VENDU    = colExact(HEADERS.STOCK.VENDU);
+  const combinedVenduValidation = resolveCombinedVenduColumn_(resolver);
+  const legacyVenduValidation = combinedVenduValidation ? { checkboxCol: 0, dateCol: 0 } : resolveLegacyVenduColumns_(resolver);
+  let   C_VENDU    = combinedVenduValidation || legacyVenduValidation.checkboxCol;
+  let   C_DVENTE   = combinedVenduValidation || legacyVenduValidation.dateCol;
+  if (!C_VENDU) {
+    C_VENDU = colExact(HEADERS.STOCK.VENDU_ALT);
+  }
+  if (!C_DVENTE) {
+    C_DVENTE = colExact(HEADERS.STOCK.DATE_VENTE_ALT) || 10;
+  }
   const C_VALIDATE = colExact(HEADERS.STOCK.VALIDER_SAISIE)
     || colWhere(h => h.includes("valider") && h.includes("saisie"));
   const C_DMS      = colExact(HEADERS.STOCK.DATE_MISE_EN_STOCK)
@@ -2190,6 +2524,9 @@ function validateAllSales() {
   const combinedMisValidation = resolveCombinedMisEnLigneColumn_(resolver);
   const legacyMisValidation = combinedMisValidation ? { checkboxCol: 0, dateCol: 0 } : resolveLegacyMisEnLigneColumn_(resolver);
   const C_DMIS     = combinedMisValidation || legacyMisValidation.dateCol;
+  const combinedPubValidation = resolveCombinedPublicationColumn_(resolver);
+  const legacyPubValidation = combinedPubValidation ? { checkboxCol: 0, dateCol: 0 } : resolveLegacyPublicationColumns_(resolver);
+  const C_DPUB     = combinedPubValidation || legacyPubValidation.dateCol;
   const C_DPUB     = colExact(HEADERS.STOCK.DATE_PUBLICATION);
 
   if (!C_SKU || !C_PRIX || !C_DVENTE) {
@@ -2299,7 +2636,7 @@ function validateAllSales() {
     const validateOk = C_VALIDATE ? (row[C_VALIDATE - 1] === true) : true;
     if (!validateOk) continue;
 
-    const vendu = C_VENDU ? (row[C_VENDU - 1] === true) : false;
+    const vendu = C_VENDU ? isStatusActiveValue_(row[C_VENDU - 1]) : false;
     if (!vendu) continue;
 
     const dateVente = row[C_DVENTE - 1];
