@@ -29,6 +29,9 @@ const HEADERS = Object.freeze({
     ARTICLE: 'ARTICLES',
     ARTICLE_ALT: 'ARTICLE',
     PRIX_VENTE: 'PRIX DE VENTE',
+    TAILLE_COLIS: 'TAILLE DU COLIS',
+    TAILLE_COLIS_ALT: 'TAILLE COLIS',
+    LOT: 'LOT',
     DATE_LIVRAISON: 'DATE DE LIVRAISON',
     DATE_MISE_EN_STOCK: 'DATE DE MISE EN STOCK',
     MIS_EN_LIGNE: 'MIS EN LIGNE',
@@ -48,6 +51,9 @@ const HEADERS = Object.freeze({
     SKU: 'SKU',
     PRIX_VENTE: 'PRIX VENTE',
     PRIX_VENTE_ALT: 'PRIX DE VENTE',
+    FRAIS_COLISSAGE: 'FRAIS DE COLISSAGE',
+    TAILLE_COLIS: 'TAILLE DU COLIS',
+    LOT: 'LOT',
     DELAI_IMMOBILISATION: "DÉLAI D'IMMOBILISATION",
     DELAI_MISE_EN_LIGNE: 'DELAI DE MISE EN LIGNE',
     DELAI_PUBLICATION: 'DELAI DE PUBLICATION',
@@ -55,6 +61,21 @@ const HEADERS = Object.freeze({
     RETOUR: 'RETOUR'
   })
 });
+
+const DEFAULT_VENTES_HEADERS = Object.freeze([
+  HEADERS.VENTES.ID,
+  HEADERS.VENTES.DATE_VENTE,
+  HEADERS.VENTES.ARTICLE,
+  HEADERS.VENTES.SKU,
+  HEADERS.VENTES.PRIX_VENTE,
+  HEADERS.VENTES.DELAI_IMMOBILISATION,
+  HEADERS.VENTES.DELAI_MISE_EN_LIGNE,
+  HEADERS.VENTES.DELAI_PUBLICATION,
+  HEADERS.VENTES.DELAI_VENTE,
+  HEADERS.VENTES.FRAIS_COLISSAGE,
+  HEADERS.VENTES.TAILLE_COLIS,
+  HEADERS.VENTES.LOT
+]);
 
 const HEADER_LABELS = Object.freeze({
   dms: HEADERS.STOCK.DATE_MISE_EN_STOCK,
@@ -221,6 +242,161 @@ function toNumber_(value) {
 
   const coerced = Number(value);
   return Number.isFinite(coerced) ? coerced : NaN;
+}
+
+function buildShippingFeeLookup_(ss) {
+  const frais = ss && typeof ss.getSheetByName === 'function' ? ss.getSheetByName('Frais') : null;
+  if (!frais) return null;
+
+  const lastRow = frais.getLastRow();
+  const lastCol = frais.getLastColumn();
+  if (lastRow < 2 || lastCol < 1) return null;
+
+  const headers = frais.getRange(1, 1, 1, lastCol).getValues()[0];
+  const resolver = makeHeaderResolver_(headers);
+  const colExact = resolver.colExact.bind(resolver);
+  const colWhere = resolver.colWhere.bind(resolver);
+
+  const COL_SIZE = colExact('TAILLE DU COLIS')
+    || colExact('TAILLE COLIS')
+    || colWhere(h => h.includes('taille') && h.includes('colis'));
+  const COL_LOT = colExact('LOT') || colWhere(h => h.includes('lot'));
+  const COL_FEE = colExact('FRAIS DE COLISSAGE')
+    || colWhere(h => h.includes('frais') && h.includes('colis'))
+    || colWhere(h => h.includes('frais') && h.includes('exped'));
+
+  if (!COL_SIZE || !COL_FEE) return null;
+
+  const sizeValues = frais.getRange(2, COL_SIZE, lastRow - 1, 1).getValues();
+  const lotValues = COL_LOT ? frais.getRange(2, COL_LOT, lastRow - 1, 1).getValues() : null;
+  const feeValues = frais.getRange(2, COL_FEE, lastRow - 1, 1).getValues();
+
+  if (sizeValues.length !== feeValues.length) return null;
+
+  const map = new Map();
+
+  for (let i = 0; i < sizeValues.length; i++) {
+    const sizeKey = normText_(sizeValues[i][0]);
+    if (!sizeKey) continue;
+
+    const lotKey = lotValues ? normText_(lotValues[i][0]) : '';
+    const fee = toNumber_(feeValues[i][0]);
+    if (!Number.isFinite(fee)) continue;
+
+    const key = sizeKey + '||' + lotKey;
+    map.set(key, fee);
+
+    if (lotKey && !map.has(sizeKey + '||')) {
+      map.set(sizeKey + '||', fee);
+    }
+  }
+
+  if (map.size === 0) return null;
+
+  return function lookup(size, lot) {
+    const sizeKey = normText_(size);
+    const lotKey = normText_(lot);
+    if (!sizeKey) return NaN;
+
+    if (lotKey) {
+      const exactKey = sizeKey + '||' + lotKey;
+      if (map.has(exactKey)) {
+        return map.get(exactKey);
+      }
+    }
+
+    const fallbackKey = sizeKey + '||';
+    if (map.has(fallbackKey)) {
+      return map.get(fallbackKey);
+    }
+
+    return NaN;
+  };
+}
+
+function applyShippingFeeToAchats_(ss, achatId, fee) {
+  if (!Number.isFinite(fee) || fee === 0) {
+    return;
+  }
+
+  const achats = ss && typeof ss.getSheetByName === 'function' ? ss.getSheetByName('Achats') : null;
+  if (!achats) return;
+
+  const lastRow = achats.getLastRow();
+  const lastCol = achats.getLastColumn();
+  if (lastRow < 2 || lastCol < 1) return;
+
+  const headers = achats.getRange(1, 1, 1, lastCol).getValues()[0];
+  const resolver = makeHeaderResolver_(headers);
+  const colExact = resolver.colExact.bind(resolver);
+  const colWhere = resolver.colWhere.bind(resolver);
+
+  const COL_ID = colExact(HEADERS.ACHATS.ID);
+  if (!COL_ID) return;
+
+  const idValues = achats.getRange(2, COL_ID, lastRow - 1, 1).getValues();
+  const targetId = String(achatId || '').trim();
+  if (!targetId) return;
+
+  let rowIndex = -1;
+  for (let i = 0; i < idValues.length; i++) {
+    const candidate = String(idValues[i][0] || '').trim();
+    if (candidate && candidate === targetId) {
+      rowIndex = i + 2;
+      break;
+    }
+  }
+
+  if (rowIndex < 2) return;
+
+  const COL_FRAIS = colExact(HEADERS.ACHATS.FRAIS_COLISSAGE)
+    || colWhere(h => h.includes('frais') && h.includes('colis'));
+  const COL_TOTAL = colExact(HEADERS.ACHATS.TOTAL_TTC)
+    || colWhere(h => h.includes('total') && h.includes('ttc'));
+  const COL_QTY = colExact(HEADERS.ACHATS.QUANTITE_RECUE)
+    || colExact(HEADERS.ACHATS.QUANTITE_RECUE_ALT)
+    || colWhere(h => h.includes('quantite'));
+  const COL_PRIX = colExact(HEADERS.ACHATS.PRIX_UNITAIRE_TTC)
+    || colWhere(h => h.includes('prix') && h.includes('ttc'));
+
+  let previousFrais = 0;
+  if (COL_FRAIS) {
+    previousFrais = toNumber_(achats.getRange(rowIndex, COL_FRAIS).getValue());
+    if (!Number.isFinite(previousFrais)) {
+      previousFrais = 0;
+    }
+  }
+
+  const newFrais = previousFrais + fee;
+  if (COL_FRAIS) {
+    achats.getRange(rowIndex, COL_FRAIS).setValue(newFrais);
+  }
+
+  if (!COL_TOTAL) {
+    return;
+  }
+
+  const totalCell = achats.getRange(rowIndex, COL_TOTAL);
+  let baseTotal = NaN;
+
+  if (COL_QTY && COL_PRIX) {
+    const qty = toNumber_(achats.getRange(rowIndex, COL_QTY).getValue());
+    const price = toNumber_(achats.getRange(rowIndex, COL_PRIX).getValue());
+    if (Number.isFinite(qty) && Number.isFinite(price)) {
+      baseTotal = qty * price;
+    }
+  }
+
+  if (!Number.isFinite(baseTotal)) {
+    const currentTotal = toNumber_(totalCell.getValue());
+    if (Number.isFinite(currentTotal)) {
+      const baseline = currentTotal - previousFrais;
+      baseTotal = Number.isFinite(baseline) ? baseline : currentTotal;
+    }
+  }
+
+  const totalToSet = Number.isFinite(baseTotal) ? baseTotal + newFrais : newFrais;
+  totalCell.setValue(totalToSet);
 }
 
 function enforceChronologicalDates_(sheet, row, cols, options) {
@@ -938,6 +1114,10 @@ function handleStock(e) {
   const C_SKU     = colExact(HEADERS.STOCK.SKU) || colExact(HEADERS.STOCK.REFERENCE); // B/C
   const C_PRIX    = colExact(HEADERS.STOCK.PRIX_VENTE)
     || colWhere(h => h.includes("prix") && h.includes("vente"));
+  const C_TAILLE  = colExact(HEADERS.STOCK.TAILLE_COLIS)
+    || colExact(HEADERS.STOCK.TAILLE_COLIS_ALT)
+    || colWhere(h => h.includes('taille') && h.includes('colis'));
+  const C_LOT     = colExact(HEADERS.STOCK.LOT) || colWhere(h => h.includes('lot'));
   const C_DMS     = colExact(HEADERS.STOCK.DATE_MISE_EN_STOCK);
   const C_MIS     = colExact(HEADERS.STOCK.MIS_EN_LIGNE);
   const C_DMIS    = colExact(HEADERS.STOCK.DATE_MISE_EN_LIGNE);
@@ -1235,37 +1415,83 @@ function handleStock(e) {
 
     if (!ensureValidPriceOrWarn_(sh, r, C_PRIX)) return;
 
+    if (!C_TAILLE) {
+      revertCheckbox_(e.range, e.oldValue);
+      ss.toast(`Colonne ${HEADERS.STOCK.TAILLE_COLIS} introuvable.`, 'Stock', 6);
+      return;
+    }
+
+    const tailleValue = String(sh.getRange(r, C_TAILLE).getDisplayValue() || '').trim();
+    if (!tailleValue) {
+      revertCheckbox_(e.range, e.oldValue);
+      ss.toast(`Indique la ${HEADERS.STOCK.TAILLE_COLIS} avant de valider.`, 'Stock', 6);
+      return;
+    }
+
+    const lotValue = C_LOT ? String(sh.getRange(r, C_LOT).getDisplayValue() || '').trim() : '';
+    const shippingLookup = buildShippingFeeLookup_(ss);
+    if (!shippingLookup) {
+      revertCheckbox_(e.range, e.oldValue);
+      ss.toast('Impossible de calculer les frais de colissage : configure la feuille "Frais".', 'Stock', 6);
+      return;
+    }
+
+    const fraisColis = shippingLookup(tailleValue, lotValue);
+    if (!Number.isFinite(fraisColis)) {
+      revertCheckbox_(e.range, e.oldValue);
+      const lotMessage = lotValue ? ` / lot ${lotValue}` : '';
+      ss.toast(`Frais de colissage introuvables pour la taille ${tailleValue}${lotMessage}.`, 'Stock', 6);
+      return;
+    }
+
     const valDate = sh.getRange(r, C_DVENTE).getValue();
     if (!(valDate instanceof Date) || isNaN(valDate.getTime())) return;
 
     const baseToDmsMap = buildBaseToStockDate_(ss);
-    exportVente_(null, r, C_ID, C_LABEL, C_SKU, C_PRIX, C_DVENTE, C_STAMPV, baseToDmsMap);
+    exportVente_(
+      null,
+      r,
+      C_ID,
+      C_LABEL,
+      C_SKU,
+      C_PRIX,
+      C_DVENTE,
+      C_STAMPV,
+      baseToDmsMap,
+      { shipping: { size: tailleValue, lot: lotValue, fee: fraisColis } }
+    );
     return;
   }
 }
 
 // Déplace la ligne de "Stock" vers "Ventes" (et calcule les délais)
-function exportVente_(e, row, C_ID, C_LABEL, C_SKU, C_PRIX, C_DVENTE, C_STAMPV, baseToDmsMap) {
+function exportVente_(e, row, C_ID, C_LABEL, C_SKU, C_PRIX, C_DVENTE, C_STAMPV, baseToDmsMap, options) {
   const ss = SpreadsheetApp.getActive();
   const sh = ss.getSheetByName("Stock");
   if (!sh) return;
 
+  const opts = options || {};
+  const shipping = opts.shipping || null;
+
   const ventes = ss.getSheetByName("Ventes") || ss.insertSheet("Ventes");
   if (ventes.getLastRow() === 0) {
-    ventes.getRange(1, 1, 1, 9).setValues([[
-      HEADERS.VENTES.ID,
-      HEADERS.VENTES.DATE_VENTE,
-      HEADERS.VENTES.ARTICLE,
-      HEADERS.VENTES.SKU,
-      HEADERS.VENTES.PRIX_VENTE,
-      HEADERS.VENTES.DELAI_IMMOBILISATION,
-      HEADERS.VENTES.DELAI_MISE_EN_LIGNE,
-      HEADERS.VENTES.DELAI_PUBLICATION,
-      HEADERS.VENTES.DELAI_VENTE
-    ]]);
+    ventes.getRange(1, 1, 1, DEFAULT_VENTES_HEADERS.length).setValues([DEFAULT_VENTES_HEADERS]);
   }
 
-  const ventesHeaders = ventes.getRange(1, 1, 1, Math.max(9, ventes.getLastColumn())).getValues()[0];
+  const headerWidth = Math.max(DEFAULT_VENTES_HEADERS.length, ventes.getLastColumn());
+  const headerRange = ventes.getRange(1, 1, 1, headerWidth);
+  const ventesHeaders = headerRange.getValues()[0];
+  let headerMutated = false;
+  for (let i = 0; i < DEFAULT_VENTES_HEADERS.length; i++) {
+    if (!ventesHeaders[i]) {
+      ventesHeaders[i] = DEFAULT_VENTES_HEADERS[i];
+      headerMutated = true;
+    }
+  }
+  if (headerMutated) {
+    headerRange.setValues([ventesHeaders]);
+  }
+
   const ventesResolver = makeHeaderResolver_(ventesHeaders);
   const ventesExact = ventesResolver.colExact.bind(ventesResolver);
   const ventesWhere = ventesResolver.colWhere.bind(ventesResolver);
@@ -1280,6 +1506,12 @@ function exportVente_(e, row, C_ID, C_LABEL, C_SKU, C_PRIX, C_DVENTE, C_STAMPV, 
   const COL_PRIX_VENTE  = ventesExact(HEADERS.VENTES.PRIX_VENTE)
     || ventesExact(HEADERS.VENTES.PRIX_VENTE_ALT)
     || ventesWhere(h => h.includes('prix') && h.includes('vente'));
+  const COL_FRAIS_VENTE = ventesExact(HEADERS.VENTES.FRAIS_COLISSAGE)
+    || ventesWhere(h => h.includes('frais') && h.includes('colis'));
+  const COL_TAILLE_VENTE = ventesExact(HEADERS.VENTES.TAILLE_COLIS)
+    || ventesWhere(h => h.includes('taille') && h.includes('colis'));
+  const COL_LOT_VENTE   = ventesExact(HEADERS.VENTES.LOT)
+    || ventesWhere(h => h.includes('lot'));
   const COL_DELAI_IMM   = ventesExact(HEADERS.VENTES.DELAI_IMMOBILISATION)
     || ventesWhere(h => h.includes('immobilisation'));
   const COL_DELAI_ML    = ventesExact(HEADERS.VENTES.DELAI_MISE_EN_LIGNE)
@@ -1288,7 +1520,7 @@ function exportVente_(e, row, C_ID, C_LABEL, C_SKU, C_PRIX, C_DVENTE, C_STAMPV, 
     || ventesWhere(h => h.includes('publication'));
   const COL_DELAI_VENTE = ventesExact(HEADERS.VENTES.DELAI_VENTE)
     || ventesWhere(h => h.includes('delai') && h.includes('vente'));
-  const widthVentes     = Math.max(ventes.getLastColumn(), 9);
+  const widthVentes     = Math.max(ventesHeaders.length, DEFAULT_VENTES_HEADERS.length, ventes.getLastColumn());
 
   const dateCell = sh.getRange(row, C_DVENTE);
   const dateV = dateCell.getValue();
@@ -1352,6 +1584,15 @@ function exportVente_(e, row, C_ID, C_LABEL, C_SKU, C_PRIX, C_DVENTE, C_STAMPV, 
   if (COL_ARTICLE) newRow[COL_ARTICLE - 1] = label;
   if (COL_SKU_VENTE) newRow[COL_SKU_VENTE - 1] = sku;
   if (COL_PRIX_VENTE) newRow[COL_PRIX_VENTE - 1] = prix;
+  if (COL_FRAIS_VENTE && shipping && Number.isFinite(shipping.fee)) {
+    newRow[COL_FRAIS_VENTE - 1] = shipping.fee;
+  }
+  if (COL_TAILLE_VENTE && shipping && shipping.size !== undefined) {
+    newRow[COL_TAILLE_VENTE - 1] = shipping.size;
+  }
+  if (COL_LOT_VENTE && shipping && shipping.lot) {
+    newRow[COL_LOT_VENTE - 1] = shipping.lot;
+  }
   if (COL_DELAI_IMM) newRow[COL_DELAI_IMM - 1] = delaiImm;
   if (COL_DELAI_ML) newRow[COL_DELAI_ML - 1] = delaiML;
   if (COL_DELAI_PUB) newRow[COL_DELAI_PUB - 1] = delaiPub;
@@ -1363,6 +1604,10 @@ function exportVente_(e, row, C_ID, C_LABEL, C_SKU, C_PRIX, C_DVENTE, C_STAMPV, 
   if (lastV > 2 && COL_DATE_VENTE) {
     ventes.getRange(2, 1, lastV - 1, ventes.getLastColumn()).sort([{column: COL_DATE_VENTE, ascending: false}]);
     ventes.getRange(2, COL_DATE_VENTE, lastV - 1, 1).setNumberFormat('dd/MM/yyyy');
+  }
+
+  if (shipping && Number.isFinite(shipping.fee)) {
+    applyShippingFeeToAchats_(ss, idVal, shipping.fee);
   }
 
   if (C_STAMPV) sh.getRange(row, C_STAMPV).setValue(new Date());
@@ -1654,6 +1899,10 @@ function validateAllSales() {
   const C_SKU      = colExact(HEADERS.STOCK.SKU) || colExact(HEADERS.STOCK.REFERENCE);
   const C_PRIX     = colExact(HEADERS.STOCK.PRIX_VENTE)
     || colWhere(h => h.includes("prix") && h.includes("vente"));
+  const C_TAILLE   = colExact(HEADERS.STOCK.TAILLE_COLIS)
+    || colExact(HEADERS.STOCK.TAILLE_COLIS_ALT)
+    || colWhere(h => h.includes('taille') && h.includes('colis'));
+  const C_LOT      = colExact(HEADERS.STOCK.LOT) || colWhere(h => h.includes('lot'));
   const C_DVENTE   = colExact(HEADERS.STOCK.DATE_VENTE) || 10;
   const C_VENDU    = colExact(HEADERS.STOCK.VENDU);
   const C_VALIDATE = colExact(HEADERS.STOCK.VALIDER_SAISIE)
@@ -1672,26 +1921,47 @@ function validateAllSales() {
     return;
   }
 
+  if (!C_TAILLE) {
+    SpreadsheetApp.getUi().alert(
+      'Validation groupée',
+      `Colonne ${HEADERS.STOCK.TAILLE_COLIS} introuvable.`,
+      SpreadsheetApp.getUi().ButtonSet.OK
+    );
+    return;
+  }
+
   const lastCol = stock.getLastColumn();
   const data = stock.getRange(2, 1, last - 1, lastCol).getValues();
   const baseToDmsMap = buildBaseToStockDate_(ss);
+  const shippingLookup = buildShippingFeeLookup_(ss);
+  if (!shippingLookup) {
+    SpreadsheetApp.getUi().alert(
+      'Validation groupée',
+      'Feuille "Frais" introuvable ou incomplète. Impossible de calculer les frais de colissage.',
+      SpreadsheetApp.getUi().ButtonSet.OK
+    );
+    return;
+  }
 
   const ventes = ss.getSheetByName('Ventes') || ss.insertSheet('Ventes');
   if (ventes.getLastRow() === 0) {
-    ventes.getRange(1,1,1,9).setValues([[
-      HEADERS.VENTES.ID,
-      HEADERS.VENTES.DATE_VENTE,
-      HEADERS.VENTES.ARTICLE,
-      HEADERS.VENTES.SKU,
-      HEADERS.VENTES.PRIX_VENTE,
-      HEADERS.VENTES.DELAI_IMMOBILISATION,
-      HEADERS.VENTES.DELAI_MISE_EN_LIGNE,
-      HEADERS.VENTES.DELAI_PUBLICATION,
-      HEADERS.VENTES.DELAI_VENTE
-    ]]);
+    ventes.getRange(1,1,1,DEFAULT_VENTES_HEADERS.length).setValues([DEFAULT_VENTES_HEADERS]);
   }
 
-  const ventesHeaders = ventes.getRange(1, 1, 1, Math.max(9, ventes.getLastColumn())).getValues()[0];
+  const headerWidth = Math.max(DEFAULT_VENTES_HEADERS.length, ventes.getLastColumn());
+  const headerRange = ventes.getRange(1, 1, 1, headerWidth);
+  const ventesHeaders = headerRange.getValues()[0];
+  let headerMutated = false;
+  for (let i = 0; i < DEFAULT_VENTES_HEADERS.length; i++) {
+    if (!ventesHeaders[i]) {
+      ventesHeaders[i] = DEFAULT_VENTES_HEADERS[i];
+      headerMutated = true;
+    }
+  }
+  if (headerMutated) {
+    headerRange.setValues([ventesHeaders]);
+  }
+
   const ventesResolver = makeHeaderResolver_(ventesHeaders);
   const ventesExact = ventesResolver.colExact.bind(ventesResolver);
   const ventesWhere = ventesResolver.colWhere.bind(ventesResolver);
@@ -1706,6 +1976,12 @@ function validateAllSales() {
   const COL_PRIX_VENTE  = ventesExact(HEADERS.VENTES.PRIX_VENTE)
     || ventesExact(HEADERS.VENTES.PRIX_VENTE_ALT)
     || ventesWhere(h => h.includes('prix') && h.includes('vente'));
+  const COL_FRAIS_VENTE = ventesExact(HEADERS.VENTES.FRAIS_COLISSAGE)
+    || ventesWhere(h => h.includes('frais') && h.includes('colis'));
+  const COL_TAILLE_VENTE = ventesExact(HEADERS.VENTES.TAILLE_COLIS)
+    || ventesWhere(h => h.includes('taille') && h.includes('colis'));
+  const COL_LOT_VENTE   = ventesExact(HEADERS.VENTES.LOT)
+    || ventesWhere(h => h.includes('lot'));
   const COL_DELAI_IMM   = ventesExact(HEADERS.VENTES.DELAI_IMMOBILISATION)
     || ventesWhere(h => h.includes('immobilisation'));
   const COL_DELAI_ML    = ventesExact(HEADERS.VENTES.DELAI_MISE_EN_LIGNE)
@@ -1714,12 +1990,14 @@ function validateAllSales() {
     || ventesWhere(h => h.includes('publication'));
   const COL_DELAI_VENTE = ventesExact(HEADERS.VENTES.DELAI_VENTE)
     || ventesWhere(h => h.includes('delai') && h.includes('vente'));
-  const widthVentes     = Math.max(ventes.getLastColumn(), 9);
+  const widthVentes     = Math.max(ventesHeaders.length, DEFAULT_VENTES_HEADERS.length, ventes.getLastColumn());
 
   const toAppend = [];
   const rowsToDel = [];
   let moved = 0;
   const invalidChronoRows = [];
+  const missingShippingRows = [];
+  const unknownShippingRows = [];
 
   const chronoCols = {
     dms: C_DMS,
@@ -1767,6 +2045,27 @@ function validateAllSales() {
     const label = row[C_LABEL - 1];
     const sku   = C_SKU ? row[C_SKU - 1] : "";
 
+    const tailleRaw = C_TAILLE ? row[C_TAILLE - 1] : '';
+    const tailleVal = String(tailleRaw === null || tailleRaw === undefined ? '' : tailleRaw).trim();
+    if (!tailleVal) {
+      if (C_VALIDATE) {
+        stock.getRange(rowIndex, C_VALIDATE).setValue(false);
+      }
+      missingShippingRows.push(rowIndex);
+      continue;
+    }
+
+    const lotRaw = C_LOT ? row[C_LOT - 1] : '';
+    const lotVal = String(lotRaw === null || lotRaw === undefined ? '' : lotRaw).trim();
+    const fraisColis = shippingLookup(tailleVal, lotVal);
+    if (!Number.isFinite(fraisColis)) {
+      if (C_VALIDATE) {
+        stock.getRange(rowIndex, C_VALIDATE).setValue(false);
+      }
+      unknownShippingRows.push({ row: rowIndex, size: tailleVal, lot: lotVal });
+      continue;
+    }
+
     let dateMiseStock = C_DMS  ? row[C_DMS  - 1] : null;
     if (!(dateMiseStock instanceof Date) || isNaN(dateMiseStock)) {
       const base = extractSkuBase_(sku);
@@ -1791,12 +2090,17 @@ function validateAllSales() {
     if (COL_ARTICLE) newRow[COL_ARTICLE - 1] = label;
     if (COL_SKU_VENTE) newRow[COL_SKU_VENTE - 1] = sku;
     if (COL_PRIX_VENTE) newRow[COL_PRIX_VENTE - 1] = prix;
+    if (COL_FRAIS_VENTE) newRow[COL_FRAIS_VENTE - 1] = fraisColis;
+    if (COL_TAILLE_VENTE) newRow[COL_TAILLE_VENTE - 1] = tailleVal;
+    if (COL_LOT_VENTE && lotVal) newRow[COL_LOT_VENTE - 1] = lotVal;
     if (COL_DELAI_IMM) newRow[COL_DELAI_IMM - 1] = dImmobil;
     if (COL_DELAI_ML) newRow[COL_DELAI_ML - 1] = dLigne;
     if (COL_DELAI_PUB) newRow[COL_DELAI_PUB - 1] = dPub;
     if (COL_DELAI_VENTE) newRow[COL_DELAI_VENTE - 1] = dVente;
 
     toAppend.push(newRow);
+
+    applyShippingFeeToAchats_(ss, idValue, fraisColis);
 
     rowsToDel.push(rowIndex);
     moved++;
@@ -1829,5 +2133,25 @@ function validateAllSales() {
     const extra = invalidChronoRows.length > 1 ? ` (et ${invalidChronoRows.length - 1} autre(s) ligne(s))` : '';
     const message = `Validation bloquée - ligne ${first.row}: ${first.message}${extra}`;
     SpreadsheetApp.getActive().toast(message, 'Validation groupée', 8);
+  }
+
+  if (missingShippingRows.length > 0) {
+    const list = missingShippingRows.join(', ');
+    SpreadsheetApp.getActive().toast(
+      `Validation bloquée - renseigne ${HEADERS.STOCK.TAILLE_COLIS} pour la/les ligne(s) ${list}.`,
+      'Validation groupée',
+      8
+    );
+  }
+
+  if (unknownShippingRows.length > 0) {
+    const first = unknownShippingRows[0];
+    const lotInfo = first.lot ? ` / lot ${first.lot}` : '';
+    const extra = unknownShippingRows.length > 1 ? ` (et ${unknownShippingRows.length - 1} autre(s) ligne(s))` : '';
+    SpreadsheetApp.getActive().toast(
+      `Frais de colissage introuvables - ligne ${first.row} (${first.size}${lotInfo})${extra}.`,
+      'Validation groupée',
+      8
+    );
   }
 }

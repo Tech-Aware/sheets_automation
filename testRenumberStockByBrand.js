@@ -56,12 +56,26 @@ class MockRange {
   setValues(values) {
     for (let r = 0; r < values.length; r++) {
       const rowIdx = this.row + r;
+      if (rowIdx === 1) {
+        for (let c = 0; c < values[r].length; c++) {
+          const colIdx = this.col + c - 1;
+          if (colIdx >= this.sheet.header.length) {
+            this.sheet.header.length = colIdx + 1;
+          }
+          this.sheet.header[colIdx] = values[r][c];
+        }
+        continue;
+      }
+
       const targetIdx = rowIdx - 2;
-      if (!this.sheet.rows[targetIdx]) {
-        this.sheet.rows[targetIdx] = [];
+      while (this.sheet.rows.length <= targetIdx) {
+        this.sheet.rows.push([]);
       }
       for (let c = 0; c < values[r].length; c++) {
         const colIdx = this.col + c - 1;
+        if (colIdx >= this.sheet.header.length) {
+          this.sheet.header.length = colIdx + 1;
+        }
         this.sheet.rows[targetIdx][colIdx] = values[r][c];
       }
     }
@@ -99,6 +113,14 @@ class MockRange {
     return this;
   }
 
+  clearDataValidations() {
+    return this;
+  }
+
+  sort() {
+    return this;
+  }
+
   getRow() {
     return this.row;
   }
@@ -133,6 +155,13 @@ class MockSheet {
 
   getRange(row, col, numRows, numCols) {
     return new MockRange(this, row, col, numRows, numCols);
+  }
+
+  deleteRow(rowNumber) {
+    const idx = rowNumber - 2;
+    if (idx >= 0 && idx < this.rows.length) {
+      this.rows.splice(idx, 1);
+    }
   }
 }
 
@@ -385,4 +414,237 @@ console.log('Existing SKUs preserved and new suffix assigned correctly.');
 
   assert.strictEqual(sheet.rows[0][totalCol], 160);
   console.log('handleAchats keeps existing total baseline when price/qty are missing.');
+})();
+
+(() => {
+  const saleDate = vm.runInNewContext('new Date("2023-01-02T00:00:00Z")', sandbox);
+  const stockHeaders = [
+    HEADERS.STOCK.ID,
+    HEADERS.STOCK.SKU,
+    HEADERS.STOCK.TAILLE_COLIS,
+    HEADERS.STOCK.LOT,
+    HEADERS.STOCK.VENDU,
+    HEADERS.STOCK.DATE_VENTE,
+    HEADERS.STOCK.PRIX_VENTE,
+    HEADERS.STOCK.VALIDER_SAISIE
+  ];
+  const stockRows = [[
+    'ACHAT-1',
+    'SKU-1',
+    'M',
+    'LOT1',
+    true,
+    saleDate,
+    120,
+    false
+  ]];
+
+  const achatsHeaders = [
+    HEADERS.ACHATS.ID,
+    HEADERS.ACHATS.QUANTITE_RECUE,
+    HEADERS.ACHATS.PRIX_UNITAIRE_TTC,
+    HEADERS.ACHATS.TOTAL_TTC,
+    HEADERS.ACHATS.FRAIS_COLISSAGE
+  ];
+  const achatsRows = [[
+    'ACHAT-1',
+    2,
+    100,
+    200,
+    0
+  ]];
+
+  const fraisHeaders = ['TAILLE DU COLIS', 'LOT', 'FRAIS DE COLISSAGE'];
+  const fraisRows = [[
+    'M',
+    'LOT1',
+    5
+  ]];
+
+  const ventesHeaders = [
+    HEADERS.VENTES.ID,
+    HEADERS.VENTES.DATE_VENTE,
+    HEADERS.VENTES.ARTICLE,
+    HEADERS.VENTES.SKU,
+    HEADERS.VENTES.PRIX_VENTE,
+    HEADERS.VENTES.DELAI_IMMOBILISATION,
+    HEADERS.VENTES.DELAI_MISE_EN_LIGNE,
+    HEADERS.VENTES.DELAI_PUBLICATION,
+    HEADERS.VENTES.DELAI_VENTE,
+    HEADERS.VENTES.FRAIS_COLISSAGE,
+    HEADERS.VENTES.TAILLE_COLIS,
+    HEADERS.VENTES.LOT
+  ];
+
+  const stock = new MockSheet('Stock', stockHeaders, stockRows);
+  const achats = new MockSheet('Achats', achatsHeaders, achatsRows);
+  const frais = new MockSheet('Frais', fraisHeaders, fraisRows);
+  const ventes = new MockSheet('Ventes', ventesHeaders, []);
+
+  const mockSpreadsheet = {
+    sheets: { Stock: stock, Achats: achats, Frais: frais, Ventes: ventes },
+    toastMessages: [],
+    getSheetByName(name) {
+      return this.sheets[name] || null;
+    },
+    insertSheet(name) {
+      const sheet = new MockSheet(name, [], []);
+      this.sheets[name] = sheet;
+      return sheet;
+    },
+    toast(message) {
+      this.toastMessages.push(message);
+    },
+    getActiveSheet() {
+      return stock;
+    },
+    getUi() {
+      return { alert() {}, ButtonSet: { OK: 'OK' } };
+    }
+  };
+
+  activeSpreadsheet = mockSpreadsheet;
+
+  const validerCol = stockHeaders.indexOf(HEADERS.STOCK.VALIDER_SAISIE) + 1;
+  stock.rows[0][validerCol - 1] = true;
+
+  const event = {
+    source: mockSpreadsheet,
+    range: stock.getRange(2, validerCol),
+    value: 'TRUE',
+    oldValue: 'FALSE'
+  };
+
+  const dateCol = stockHeaders.indexOf(HEADERS.STOCK.DATE_VENTE) + 1;
+  const rawDate = stock.getRange(2, dateCol).getValue();
+  assert.strictEqual(Object.prototype.toString.call(rawDate), '[object Date]');
+  assert.strictEqual(Object.prototype.toString.call(sandbox.getDateOrNull_(rawDate)), '[object Date]');
+
+  sandbox.handleStock(event);
+
+  assert.strictEqual(mockSpreadsheet.toastMessages.length, 0);
+  assert.strictEqual(stock.rows.length, 0);
+  const ventesFraisCol = ventes.header.indexOf(HEADERS.VENTES.FRAIS_COLISSAGE);
+  assert.strictEqual(ventes.rows[0][ventesFraisCol], 5);
+  const ventesTailleCol = ventes.header.indexOf(HEADERS.VENTES.TAILLE_COLIS);
+  assert.strictEqual(ventes.rows[0][ventesTailleCol], 'M');
+  const ventesLotCol = ventes.header.indexOf(HEADERS.VENTES.LOT);
+  assert.strictEqual(ventes.rows[0][ventesLotCol], 'LOT1');
+
+  const totalCol = achatsHeaders.indexOf(HEADERS.ACHATS.TOTAL_TTC);
+  assert.strictEqual(achats.rows[0][totalCol], 205);
+  const fraisCol = achatsHeaders.indexOf(HEADERS.ACHATS.FRAIS_COLISSAGE);
+  assert.strictEqual(achats.rows[0][fraisCol], 5);
+  console.log('handleStock applies shipping fees to ventes and achats totals.');
+})();
+
+(() => {
+  const saleDate = vm.runInNewContext('new Date("2023-01-03T00:00:00Z")', sandbox);
+  const stockHeaders = [
+    HEADERS.STOCK.ID,
+    HEADERS.STOCK.SKU,
+    HEADERS.STOCK.TAILLE_COLIS,
+    HEADERS.STOCK.LOT,
+    HEADERS.STOCK.VENDU,
+    HEADERS.STOCK.DATE_VENTE,
+    HEADERS.STOCK.PRIX_VENTE,
+    HEADERS.STOCK.VALIDER_SAISIE
+  ];
+  const stockRows = [[
+    'ACHAT-2',
+    'SKU-2',
+    '',
+    '',
+    true,
+    saleDate,
+    80,
+    false
+  ]];
+
+  const achatsHeaders = [
+    HEADERS.ACHATS.ID,
+    HEADERS.ACHATS.QUANTITE_RECUE,
+    HEADERS.ACHATS.PRIX_UNITAIRE_TTC,
+    HEADERS.ACHATS.TOTAL_TTC,
+    HEADERS.ACHATS.FRAIS_COLISSAGE
+  ];
+  const achatsRows = [[
+    'ACHAT-2',
+    2,
+    80,
+    160,
+    0
+  ]];
+
+  const fraisHeaders = ['TAILLE DU COLIS', 'LOT', 'FRAIS DE COLISSAGE'];
+  const fraisRows = [[
+    'M',
+    'LOT1',
+    5
+  ]];
+
+  const ventesHeaders = [
+    HEADERS.VENTES.ID,
+    HEADERS.VENTES.DATE_VENTE,
+    HEADERS.VENTES.ARTICLE,
+    HEADERS.VENTES.SKU,
+    HEADERS.VENTES.PRIX_VENTE,
+    HEADERS.VENTES.DELAI_IMMOBILISATION,
+    HEADERS.VENTES.DELAI_MISE_EN_LIGNE,
+    HEADERS.VENTES.DELAI_PUBLICATION,
+    HEADERS.VENTES.DELAI_VENTE,
+    HEADERS.VENTES.FRAIS_COLISSAGE,
+    HEADERS.VENTES.TAILLE_COLIS,
+    HEADERS.VENTES.LOT
+  ];
+
+  const stock = new MockSheet('Stock', stockHeaders, stockRows);
+  const achats = new MockSheet('Achats', achatsHeaders, achatsRows);
+  const frais = new MockSheet('Frais', fraisHeaders, fraisRows);
+  const ventes = new MockSheet('Ventes', ventesHeaders, []);
+
+  const mockSpreadsheet = {
+    sheets: { Stock: stock, Achats: achats, Frais: frais, Ventes: ventes },
+    toastMessages: [],
+    getSheetByName(name) {
+      return this.sheets[name] || null;
+    },
+    insertSheet(name) {
+      const sheet = new MockSheet(name, [], []);
+      this.sheets[name] = sheet;
+      return sheet;
+    },
+    toast(message) {
+      this.toastMessages.push(message);
+    },
+    getActiveSheet() {
+      return stock;
+    },
+    getUi() {
+      return { alert() {}, ButtonSet: { OK: 'OK' } };
+    }
+  };
+
+  activeSpreadsheet = mockSpreadsheet;
+
+  const validerCol = stockHeaders.indexOf(HEADERS.STOCK.VALIDER_SAISIE) + 1;
+  stock.rows[0][validerCol - 1] = true;
+
+  const event = {
+    source: mockSpreadsheet,
+    range: stock.getRange(2, validerCol),
+    value: 'TRUE',
+    oldValue: 'FALSE'
+  };
+
+  sandbox.handleStock(event);
+
+  assert.strictEqual(stock.rows.length, 1);
+  assert.strictEqual(stock.rows[0][validerCol - 1], false);
+  assert.strictEqual(ventes.rows.length, 0);
+  const totalCol = achatsHeaders.indexOf(HEADERS.ACHATS.TOTAL_TTC);
+  assert.strictEqual(achats.rows[0][totalCol], 160);
+  const fraisCol = achatsHeaders.indexOf(HEADERS.ACHATS.FRAIS_COLISSAGE);
+  assert.strictEqual(achats.rows[0][fraisCol], 0);
+  console.log('handleStock blocks validation when shipping size is missing.');
 })();
