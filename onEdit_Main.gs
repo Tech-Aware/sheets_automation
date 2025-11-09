@@ -357,6 +357,25 @@ function isStatusActiveValue_(value) {
   return !!date;
 }
 
+function toEditOldValue_(value) {
+  if (value === true) {
+    return 'TRUE';
+  }
+  if (value === false) {
+    return 'FALSE';
+  }
+  if (value === '' || value === null || value === undefined) {
+    return '';
+  }
+  if (value instanceof Date) {
+    return new Date(value.getTime());
+  }
+  if (typeof value === 'string' || typeof value === 'number') {
+    return value;
+  }
+  return '';
+}
+
 function toNumber_(value) {
   if (typeof value === 'number') {
     return Number.isFinite(value) ? value : NaN;
@@ -2448,6 +2467,170 @@ function exportVente_(e, row, C_ID, C_LABEL, C_SKU, C_PRIX, C_DVENTE, C_STAMPV, 
   sh.deleteRow(row);
 }
 
+function bulkToggleStockStatuses() {
+  const ss = SpreadsheetApp.getActive();
+  const ui = SpreadsheetApp.getUi();
+  const sheet = ss.getActiveSheet();
+
+  if (!sheet || sheet.getName() !== 'Stock') {
+    ui.alert('Actions groupées', 'Cette action ne fonctionne que sur la feuille "Stock".', ui.ButtonSet.OK);
+    return;
+  }
+
+  const selection = ss.getSelection();
+  const rangeList = selection ? selection.getActiveRangeList() : null;
+  const ranges = rangeList ? rangeList.getRanges() : [];
+  if (!ranges.length) {
+    const active = selection && selection.getActiveRange();
+    if (active) {
+      ranges.push(active);
+    }
+  }
+
+  if (!ranges.length) {
+    ui.alert('Actions groupées', 'Sélectionnez d\'abord au moins une cellule.', ui.ButtonSet.OK);
+    return;
+  }
+
+  const rowSet = new Set();
+  ranges.forEach(range => {
+    const startRow = Math.max(2, range.getRow());
+    const endRow = range.getLastRow();
+    for (let row = startRow; row <= endRow; row++) {
+      rowSet.add(row);
+    }
+  });
+
+  if (!rowSet.size) {
+    ui.alert('Actions groupées', 'Aucune ligne sélectionnée en dehors de l\'en-tête.', ui.ButtonSet.OK);
+    return;
+  }
+
+  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  const resolver = makeHeaderResolver_(headers);
+
+  const combinedMisCol = resolveCombinedMisEnLigneColumn_(resolver);
+  const legacyMisCols = combinedMisCol ? { checkboxCol: 0, dateCol: 0 } : resolveLegacyMisEnLigneColumn_(resolver);
+  const C_MIS = combinedMisCol || legacyMisCols.checkboxCol;
+
+  const combinedPubCol = resolveCombinedPublicationColumn_(resolver);
+  const legacyPubCols = combinedPubCol ? { checkboxCol: 0, dateCol: 0 } : resolveLegacyPublicationColumns_(resolver);
+  const C_PUB = combinedPubCol || legacyPubCols.checkboxCol;
+
+  const combinedVenduCol = resolveCombinedVenduColumn_(resolver);
+  const legacyVenduCols = combinedVenduCol ? { checkboxCol: 0, dateCol: 0 } : resolveLegacyVenduColumns_(resolver);
+  const C_VENDU = combinedVenduCol || legacyVenduCols.checkboxCol;
+
+  const candidates = [
+    { key: 'mis', column: C_MIS, label: C_MIS ? (headers[C_MIS - 1] || HEADERS.STOCK.MIS_EN_LIGNE) : '' },
+    { key: 'pub', column: C_PUB, label: C_PUB ? (headers[C_PUB - 1] || HEADERS.STOCK.PUBLIE) : '' },
+    { key: 'vente', column: C_VENDU, label: C_VENDU ? (headers[C_VENDU - 1] || HEADERS.STOCK.VENDU) : '' }
+  ].filter(item => item.column);
+
+  if (!candidates.length) {
+    ui.alert('Actions groupées', 'Impossible de trouver les colonnes de statut à cocher.', ui.ButtonSet.OK);
+    return;
+  }
+
+  const selectedActions = [];
+  for (let i = 0; i < candidates.length; i++) {
+    const item = candidates[i];
+    const prompt = ui.alert(
+      'Actions groupées',
+      `Cocher "${item.label}" pour les ${rowSet.size} ligne(s) sélectionnée(s) ?`,
+      ui.ButtonSet.YES_NO_CANCEL
+    );
+    if (prompt === ui.Button.CANCEL) {
+      return;
+    }
+    if (prompt === ui.Button.YES) {
+      selectedActions.push(item);
+    }
+  }
+
+  if (!selectedActions.length) {
+    ui.alert('Actions groupées', 'Aucune action sélectionnée.', ui.ButtonSet.OK);
+    return;
+  }
+
+  const stats = new Map();
+  selectedActions.forEach(item => {
+    stats.set(item.key, { label: item.label, applied: 0, already: 0, failed: 0 });
+  });
+
+  const pendingChecks = [];
+  const errors = [];
+  const rows = Array.from(rowSet).sort((a, b) => a - b);
+
+  rows.forEach(row => {
+    selectedActions.forEach(action => {
+      const column = action.column;
+      const stat = stats.get(action.key);
+      if (!column) {
+        stat.failed++;
+        return;
+      }
+
+      const cell = sheet.getRange(row, column);
+      const currentValue = cell.getValue();
+      if (isStatusActiveValue_(currentValue)) {
+        stat.already++;
+        return;
+      }
+
+      const oldValue = toEditOldValue_(currentValue);
+      try {
+        cell.setValue(true);
+        pendingChecks.push({ key: action.key, row, column });
+        handleStock({
+          source: ss,
+          range: cell,
+          value: 'TRUE',
+          oldValue
+        });
+      } catch (err) {
+        stat.failed++;
+        errors.push(err);
+        cell.setValue(currentValue);
+      }
+    });
+  });
+
+  SpreadsheetApp.flush();
+
+  pendingChecks.forEach(entry => {
+    const stat = stats.get(entry.key);
+    const cell = sheet.getRange(entry.row, entry.column);
+    const finalValue = cell.getValue();
+    if (isStatusActiveValue_(finalValue)) {
+      stat.applied++;
+    } else {
+      stat.failed++;
+    }
+  });
+
+  const summaryParts = [];
+  stats.forEach(info => {
+    const segments = [`${info.label}: ${info.applied} mise(s) à jour`];
+    if (info.already) {
+      segments.push(`${info.already} déjà cochée(s)`);
+    }
+    if (info.failed) {
+      segments.push(`${info.failed} échec(s)`);
+    }
+    summaryParts.push(segments.join(' · '));
+  });
+
+  if (summaryParts.length) {
+    ss.toast(summaryParts.join('\n'), 'Actions groupées', 8);
+  }
+
+  if (errors.length) {
+    const message = errors[0] && errors[0].message ? errors[0].message : String(errors[0]);
+    ui.alert('Actions groupées', `Certaines actions ont échoué : ${message}`, ui.ButtonSet.OK);
+  }
+}
+
 // === MENU ===
 
 function onOpen(e) {
@@ -2455,6 +2638,7 @@ function onOpen(e) {
     .createMenu('Maintenance')
     .addItem('Recalculer les SKU du Stock', 'recalcStock')
     .addItem('Mettre à jour les dates de mise en stock', 'syncMiseEnStockFromAchats')
+    .addItem('Cocher des statuts sur la sélection', 'bulkToggleStockStatuses')
     .addItem('Valider toutes les saisies prêtes', 'validateAllSales')
     .addItem('Trier les ventes (date décroissante)', 'sortVentesByDate')
     .addItem('Retirer du Stock les ventes importées', 'purgeStockFromVentes')
