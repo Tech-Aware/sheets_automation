@@ -2624,6 +2624,10 @@ function purgeStockFromVentes() {
   const C_STOCK_ID = stockResolver.colExact(HEADERS.STOCK.ID);
   const C_STOCK_SKU = stockResolver.colExact(HEADERS.STOCK.SKU)
     || stockResolver.colExact(HEADERS.STOCK.REFERENCE);
+  const C_STOCK_LABEL = stockResolver.colExact(HEADERS.STOCK.LIBELLE)
+    || stockResolver.colExact(HEADERS.STOCK.LIBELLE_ALT)
+    || stockResolver.colExact(HEADERS.STOCK.ARTICLE)
+    || stockResolver.colExact(HEADERS.STOCK.ARTICLE_ALT);
   const C_VENTE_ID = ventesResolver.colExact(HEADERS.VENTES.ID);
   const C_VENTE_SKU = ventesResolver.colExact(HEADERS.VENTES.SKU);
 
@@ -2666,6 +2670,7 @@ function purgeStockFromVentes() {
   const stockWidth = stock.getLastColumn();
   const stockValues = stock.getRange(2, 1, stockLast - 1, stockWidth).getValues();
   const rowsToDelete = [];
+  const deletedItems = [];
 
   for (let i = 0; i < stockValues.length; i++) {
     const row = stockValues[i];
@@ -2673,6 +2678,12 @@ function purgeStockFromVentes() {
     const count = key ? venteCounts.get(key) : 0;
     if (count && count > 0) {
       rowsToDelete.push(i + 2);
+      deletedItems.push({
+        rowNumber: i + 2,
+        id: row[C_STOCK_ID - 1],
+        sku: row[C_STOCK_SKU - 1],
+        label: C_STOCK_LABEL ? row[C_STOCK_LABEL - 1] : ''
+      });
       if (count === 1) {
         venteCounts.delete(key);
       } else {
@@ -2682,6 +2693,7 @@ function purgeStockFromVentes() {
   }
 
   if (!rowsToDelete.length) {
+    Logger.log('Purge du stock : aucune correspondance trouvée. %s vente(s) ignorée(s).', ventesIgnorées);
     ss.toast('Aucune ligne du stock ne correspond aux ventes.', 'Purge du stock', 6);
     return;
   }
@@ -2690,6 +2702,13 @@ function purgeStockFromVentes() {
   rowsToDelete.forEach(row => stock.deleteRow(row));
 
   const restants = Array.from(venteCounts.values()).reduce((sum, val) => sum + val, 0);
+  const remainingSales = [];
+  venteCounts.forEach((remaining, key) => {
+    if (remaining > 0) {
+      const [venteId, venteSku] = key.split('|');
+      remainingSales.push({ id: venteId, sku: venteSku, remaining });
+    }
+  });
   const messageParts = [`${rowsToDelete.length} ligne(s) supprimée(s) du Stock.`];
   if (ventesIgnorées) {
     messageParts.push(`${ventesIgnorées} vente(s) ignorée(s) (${HEADERS.VENTES.ID} ou ${HEADERS.VENTES.SKU} manquant).`);
@@ -2699,6 +2718,18 @@ function purgeStockFromVentes() {
   }
 
   ss.toast(messageParts.join(' '), 'Purge du stock', 8);
+  Logger.log(
+    'Purge du stock : %s ligne(s) supprimée(s), %s vente(s) ignorée(s), %s vente(s) sans correspondance.',
+    rowsToDelete.length,
+    ventesIgnorées,
+    restants
+  );
+  if (deletedItems.length) {
+    Logger.log('Détails des suppressions : %s', JSON.stringify(deletedItems));
+  }
+  if (remainingSales.length) {
+    Logger.log('Ventes restantes sans correspondance : %s', JSON.stringify(remainingSales));
+  }
 }
 
 // Validation groupée
