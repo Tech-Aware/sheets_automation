@@ -1064,7 +1064,22 @@ function handleAchats(e) {
       if (wasCheckbox && typeof cell.clearDataValidations === 'function') {
         cell.clearDataValidations();
       }
-      const stamp = parsedValue || new Date();
+
+      let stamp = null;
+      if (COL_DLIV) {
+        const deliveryCell = sh.getRange(row, COL_DLIV);
+        const deliveryValue = deliveryCell.getValue();
+        const deliveryDate = getDateOrNull_(deliveryValue)
+          || getDateOrNull_(deliveryCell.getDisplayValue());
+        if (deliveryDate) {
+          stamp = addDays_(deliveryDate, 1);
+        }
+      }
+
+      if (!stamp) {
+        stamp = parsedValue || new Date();
+      }
+
       cell.setValue(stamp);
       cell.setNumberFormat('dd/MM/yyyy');
       shouldSync = true;
