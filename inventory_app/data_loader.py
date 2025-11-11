@@ -1,21 +1,16 @@
 """Utilities responsible for loading the Excel workbook used by the UI."""
 from __future__ import annotations
 
-import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
 from openpyxl import load_workbook
 
-
-# ``dataclasses`` gained ``slots`` support in Python 3.10.  Older runtimes, such as
-# the Python 3.9 interpreter bundled with some Windows installations, do not accept
-# the argument which previously caused the application to fail at import time.
-_DATACLASS_KWARGS = {"slots": True} if sys.version_info >= (3, 10) else {}
+from inventory_app._compat import DATACLASS_KWARGS
 
 
-@dataclass(**_DATACLASS_KWARGS)
+@dataclass(**DATACLASS_KWARGS)
 class SheetData:
     """Container describing the contents of a worksheet."""
 

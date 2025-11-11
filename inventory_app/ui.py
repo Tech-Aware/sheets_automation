@@ -7,6 +7,7 @@ from pathlib import Path
 from tkinter import BOTH, END, StringVar, Tk, ttk
 from typing import Callable, Dict, Iterable, Sequence, Tuple
 
+from inventory_app._compat import DATACLASS_KWARGS
 from inventory_app.data_loader import WorkbookRepository, load_named_sheets
 from inventory_app.models import (
     PurchaseRecord,
@@ -24,7 +25,7 @@ from inventory_app.services import (
 )
 
 
-@dataclass(slots=True)
+@dataclass(**DATACLASS_KWARGS)
 class TableDefinition:
     headers: Sequence[Tuple[str, str]]  # (column id, displayed label)
     extract: Callable[[object], Sequence[str]]

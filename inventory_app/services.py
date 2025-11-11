@@ -5,6 +5,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 from typing import Dict, Iterable, List, Sequence
 
+from inventory_app._compat import DATACLASS_KWARGS
 from inventory_app.models import (
     DashboardSnapshot,
     PurchaseRecord,
@@ -14,13 +15,13 @@ from inventory_app.models import (
 )
 
 
-@dataclass(slots=True)
+@dataclass(**DATACLASS_KWARGS)
 class ReportRow:
     label: str
     value: str
 
 
-@dataclass(slots=True)
+@dataclass(**DATACLASS_KWARGS)
 class ReportingBundle:
     dashboard: DashboardSnapshot
     top_products: List[ReportRow]
