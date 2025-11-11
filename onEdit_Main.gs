@@ -96,6 +96,24 @@ const MONTHLY_LEDGER_HEADERS = Object.freeze([
   'NBR PCS VENDU'
 ]);
 
+const MONTH_NAMES_FR = Object.freeze([
+  'Janvier',
+  'Février',
+  'Mars',
+  'Avril',
+  'Mai',
+  'Juin',
+  'Juillet',
+  'Août',
+  'Septembre',
+  'Octobre',
+  'Novembre',
+  'Décembre'
+]);
+
+const BACKFILL_MONTH_MENU_SLOTS = 12;
+const BACKFILL_MONTH_SLOT_PREFIX = 'BACKFILL_MENU_SLOT_';
+
 const HEADER_LABELS = Object.freeze({
   dms: HEADERS.STOCK.DATE_MISE_EN_STOCK,
   dmis: HEADERS.STOCK.DATE_MISE_EN_LIGNE_ALT,
@@ -2885,19 +2903,152 @@ function formatDateString_(date) {
   return `${day}/${month}/${year}`;
 }
 
+function formatMonthLabel_(year, monthIndex) {
+  const safeMonth = Math.min(Math.max(monthIndex, 0), 11);
+  return `${MONTH_NAMES_FR[safeMonth]} ${year}`;
+}
+
+function getAvailableSalesMonths_(ss) {
+  const ventes = ss.getSheetByName('Ventes');
+  if (!ventes) return [];
+
+  const lastRow = ventes.getLastRow();
+  if (lastRow < 2) return [];
+
+  const headers = ventes.getRange(1, 1, 1, ventes.getLastColumn()).getValues()[0];
+  const resolver = makeHeaderResolver_(headers);
+  const colDate = resolver.colExact(HEADERS.VENTES.DATE_VENTE)
+    || resolver.colWhere(h => h.includes('date') && h.includes('vente'));
+
+  if (!colDate) return [];
+
+  const dates = ventes.getRange(2, colDate, lastRow - 1, 1).getValues();
+  const monthsMap = new Map();
+
+  for (let i = 0; i < dates.length; i++) {
+    let cell = dates[i][0];
+    if (cell instanceof Date && !isNaN(cell)) {
+      // already proper date
+    } else if (typeof cell === 'number') {
+      cell = new Date(cell);
+    } else if (typeof cell === 'string' && cell.trim()) {
+      const parsed = new Date(cell);
+      cell = isNaN(parsed) ? null : parsed;
+    } else {
+      cell = null;
+    }
+
+    if (!(cell instanceof Date) || isNaN(cell)) continue;
+
+    const year = cell.getFullYear();
+    const monthIndex = cell.getMonth();
+    const key = `${year}-${String(monthIndex + 1).padStart(2, '0')}`;
+    if (!monthsMap.has(key)) {
+      monthsMap.set(key, { year, monthIndex });
+    }
+  }
+
+  const months = Array.from(monthsMap.values());
+  months.sort((a, b) => {
+    if (a.year !== b.year) return b.year - a.year;
+    return b.monthIndex - a.monthIndex;
+  });
+
+  return months.map(({ year, monthIndex }) => ({
+    year,
+    monthIndex,
+    label: formatMonthLabel_(year, monthIndex),
+    key: `${year}-${String(monthIndex + 1).padStart(2, '0')}`
+  }));
+}
+
+function setBackfillMenuSlot_(slot, payload) {
+  const props = PropertiesService.getDocumentProperties();
+  const key = `${BACKFILL_MONTH_SLOT_PREFIX}${slot}`;
+  if (payload) {
+    props.setProperty(key, JSON.stringify(payload));
+  } else {
+    props.deleteProperty(key);
+  }
+}
+
+function getBackfillMenuSlot_(slot) {
+  const props = PropertiesService.getDocumentProperties();
+  const key = `${BACKFILL_MONTH_SLOT_PREFIX}${slot}`;
+  const raw = props.getProperty(key);
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    if (
+      parsed &&
+      typeof parsed.year === 'number' &&
+      typeof parsed.monthIndex === 'number'
+    ) {
+      return parsed;
+    }
+  } catch (err) {
+    props.deleteProperty(key);
+  }
+  return null;
+}
+
+function registerBackfillMenu_(menu, ss) {
+  const backfillMenu = SpreadsheetApp.getUi().createMenu('Recopier les ventes en compta');
+  backfillMenu.addItem('Tous les mois', 'backfillMonthlyLedgers');
+
+  const months = getAvailableSalesMonths_(ss);
+
+  let assigned = 0;
+  for (let slot = 1; slot <= BACKFILL_MONTH_MENU_SLOTS; slot++) {
+    const month = months[slot - 1];
+    if (month) {
+      setBackfillMenuSlot_(slot, month);
+      backfillMenu.addItem(month.label, `backfillMonthlyLedgersSlot${slot}`);
+      assigned++;
+    } else {
+      setBackfillMenuSlot_(slot, null);
+    }
+  }
+
+  if (assigned === 0) {
+    backfillMenu.addItem('Aucun mois disponible', 'noopBackfillMonthlyLedgerMenu');
+  }
+
+  menu.addSubMenu(backfillMenu);
+}
+
 // === MENU ===
 
 function onOpen(e) {
-  SpreadsheetApp.getUi()
-    .createMenu('Maintenance')
+  const ui = SpreadsheetApp.getUi();
+  const maintenance = ui.createMenu('Maintenance')
     .addItem('Recalculer les SKU du Stock', 'recalcStock')
     .addItem('Mettre à jour les dates de mise en stock', 'syncMiseEnStockFromAchats')
     .addItem('Valider toutes les saisies prêtes', 'validateAllSales')
     .addItem('Trier les ventes (date décroissante)', 'sortVentesByDate')
-    .addItem('Retirer du Stock les ventes importées', 'purgeStockFromVentes')
-    .addItem('Recopier les ventes en compta', 'backfillMonthlyLedgers')
-    .addToUi();
+    .addItem('Retirer du Stock les ventes importées', 'purgeStockFromVentes');
+
+  registerBackfillMenu_(maintenance, SpreadsheetApp.getActive());
+
+  maintenance.addToUi();
 }
+
+function noopBackfillMonthlyLedgerMenu() {
+  SpreadsheetApp.getActive().toast('Aucun mois de vente disponible pour la recopie.', 'Recopie comptable', 5);
+}
+
+function backfillMonthlyLedgersSlot1() { backfillMonthlyLedgersForAssignedMonth_(1); }
+function backfillMonthlyLedgersSlot2() { backfillMonthlyLedgersForAssignedMonth_(2); }
+function backfillMonthlyLedgersSlot3() { backfillMonthlyLedgersForAssignedMonth_(3); }
+function backfillMonthlyLedgersSlot4() { backfillMonthlyLedgersForAssignedMonth_(4); }
+function backfillMonthlyLedgersSlot5() { backfillMonthlyLedgersForAssignedMonth_(5); }
+function backfillMonthlyLedgersSlot6() { backfillMonthlyLedgersForAssignedMonth_(6); }
+function backfillMonthlyLedgersSlot7() { backfillMonthlyLedgersForAssignedMonth_(7); }
+function backfillMonthlyLedgersSlot8() { backfillMonthlyLedgersForAssignedMonth_(8); }
+function backfillMonthlyLedgersSlot9() { backfillMonthlyLedgersForAssignedMonth_(9); }
+function backfillMonthlyLedgersSlot10() { backfillMonthlyLedgersForAssignedMonth_(10); }
+function backfillMonthlyLedgersSlot11() { backfillMonthlyLedgersForAssignedMonth_(11); }
+function backfillMonthlyLedgersSlot12() { backfillMonthlyLedgersForAssignedMonth_(12); }
 
 function sortVentesByDate() {
   const ss = SpreadsheetApp.getActive();
@@ -3171,6 +3322,21 @@ function purgeStockFromVentes() {
 }
 
 function backfillMonthlyLedgers() {
+  runBackfillMonthlyLedgers_();
+}
+
+function backfillMonthlyLedgersForAssignedMonth_(slot) {
+  const ss = SpreadsheetApp.getActive();
+  const payload = getBackfillMenuSlot_(slot);
+  if (!payload) {
+    ss.toast('Ce mois n\'est plus disponible. Rouvre le menu pour le rafraîchir.', 'Recopie comptable', 6);
+    return;
+  }
+
+  runBackfillMonthlyLedgers_(payload);
+}
+
+function runBackfillMonthlyLedgers_(filter) {
   const ss = SpreadsheetApp.getActive();
   const ventes = ss.getSheetByName('Ventes');
   if (!ventes) {
@@ -3205,6 +3371,7 @@ function backfillMonthlyLedgers() {
   let copied = 0;
   let duplicates = 0;
   let missingDate = 0;
+  let skippedByFilter = 0;
 
   for (let i = 0; i < data.length; i++) {
     const row = data[i];
@@ -3223,6 +3390,13 @@ function backfillMonthlyLedgers() {
     if (!(dateCell instanceof Date) || isNaN(dateCell)) {
       missingDate++;
       continue;
+    }
+
+    if (filter && typeof filter.year === 'number' && typeof filter.monthIndex === 'number') {
+      if (dateCell.getFullYear() !== filter.year || dateCell.getMonth() !== filter.monthIndex) {
+        skippedByFilter++;
+        continue;
+      }
     }
 
     const idVal = colId ? row[colId - 1] : '';
@@ -3274,7 +3448,15 @@ function backfillMonthlyLedgers() {
   if (missingDate) {
     messageParts.push(`${missingDate} vente(s) sans date de vente.`);
   }
-  ss.toast(messageParts.join(' '), 'Recopie comptable', 8);
+  if (filter && skippedByFilter && copied === 0) {
+    messageParts.push(`${skippedByFilter} ligne(s) ignorée(s) car hors du mois sélectionné.`);
+  }
+
+  const title = filter
+    ? `Recopie ${formatMonthLabel_(filter.year, filter.monthIndex)}`
+    : 'Recopie comptable';
+
+  ss.toast(messageParts.join(' '), title, 8);
 }
 
 // Validation groupée
