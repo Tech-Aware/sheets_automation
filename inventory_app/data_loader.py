@@ -40,8 +40,11 @@ class WorkbookRepository:
     def sheet_names(self) -> List[str]:
         """Return the sheet names available in the workbook."""
 
-        with load_workbook(self._workbook_path, read_only=True, data_only=True) as wb:
+        wb = load_workbook(self._workbook_path, read_only=True, data_only=True)
+        try:
             return list(wb.sheetnames)
+        finally:
+            wb.close()
 
     def refresh(self) -> None:
         """Invalidate the cached sheets."""
@@ -64,7 +67,8 @@ class WorkbookRepository:
         if normalised_name in self._cache:
             return self._cache[normalised_name]
 
-        with load_workbook(self._workbook_path, read_only=True, data_only=True) as wb:
+        wb = load_workbook(self._workbook_path, read_only=True, data_only=True)
+        try:
             if normalised_name not in wb.sheetnames:
                 raise KeyError(f"Sheet '{sheet_name}' not found in workbook {self._workbook_path!s}")
             ws = wb[normalised_name]
@@ -84,6 +88,8 @@ class WorkbookRepository:
                 if all(value in (None, "") for value in row_dict.values()):
                     continue
                 rows.append(row_dict)
+        finally:
+            wb.close()
 
         sheet = SheetData(normalised_name, list(header_lookup.keys()), rows)
         self._cache[normalised_name] = sheet
