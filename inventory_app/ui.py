@@ -7,8 +7,8 @@ from pathlib import Path
 from tkinter import BOTH, END, StringVar, Tk, ttk
 from typing import Callable, Dict, Iterable, Sequence, Tuple
 
-from .data_loader import WorkbookRepository, load_named_sheets
-from .models import (
+from inventory_app.data_loader import WorkbookRepository, load_named_sheets
+from inventory_app.models import (
     PurchaseRecord,
     SaleRecord,
     StockRecord,
@@ -16,7 +16,12 @@ from .models import (
     build_sales,
     build_stock,
 )
-from .services import ReportingBundle, ReportRow, build_reporting, filter_records
+from inventory_app.services import (
+    ReportingBundle,
+    ReportRow,
+    build_reporting,
+    filter_records,
+)
 
 
 @dataclass(slots=True)
