@@ -2466,11 +2466,17 @@ function exportVente_(e, row, C_ID, C_LABEL, C_SKU, C_PRIX, C_DVENTE, C_STAMPV, 
 // === MENU ===
 
 function onOpen(e) {
-  SpreadsheetApp.getUi()
+  const ui = SpreadsheetApp.getUi();
+  ui
     .createMenu('Maintenance')
     .addItem('Recalculer les SKU du Stock', 'recalcStock')
     .addItem('Mettre à jour les dates de mise en stock', 'syncMiseEnStockFromAchats')
-    .addItem('Valider toutes les saisies prêtes', 'validateAllSales')
+    .addSubMenu(
+      ui
+        .createMenu('Recopie ventes en compta')
+        .addItem('Tout valider', 'validateAllSales')
+        .addItem('Choisir un mois…', 'promptValidateSalesByMonth')
+    )
     .addItem('Trier les ventes (date décroissante)', 'sortVentesByDate')
     .addItem('Retirer du Stock les ventes importées', 'purgeStockFromVentes')
     .addToUi();
@@ -2748,7 +2754,13 @@ function purgeStockFromVentes() {
 }
 
 // Validation groupée
-function validateAllSales() {
+function validateAllSales(options) {
+  const params = options || {};
+  const filterYear = Number.isInteger(params.year) ? params.year : null;
+  const filterMonth = Number.isInteger(params.month) ? params.month : null; // 0-11
+  const hasMonthFilter = filterYear !== null && filterMonth !== null;
+  const contextLabel = params.contextLabel ? String(params.contextLabel) : '';
+
   const ss = SpreadsheetApp.getActive();
   const stock = ss.getSheetByName('Stock');
   if (!stock) {
@@ -2919,6 +2931,13 @@ function validateAllSales() {
 
     const dateVente = row[C_DVENTE - 1];
     if (!(dateVente instanceof Date) || isNaN(dateVente)) continue;
+    if (hasMonthFilter) {
+      const rowYear = dateVente.getFullYear();
+      const rowMonth = dateVente.getMonth();
+      if (rowYear !== filterYear || rowMonth !== filterMonth) {
+        continue;
+      }
+    }
 
     const prix = row[C_PRIX - 1];
     const prixOk = (typeof prix === 'number' && !isNaN(prix) && prix > 0);
@@ -3019,11 +3038,16 @@ function validateAllSales() {
   }
 
   const ui = SpreadsheetApp.getUi();
+  const suffix = contextLabel ? ` (${contextLabel})` : '';
   ui.alert(
     'Validation groupée terminée',
-    `${moved} ligne(s) ont été déplacées vers "Ventes".`,
+    `${moved} ligne(s) ont été déplacées vers "Ventes"${suffix}.`,
     ui.ButtonSet.OK
   );
+
+  if (hasMonthFilter && moved === 0) {
+    SpreadsheetApp.getActive().toast(`Aucune vente trouvée pour ${contextLabel}.`, 'Validation groupée', 5);
+  }
 
   if (invalidChronoRows.length > 0) {
     const first = invalidChronoRows[0];
@@ -3051,4 +3075,47 @@ function validateAllSales() {
       8
     );
   }
+}
+
+function promptValidateSalesByMonth() {
+  const ui = SpreadsheetApp.getUi();
+  const response = ui.prompt(
+    'Recopie ventes en compta',
+    'Saisis le mois à recopier (formats acceptés : AAAA-MM ou MM/AAAA).',
+    ui.ButtonSet.OK_CANCEL
+  );
+
+  if (response.getSelectedButton() !== ui.Button.OK) {
+    return;
+  }
+
+  const raw = (response.getResponseText() || '').trim();
+  if (!raw) {
+    ui.alert('Recopie ventes en compta', 'Aucun mois saisi.', ui.ButtonSet.OK);
+    return;
+  }
+
+  const normalized = raw.replace(/[.\s]+/g, '-').replace(/\/+/g, '-');
+  let year;
+  let month;
+  let match = normalized.match(/^(\d{4})[-](\d{1,2})$/);
+  if (match) {
+    year = Number(match[1]);
+    month = Number(match[2]);
+  } else {
+    match = normalized.match(/^(\d{1,2})[-](\d{4})$/);
+    if (match) {
+      month = Number(match[1]);
+      year = Number(match[2]);
+    }
+  }
+
+  if (!match || !Number.isInteger(year) || !Number.isInteger(month) || month < 1 || month > 12) {
+    ui.alert('Recopie ventes en compta', 'Format de mois invalide. Utilise par exemple 2024-03 ou 03/2024.', ui.ButtonSet.OK);
+    return;
+  }
+
+  const zeroBasedMonth = month - 1;
+  const label = `${String(month).padStart(2, '0')}/${year}`;
+  validateAllSales({ year, month: zeroBasedMonth, contextLabel: label });
 }
