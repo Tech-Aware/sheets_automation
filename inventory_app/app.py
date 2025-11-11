@@ -2,9 +2,13 @@
 from __future__ import annotations
 
 import argparse
+import sys
 from pathlib import Path
 
-from .ui import run_app
+if __package__ in {None, ""}:  # pragma: no cover - executed for direct script runs
+    sys.path.append(str(Path(__file__).resolve().parent.parent))
+
+from inventory_app.ui import run_app
 
 
 def main(argv: list[str] | None = None) -> None:
