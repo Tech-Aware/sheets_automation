@@ -87,6 +87,15 @@ const DEFAULT_VENTES_HEADERS = Object.freeze([
   HEADERS.VENTES.LOT
 ]);
 
+const MONTHLY_LEDGER_HEADERS = Object.freeze([
+  'ID',
+  'LIBELLÉS',
+  'DATE DE VENTE',
+  'MARGE BRUTE',
+  'COEFF MARGE',
+  'NBR PCS VENDU'
+]);
+
 const HEADER_LABELS = Object.freeze({
   dms: HEADERS.STOCK.DATE_MISE_EN_STOCK,
   dmis: HEADERS.STOCK.DATE_MISE_EN_LIGNE_ALT,
@@ -2375,6 +2384,12 @@ function exportVente_(e, row, C_ID, C_LABEL, C_SKU, C_PRIX, C_DVENTE, C_STAMPV, 
   const sku   = C_SKU  ? sh.getRange(row, C_SKU).getDisplayValue() : "";
   const prix  = C_PRIX ? sh.getRange(row, C_PRIX).getValue() : "";
 
+  const achatInfo = getAchatsRecordByIdOrSku_(ss, idVal, sku);
+  const prixAchat = achatInfo && Number.isFinite(achatInfo.prixAchat) ? achatInfo.prixAchat : null;
+  const dateReception = achatInfo && achatInfo.dateReception instanceof Date && !isNaN(achatInfo.dateReception)
+    ? achatInfo.dateReception
+    : null;
+
   const headersS = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0];
   const resolverS = makeHeaderResolver_(headersS);
 
@@ -2424,6 +2439,14 @@ function exportVente_(e, row, C_ID, C_LABEL, C_SKU, C_PRIX, C_DVENTE, C_STAMPV, 
   const delaiML  = diffDays(dMiseLigne, dMiseStock);
   const delaiPub = diffDays(dPub, dMiseLigne);
   const delaiVte = diffDays(dateV, dPub);
+  const delaiImmFromReception = diffDays(dateV, dateReception);
+  const delaiVteFromMiseEnLigne = diffDays(dateV, dMiseLigne);
+
+  const margeBrute = Number.isFinite(prix) && Number.isFinite(prixAchat) ? prix - prixAchat : '';
+  const coeffMarge = Number.isFinite(prix) && Number.isFinite(prixAchat) && prixAchat !== 0
+    ? prix / prixAchat
+    : '';
+  const nbPiecesVendu = 1;
 
   const start = Math.max(2, ventes.getLastRow() + 1);
   const newRow = Array(widthVentes).fill("");
@@ -2448,6 +2471,16 @@ function exportVente_(e, row, C_ID, C_LABEL, C_SKU, C_PRIX, C_DVENTE, C_STAMPV, 
 
   ventes.getRange(start, 1, 1, newRow.length).setValues([newRow]);
 
+  copySaleToMonthlySheet_(ss, {
+    id: idVal,
+    libelle: label,
+    dateVente: dateV,
+    margeBrute: Number.isFinite(margeBrute) ? margeBrute : '',
+    coeffMarge: Number.isFinite(coeffMarge) ? coeffMarge : '',
+    nbPieces: nbPiecesVendu,
+    sku
+  });
+
   const lastV = ventes.getLastRow();
   if (lastV > 2 && COL_DATE_VENTE) {
     ventes.getRange(2, 1, lastV - 1, ventes.getLastColumn()).sort([{column: COL_DATE_VENTE, ascending: false}]);
@@ -2463,6 +2496,395 @@ function exportVente_(e, row, C_ID, C_LABEL, C_SKU, C_PRIX, C_DVENTE, C_STAMPV, 
   sh.deleteRow(row);
 }
 
+function getAchatsRecordByIdOrSku_(ss, idVal, sku) {
+  const achats = ss.getSheetByName('Achats');
+  if (!achats) return null;
+
+  const lastRow = achats.getLastRow();
+  if (lastRow < 2) return null;
+
+  const headers = achats.getRange(1, 1, 1, achats.getLastColumn()).getValues()[0];
+  const resolver = makeHeaderResolver_(headers);
+
+  const colId = resolver.colExact(HEADERS.ACHATS.ID);
+  const colRef = resolver.colExact(HEADERS.ACHATS.REFERENCE);
+  const colPrix = resolver.colExact(HEADERS.ACHATS.PRIX_UNITAIRE_TTC);
+  const colDate = resolver.colExact(HEADERS.ACHATS.DATE_LIVRAISON);
+
+  const keyId = idVal !== undefined && idVal !== null && String(idVal).trim() !== ''
+    ? normText_(idVal)
+    : '';
+  const keyRef = sku ? normText_(sku) : '';
+
+  if (!keyId && !keyRef) return null;
+
+  const data = achats.getRange(2, 1, lastRow - 1, achats.getLastColumn()).getValues();
+  for (let i = 0; i < data.length; i++) {
+    const row = data[i];
+    const idMatch = keyId && colId ? normText_(row[colId - 1]) === keyId : false;
+    const refMatch = keyRef && colRef ? normText_(row[colRef - 1]) === keyRef : false;
+    if (!idMatch && !refMatch) continue;
+
+    const prixCell = colPrix ? row[colPrix - 1] : null;
+    const prixAchat = typeof prixCell === 'number' && Number.isFinite(prixCell) ? prixCell : null;
+    const dateCell = colDate ? row[colDate - 1] : null;
+    const dateReception = dateCell instanceof Date && !isNaN(dateCell) ? dateCell : null;
+
+    return { prixAchat, dateReception };
+  }
+
+  return null;
+}
+
+function copySaleToMonthlySheet_(ss, sale) {
+  if (!sale || !(sale.dateVente instanceof Date) || isNaN(sale.dateVente)) {
+    return false;
+  }
+
+  const month = sale.dateVente.getMonth();
+  const year = sale.dateVente.getFullYear();
+  const sheetName = `Compta ${String(month + 1).padStart(2, '0')}-${year}`;
+  const monthStart = new Date(year, month, 1);
+
+  let sheet = ss.getSheetByName(sheetName);
+  if (!sheet) {
+    sheet = ss.insertSheet(sheetName);
+    initializeMonthlyLedgerSheet_(sheet, monthStart);
+  }
+
+  ensureMonthlyLedgerSheet_(sheet, monthStart);
+
+  const headersLen = MONTHLY_LEDGER_HEADERS.length;
+  const rawSku = sale.sku !== undefined && sale.sku !== null ? String(sale.sku).trim() : '';
+  const skuKey = rawSku ? `SKU:${normText_(rawSku)}` : '';
+  const rawId = sale.id !== undefined && sale.id !== null ? String(sale.id).trim() : '';
+  const idKey = rawId ? `ID:${rawId}` : '';
+  const dedupeKey = skuKey || idKey;
+
+  if (dedupeKey) {
+    const last = sheet.getLastRow();
+    if (last > 1) {
+      const notes = sheet.getRange(2, 1, last - 1, 1).getNotes();
+      const alreadyPresent = notes.some(row => row[0] === dedupeKey);
+      if (alreadyPresent) {
+        return false;
+      }
+    }
+  }
+
+  const weekRanges = computeMonthlyWeekRanges_(monthStart);
+  const saleTime = sale.dateVente.getTime();
+  let weekIndex = weekRanges.findIndex(range => saleTime >= range.start.getTime() && saleTime <= range.end.getTime());
+  if (weekIndex < 0) {
+    weekIndex = weekRanges.length - 1;
+  }
+
+  const labels = sheet.getRange(1, 1, sheet.getLastRow(), 1).getValues().map(row => String(row[0] || ''));
+  const labelPrefix = `SEMAINE ${weekIndex + 1}`;
+  const totalPrefix = `TOTAL VENTE SEMAINE ${weekIndex + 1}`;
+
+  const labelIdx = labels.findIndex(v => v.toUpperCase().startsWith(labelPrefix));
+  const totalIdx = labels.findIndex((v, idx) => idx > labelIdx && v.toUpperCase().startsWith(totalPrefix));
+  if (labelIdx === -1 || totalIdx === -1) {
+    return false;
+  }
+
+  const totalRowNumber = totalIdx + 1;
+  sheet.insertRows(totalRowNumber, 1);
+  const saleRowNumber = totalRowNumber;
+
+  const saleRow = Array(headersLen).fill('');
+  saleRow[0] = rawId || '';
+  saleRow[1] = sale.libelle || '';
+  saleRow[2] = sale.dateVente;
+
+  const margeSource = sale.margeBrute;
+  const margeValue = (margeSource === '' || margeSource === null || margeSource === undefined)
+    ? NaN
+    : (typeof margeSource === 'number' ? margeSource : valueToNumber_(margeSource));
+  saleRow[3] = Number.isFinite(margeValue) ? roundCurrency_(margeValue) : '';
+
+  const coeffSource = sale.coeffMarge;
+  const coeffValue = (coeffSource === '' || coeffSource === null || coeffSource === undefined)
+    ? NaN
+    : (typeof coeffSource === 'number' ? coeffSource : valueToNumber_(coeffSource));
+  saleRow[4] = Number.isFinite(coeffValue) ? Math.round(coeffValue * 100) / 100 : '';
+
+  const piecesSource = sale.nbPieces;
+  const piecesValue = (piecesSource === '' || piecesSource === null || piecesSource === undefined)
+    ? NaN
+    : (typeof piecesSource === 'number' ? piecesSource : valueToNumber_(piecesSource));
+  if (Number.isFinite(piecesValue)) {
+    saleRow[5] = piecesValue;
+  } else if (piecesSource !== undefined && piecesSource !== null && piecesSource !== '') {
+    saleRow[5] = piecesSource;
+  }
+
+  sheet.getRange(saleRowNumber, 1, 1, headersLen).setValues([saleRow]);
+  sheet.getRange(saleRowNumber, 1).setNote(dedupeKey || '');
+
+  sortWeekRowsByDate_(sheet, weekIndex + 1, headersLen);
+  updateWeeklyTotals_(sheet, weekIndex + 1, headersLen);
+  updateMonthlyTotals_(sheet, headersLen);
+  return true;
+}
+
+function ensureMonthlyLedgerSheet_(sheet, monthStart) {
+  const headersLen = MONTHLY_LEDGER_HEADERS.length;
+  const firstCell = sheet.getRange(1, 1).getValue();
+  if (!firstCell || firstCell === '') {
+    initializeMonthlyLedgerSheet_(sheet, monthStart);
+    return;
+  }
+
+  const headerValues = sheet.getRange(1, 1, 1, headersLen).getValues()[0];
+  if (headerValues[0] !== MONTHLY_LEDGER_HEADERS[0]) {
+    // La feuille contient d'autres données : ne pas écraser.
+    return;
+  }
+}
+
+function initializeMonthlyLedgerSheet_(sheet, monthStart) {
+  sheet.clear();
+
+  const headersLen = MONTHLY_LEDGER_HEADERS.length;
+  sheet.getRange(1, 1, 1, headersLen).setValues([MONTHLY_LEDGER_HEADERS]);
+  sheet.setFrozenRows(1);
+
+  const weekRanges = computeMonthlyWeekRanges_(monthStart);
+  let row = 2;
+  for (let i = 0; i < weekRanges.length; i++) {
+    const range = weekRanges[i];
+    const label = `SEMAINE ${i + 1} ${formatDateString_(range.start)} AU ${formatDateString_(range.end)}`;
+    sheet.getRange(row, 1).setValue(label).setFontWeight('bold');
+    row++;
+
+    sheet.getRange(row, 1, 1, headersLen)
+      .setValues([[`TOTAL VENTE SEMAINE ${i + 1}`, '', '', '', '', '']]);
+    sheet.getRange(row, 1).setFontWeight('bold');
+    row++;
+
+    sheet.getRange(row, 1, 1, headersLen).clearContent();
+    row++;
+  }
+
+  sheet.getRange(row, 1, 1, headersLen)
+    .setValues([[`TOTAL VENTE MOIS`, '', '', '', '', '']]);
+  sheet.getRange(row, 1).setFontWeight('bold');
+
+  applyMonthlySheetFormats_(sheet);
+}
+
+function applyMonthlySheetFormats_(sheet) {
+  const maxRows = sheet.getMaxRows();
+  sheet.getRange(1, 3, maxRows, 1).setNumberFormat('dd/MM/yyyy');
+  sheet.getRange(1, 4, maxRows, 1).setNumberFormat('#,##0.00');
+  sheet.getRange(1, 5, maxRows, 1).setNumberFormat('0.00');
+  sheet.getRange(1, 6, maxRows, 1).setNumberFormat('0');
+}
+
+function sortWeekRowsByDate_(sheet, weekNumber, headersLen) {
+  const labels = sheet.getRange(1, 1, sheet.getLastRow(), 1).getValues().map(row => String(row[0] || ''));
+  const labelPrefix = `SEMAINE ${weekNumber}`;
+  const totalPrefix = `TOTAL VENTE SEMAINE ${weekNumber}`;
+  const labelIdx = labels.findIndex(v => v.toUpperCase().startsWith(labelPrefix));
+  const totalIdx = labels.findIndex((v, idx) => idx > labelIdx && v.toUpperCase().startsWith(totalPrefix));
+  if (labelIdx === -1 || totalIdx === -1) return;
+
+  const dataCount = totalIdx - labelIdx - 1;
+  if (dataCount <= 1) return;
+
+  const firstDataRow = labelIdx + 2;
+  sheet.getRange(firstDataRow, 1, dataCount, headersLen).sort({ column: 3, ascending: true });
+}
+
+function updateWeeklyTotals_(sheet, weekNumber, headersLen) {
+  const labels = sheet.getRange(1, 1, sheet.getLastRow(), 1).getValues().map(row => String(row[0] || ''));
+  const labelPrefix = `SEMAINE ${weekNumber}`;
+  const totalPrefix = `TOTAL VENTE SEMAINE ${weekNumber}`;
+  const labelIdx = labels.findIndex(v => v.toUpperCase().startsWith(labelPrefix));
+  const totalIdx = labels.findIndex((v, idx) => idx > labelIdx && v.toUpperCase().startsWith(totalPrefix));
+  if (labelIdx === -1 || totalIdx === -1) return;
+
+  const dataCount = totalIdx - labelIdx - 1;
+  const totalRowNumber = totalIdx + 1;
+  const totals = Array(headersLen).fill('');
+  totals[0] = `TOTAL VENTE SEMAINE ${weekNumber}`;
+
+  if (dataCount > 0) {
+    const dataRange = sheet.getRange(labelIdx + 2, 1, dataCount, headersLen);
+    const rows = dataRange.getValues();
+
+    let sumMarge = 0;
+    let sumCoeff = 0;
+    let sumPieces = 0;
+    let countCoeff = 0;
+    let rowCount = 0;
+
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i];
+      const hasIdOrLabel = (String(row[0] || '').trim() !== '') || (String(row[1] || '').trim() !== '');
+      if (!hasIdOrLabel) {
+        continue;
+      }
+      rowCount++;
+
+      let marge = NaN;
+      if (row[3] !== '' && row[3] !== null && row[3] !== undefined) {
+        marge = valueToNumber_(row[3]);
+      }
+      if (Number.isFinite(marge)) sumMarge += marge;
+
+      let coeff = NaN;
+      if (row[4] !== '' && row[4] !== null && row[4] !== undefined) {
+        coeff = valueToNumber_(row[4]);
+      }
+      if (Number.isFinite(coeff)) {
+        sumCoeff += coeff;
+        countCoeff++;
+      }
+
+      let pieces = NaN;
+      if (row[5] !== '' && row[5] !== null && row[5] !== undefined) {
+        pieces = valueToNumber_(row[5]);
+      }
+      if (Number.isFinite(pieces)) sumPieces += pieces;
+    }
+
+    if (rowCount > 0) {
+      totals[0] = `TOTAL VENTE SEMAINE ${weekNumber} : ${rowCount}`;
+      totals[3] = roundCurrency_(sumMarge);
+      totals[4] = countCoeff ? Math.round((sumCoeff / countCoeff) * 100) / 100 : '';
+      totals[5] = sumPieces;
+    }
+  }
+
+  sheet.getRange(totalRowNumber, 1, 1, headersLen).setValues([totals]);
+  sheet.getRange(totalRowNumber, 1).setFontWeight('bold').setNote('');
+}
+
+function updateMonthlyTotals_(sheet, headersLen) {
+  const labels = sheet.getRange(1, 1, sheet.getLastRow(), 1).getValues().map(row => String(row[0] || ''));
+  const totalMonthIdx = labels.findIndex(v => v.toUpperCase().startsWith('TOTAL VENTE MOIS'));
+  if (totalMonthIdx === -1) return;
+
+  const monthRowNumber = totalMonthIdx + 1;
+  const dataHeight = monthRowNumber - 2;
+  const totals = Array(headersLen).fill('');
+  totals[0] = 'TOTAL VENTE MOIS';
+
+  if (dataHeight > 0) {
+    const values = sheet.getRange(2, 1, dataHeight, headersLen).getValues();
+    let countRows = 0;
+    let sumMarge = 0;
+    let sumCoeff = 0;
+    let sumPieces = 0;
+    let countCoeff = 0;
+
+    for (let i = 0; i < values.length; i++) {
+      const row = values[i];
+      const labelText = String(row[0] || '').toUpperCase();
+      if (labelText.startsWith('SEMAINE') || labelText.startsWith('TOTAL VENTE')) {
+        continue;
+      }
+
+      const hasIdOrLabel = (row[0] !== '' && row[0] !== null) || String(row[1] || '').trim() !== '';
+      if (!hasIdOrLabel) {
+        continue;
+      }
+
+      countRows++;
+
+      let marge = NaN;
+      if (row[3] !== '' && row[3] !== null && row[3] !== undefined) {
+        marge = valueToNumber_(row[3]);
+      }
+      if (Number.isFinite(marge)) sumMarge += marge;
+
+      let coeff = NaN;
+      if (row[4] !== '' && row[4] !== null && row[4] !== undefined) {
+        coeff = valueToNumber_(row[4]);
+      }
+      if (Number.isFinite(coeff)) {
+        sumCoeff += coeff;
+        countCoeff++;
+      }
+
+      let pieces = NaN;
+      if (row[5] !== '' && row[5] !== null && row[5] !== undefined) {
+        pieces = valueToNumber_(row[5]);
+      }
+      if (Number.isFinite(pieces)) sumPieces += pieces;
+    }
+
+    if (countRows > 0) {
+      totals[0] = `TOTAL VENTE MOIS : ${countRows}`;
+      totals[3] = roundCurrency_(sumMarge);
+      totals[4] = countCoeff ? Math.round((sumCoeff / countCoeff) * 100) / 100 : '';
+      totals[5] = sumPieces;
+    }
+  }
+
+  sheet.getRange(monthRowNumber, 1, 1, headersLen).setValues([totals]);
+  sheet.getRange(monthRowNumber, 1).setFontWeight('bold').setNote('');
+}
+
+function valueToNumber_(value) {
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? value : NaN;
+  }
+  if (typeof value === 'string') {
+    const normalized = value.replace(/\s+/g, '').replace(',', '.');
+    const parsed = Number(normalized);
+    return Number.isFinite(parsed) ? parsed : NaN;
+  }
+  return NaN;
+}
+
+function roundCurrency_(value) {
+  if (!Number.isFinite(value)) return '';
+  return Math.round(value * 100) / 100;
+}
+
+function computeMonthlyWeekRanges_(monthStart) {
+  if (!(monthStart instanceof Date) || isNaN(monthStart)) return [];
+
+  const ranges = [];
+  const start = new Date(monthStart.getFullYear(), monthStart.getMonth(), 1);
+  const monthEnd = new Date(monthStart.getFullYear(), monthStart.getMonth() + 1, 0);
+
+  let current = start;
+  while (current <= monthEnd) {
+    const weekStart = new Date(current);
+    let weekEnd = new Date(weekStart);
+    if (ranges.length === 0) {
+      const dow = weekStart.getDay();
+      const delta = dow === 0 ? 0 : 7 - dow;
+      weekEnd.setDate(weekEnd.getDate() + delta);
+    } else {
+      weekEnd.setDate(weekEnd.getDate() + 6);
+    }
+    if (weekEnd > monthEnd) {
+      weekEnd = new Date(monthEnd);
+    }
+
+    ranges.push({ start: weekStart, end: weekEnd });
+
+    current = new Date(weekEnd);
+    current.setDate(current.getDate() + 1);
+  }
+
+  return ranges;
+}
+
+function formatDateString_(date) {
+  if (!(date instanceof Date) || isNaN(date)) return '';
+  const day = String(date.getDate()).padStart(2, '0');
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const year = date.getFullYear();
+  return `${day}/${month}/${year}`;
+}
+
 // === MENU ===
 
 function onOpen(e) {
@@ -2473,6 +2895,7 @@ function onOpen(e) {
     .addItem('Valider toutes les saisies prêtes', 'validateAllSales')
     .addItem('Trier les ventes (date décroissante)', 'sortVentesByDate')
     .addItem('Retirer du Stock les ventes importées', 'purgeStockFromVentes')
+    .addItem('Recopier les ventes en compta', 'backfillMonthlyLedgers')
     .addToUi();
 }
 
@@ -2745,6 +3168,113 @@ function purgeStockFromVentes() {
   if (remainingSales.length) {
     Logger.log('Ventes restantes sans correspondance : %s', JSON.stringify(remainingSales));
   }
+}
+
+function backfillMonthlyLedgers() {
+  const ss = SpreadsheetApp.getActive();
+  const ventes = ss.getSheetByName('Ventes');
+  if (!ventes) {
+    ss.toast('Feuille "Ventes" introuvable.', 'Recopie comptable', 6);
+    return;
+  }
+
+  const lastRow = ventes.getLastRow();
+  if (lastRow < 2) {
+    ss.toast('Aucune vente à recopier.', 'Recopie comptable', 5);
+    return;
+  }
+
+  const headers = ventes.getRange(1, 1, 1, ventes.getLastColumn()).getValues()[0];
+  const resolver = makeHeaderResolver_(headers);
+
+  const colId = resolver.colExact(HEADERS.VENTES.ID);
+  const colLibelle = resolver.colExact(HEADERS.VENTES.ARTICLE)
+    || resolver.colExact(HEADERS.VENTES.ARTICLE_ALT);
+  const colSku = resolver.colExact(HEADERS.VENTES.SKU);
+  const colDate = resolver.colExact(HEADERS.VENTES.DATE_VENTE);
+  const colPrix = resolver.colExact(HEADERS.VENTES.PRIX_VENTE)
+    || resolver.colExact(HEADERS.VENTES.PRIX_VENTE_ALT);
+
+  if (!colDate) {
+    ss.toast(`Colonne ${HEADERS.VENTES.DATE_VENTE} introuvable dans "Ventes".`, 'Recopie comptable', 8);
+    return;
+  }
+
+  const width = ventes.getLastColumn();
+  const data = ventes.getRange(2, 1, lastRow - 1, width).getValues();
+  let copied = 0;
+  let duplicates = 0;
+  let missingDate = 0;
+
+  for (let i = 0; i < data.length; i++) {
+    const row = data[i];
+    let dateCell = colDate ? row[colDate - 1] : null;
+    if (!(dateCell instanceof Date) || isNaN(dateCell)) {
+      if (typeof dateCell === 'number') {
+        dateCell = new Date(dateCell);
+      } else if (typeof dateCell === 'string' && dateCell.trim()) {
+        const parsed = new Date(dateCell);
+        dateCell = isNaN(parsed) ? null : parsed;
+      } else {
+        dateCell = null;
+      }
+    }
+
+    if (!(dateCell instanceof Date) || isNaN(dateCell)) {
+      missingDate++;
+      continue;
+    }
+
+    const idVal = colId ? row[colId - 1] : '';
+    const libelle = colLibelle ? row[colLibelle - 1] : '';
+    const sku = colSku ? row[colSku - 1] : '';
+
+    let prixVente = NaN;
+    if (colPrix) {
+      const rawPrix = row[colPrix - 1];
+      if (rawPrix !== '' && rawPrix !== null && rawPrix !== undefined) {
+        prixVente = valueToNumber_(rawPrix);
+      }
+    }
+
+    const achat = getAchatsRecordByIdOrSku_(ss, idVal, sku) || {};
+    const prixAchat = Number.isFinite(achat.prixAchat) ? achat.prixAchat : NaN;
+
+    let marge = '';
+    if (Number.isFinite(prixVente) && Number.isFinite(prixAchat)) {
+      marge = prixVente - prixAchat;
+    }
+
+    let coeff = '';
+    if (Number.isFinite(prixVente) && Number.isFinite(prixAchat) && prixAchat !== 0) {
+      coeff = prixVente / prixAchat;
+    }
+
+    const inserted = copySaleToMonthlySheet_(ss, {
+      id: idVal,
+      libelle,
+      dateVente: dateCell,
+      margeBrute: marge,
+      coeffMarge: coeff,
+      nbPieces: 1,
+      sku
+    });
+
+    if (inserted) {
+      copied++;
+    } else {
+      duplicates++;
+    }
+  }
+
+  const messageParts = [`${copied} vente(s) copiée(s).`];
+  if (duplicates) {
+    messageParts.push(`${duplicates} vente(s) déjà présentes ou ignorées.`);
+  }
+  if (missingDate) {
+    messageParts.push(`${missingDate} vente(s) sans date de vente.`);
+  }
+  ss.toast(messageParts.join(' '), 'Recopie comptable', 8);
 }
 
 // Validation groupée
