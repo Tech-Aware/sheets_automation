@@ -2,20 +2,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-import sys
 from datetime import datetime
 from typing import Any, Dict, Iterable, List, Optional
 
+from inventory_app._compat import DATACLASS_KWARGS
+
 from inventory_app.data_loader import SheetData
 
-
-if sys.version_info >= (3, 10):
-    _DATACLASS_KWARGS = {"slots": True}
-else:
-    _DATACLASS_KWARGS = {}
-
-
-@dataclass(**_DATACLASS_KWARGS)
+@dataclass(**DATACLASS_KWARGS)
 class PurchaseRecord:
     id_achat: str
     designation: str
@@ -40,7 +34,7 @@ class PurchaseRecord:
         )
 
 
-@dataclass(**_DATACLASS_KWARGS)
+@dataclass(**DATACLASS_KWARGS)
 class StockRecord:
     sku: str
     designation: str
@@ -63,7 +57,7 @@ class StockRecord:
         )
 
 
-@dataclass(**_DATACLASS_KWARGS)
+@dataclass(**DATACLASS_KWARGS)
 class SaleRecord:
     sku: str
     designation: str
@@ -88,7 +82,7 @@ class SaleRecord:
         )
 
 
-@dataclass(**_DATACLASS_KWARGS)
+@dataclass(**DATACLASS_KWARGS)
 class DashboardSnapshot:
     total_stock_value: float
     total_purchases_value: float
