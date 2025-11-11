@@ -5,7 +5,13 @@ from collections import defaultdict
 from dataclasses import dataclass
 from typing import Dict, Iterable, List, Sequence
 
-from .models import DashboardSnapshot, PurchaseRecord, SaleRecord, StockRecord, summarise
+from inventory_app.models import (
+    DashboardSnapshot,
+    PurchaseRecord,
+    SaleRecord,
+    StockRecord,
+    summarise,
+)
 
 
 @dataclass(slots=True)

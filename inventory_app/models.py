@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Dict, Iterable, List, Optional
 
-from .data_loader import SheetData
+from inventory_app.data_loader import SheetData
 
 
 @dataclass(slots=True)
