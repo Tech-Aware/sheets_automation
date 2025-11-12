@@ -107,6 +107,30 @@ const MONTHLY_LEDGER_INDEX = Object.freeze({
   NB_PIECES: MONTHLY_LEDGER_HEADERS.indexOf('NBR PCS VENDU')
 });
 
+const SKU_COLOR_PALETTE = Object.freeze([
+  Object.freeze({ background: '#FDEBD0', text: '#BA4A00' }),
+  Object.freeze({ background: '#FADBD8', text: '#943126' }),
+  Object.freeze({ background: '#E8DAEF', text: '#633974' }),
+  Object.freeze({ background: '#D6EAF8', text: '#1F618D' }),
+  Object.freeze({ background: '#D1F2EB', text: '#0E6655' }),
+  Object.freeze({ background: '#FCF3CF', text: '#7D6608' }),
+  Object.freeze({ background: '#F5EEF8', text: '#6C3483' }),
+  Object.freeze({ background: '#EBDEF0', text: '#512E5F' }),
+  Object.freeze({ background: '#E8F6F3', text: '#0B5345' }),
+  Object.freeze({ background: '#FEF5E7', text: '#935116' }),
+  Object.freeze({ background: '#EBF5FB', text: '#154360' }),
+  Object.freeze({ background: '#F9EBEA', text: '#78281F' })
+]);
+
+const SKU_COLOR_OVERRIDES = Object.freeze({
+  // Exemple : 'JLF': { background: '#E8F8F5', text: '#117A65' }
+});
+
+const SKU_COLOR_DEFAULT = Object.freeze({ background: '#FFFFFF', text: '#000000' });
+
+const LEDGER_WEEK_RULE_DESCRIPTION = 'auto-ledger-week-highlight';
+const LEDGER_MONTH_TOTAL_RULE_DESCRIPTION = 'auto-ledger-month-total-highlight';
+
 const MONTH_NAMES_FR = Object.freeze([
   'Janvier',
   'Février',
@@ -771,6 +795,134 @@ function extractSkuSuffix_(sku, expectedBase) {
   }
 
   return parsed;
+}
+
+function computeSkuPaletteKey_(sku) {
+  const raw = String(sku || '').trim();
+  if (!raw) return '';
+
+  const base = extractSkuBase_(raw) || raw;
+  const lettersMatch = base.match(/[A-Za-z]+/);
+  if (lettersMatch && lettersMatch.length > 0) {
+    return lettersMatch[0].toUpperCase();
+  }
+
+  return base.toUpperCase();
+}
+
+function computeSkuPaletteColor_(sku) {
+  const key = computeSkuPaletteKey_(sku);
+  if (!key) return null;
+
+  if (Object.prototype.hasOwnProperty.call(SKU_COLOR_OVERRIDES, key)) {
+    return SKU_COLOR_OVERRIDES[key];
+  }
+
+  if (!Array.isArray(SKU_COLOR_PALETTE) || SKU_COLOR_PALETTE.length === 0) {
+    return null;
+  }
+
+  let hash = 0;
+  for (let i = 0; i < key.length; i++) {
+    hash = (hash * 31 + key.charCodeAt(i)) >>> 0;
+  }
+
+  const index = hash % SKU_COLOR_PALETTE.length;
+  return SKU_COLOR_PALETTE[index] || null;
+}
+
+function applySkuPaletteFormatting_(sheet, skuCol, articleCol) {
+  if (!sheet || !skuCol || skuCol < 1) {
+    return;
+  }
+
+  const lastRow = sheet.getLastRow();
+  const lastColumn = sheet.getLastColumn();
+  if (lastRow <= 1 || lastColumn < skuCol) {
+    return;
+  }
+
+  const dataRowCount = lastRow - 1;
+  const width = lastColumn;
+  const range = sheet.getRange(2, 1, dataRowCount, width);
+  const values = range.getDisplayValues();
+  const backgrounds = range.getBackgrounds();
+  const fontColors = range.getFontColors();
+
+  const skuIndex = skuCol - 1;
+  const articleIndex = articleCol && articleCol >= 1 && articleCol <= width ? articleCol - 1 : -1;
+
+  for (let r = 0; r < values.length; r++) {
+    const rowValues = values[r];
+    const firstCellText = normText_(rowValues[0] || '');
+    const isLedgerLabel = firstCellText.startsWith('semaine')
+      || firstCellText.startsWith('total vente semaine')
+      || firstCellText === 'total vente mois';
+    if (isLedgerLabel) {
+      continue;
+    }
+
+    const skuValue = skuIndex < rowValues.length ? String(rowValues[skuIndex] || '').trim() : '';
+    const paletteColor = computeSkuPaletteColor_(skuValue);
+    const background = paletteColor && paletteColor.background ? paletteColor.background : SKU_COLOR_DEFAULT.background;
+    const textColor = paletteColor && paletteColor.text ? paletteColor.text : SKU_COLOR_DEFAULT.text;
+
+    const rowBackgrounds = backgrounds[r];
+    for (let c = 0; c < rowBackgrounds.length; c++) {
+      rowBackgrounds[c] = background;
+    }
+
+    if (articleIndex >= 0) {
+      fontColors[r][articleIndex] = textColor;
+    }
+  }
+
+  range.setBackgrounds(backgrounds);
+  if (articleIndex >= 0) {
+    range.setFontColors(fontColors);
+  }
+}
+
+function ensureLedgerWeekHighlight_(sheet, headersLen) {
+  if (!sheet || !headersLen || headersLen < 1) {
+    return;
+  }
+
+  const width = Math.min(headersLen, sheet.getMaxColumns());
+  if (width < 1) {
+    return;
+  }
+
+  const height = Math.max(sheet.getMaxRows() - 1, 1);
+  const range = sheet.getRange(2, 1, height, width);
+
+  const rules = sheet.getConditionalFormatRules() || [];
+  const retained = rules.filter(rule => {
+    if (!rule || typeof rule.getDescription !== 'function') {
+      return true;
+    }
+    const description = rule.getDescription();
+    return description !== LEDGER_WEEK_RULE_DESCRIPTION && description !== LEDGER_MONTH_TOTAL_RULE_DESCRIPTION;
+  });
+
+  const weekRule = SpreadsheetApp.newConditionalFormatRule()
+    .setRanges([range])
+    .whenFormulaSatisfied('=REGEXMATCH($A2;"^(SEMAINE|TOTAL VENTE SEMAINE)")')
+    .setBackground('#B8FF5C')
+    .setFontWeight('bold')
+    .setDescription(LEDGER_WEEK_RULE_DESCRIPTION)
+    .build();
+
+  const monthRule = SpreadsheetApp.newConditionalFormatRule()
+    .setRanges([range])
+    .whenFormulaSatisfied('=$A2="TOTAL VENTE MOIS"')
+    .setBackground('#B8FF5C')
+    .setFontWeight('bold')
+    .setDescription(LEDGER_MONTH_TOTAL_RULE_DESCRIPTION)
+    .build();
+
+  retained.push(weekRule, monthRule);
+  sheet.setConditionalFormatRules(retained);
 }
 
 function buildBaseToStockDate_(ss) {
@@ -1548,6 +1700,7 @@ function handleStock(e) {
 
   const c = e.range.getColumn(), r = e.range.getRow();
 
+  try {
   const chronoCols = {
     dms: C_DMS,
     dmis: C_DMIS,
@@ -2343,6 +2496,9 @@ function handleStock(e) {
     );
     return;
   }
+  } finally {
+    applySkuPaletteFormatting_(sh, C_SKU, C_LABEL);
+  }
 }
 
 // Déplace la ligne de "Stock" vers "Ventes" (et calcule les délais)
@@ -2516,6 +2672,8 @@ function exportVente_(e, row, C_ID, C_LABEL, C_SKU, C_PRIX, C_DVENTE, C_STAMPV, 
     ventes.getRange(2, COL_DATE_VENTE, lastV - 1, 1).setNumberFormat('dd/MM/yyyy');
   }
 
+  applySkuPaletteFormatting_(ventes, COL_SKU_VENTE, COL_ARTICLE);
+
   if (shipping && Number.isFinite(shipping.fee)) {
     applyShippingFeeToAchats_(ss, idVal, shipping.fee);
   }
@@ -2672,6 +2830,7 @@ function copySaleToMonthlySheet_(ss, sale) {
   sortWeekRowsByDate_(sheet, weekIndex + 1, headersLen);
   updateWeeklyTotals_(sheet, weekIndex + 1, headersLen);
   updateMonthlyTotals_(sheet, headersLen);
+  applySkuPaletteFormatting_(sheet, MONTHLY_LEDGER_INDEX.SKU + 1, MONTHLY_LEDGER_INDEX.LIBELLE + 1);
   return true;
 }
 
@@ -2688,6 +2847,10 @@ function ensureMonthlyLedgerSheet_(sheet, monthStart) {
     // La feuille contient d'autres données : ne pas écraser.
     return;
   }
+
+  applyMonthlySheetFormats_(sheet);
+  applySkuPaletteFormatting_(sheet, MONTHLY_LEDGER_INDEX.SKU + 1, MONTHLY_LEDGER_INDEX.LIBELLE + 1);
+  ensureLedgerWeekHighlight_(sheet, headersLen);
 }
 
 function initializeMonthlyLedgerSheet_(sheet, monthStart) {
@@ -2723,6 +2886,8 @@ function initializeMonthlyLedgerSheet_(sheet, monthStart) {
   sheet.getRange(row, 1).setFontWeight('bold');
 
   applyMonthlySheetFormats_(sheet);
+  applySkuPaletteFormatting_(sheet, MONTHLY_LEDGER_INDEX.SKU + 1, MONTHLY_LEDGER_INDEX.LIBELLE + 1);
+  ensureLedgerWeekHighlight_(sheet, headersLen);
 }
 
 function applyMonthlySheetFormats_(sheet) {
