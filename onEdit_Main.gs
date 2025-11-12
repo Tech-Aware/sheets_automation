@@ -148,6 +148,8 @@ const MONTH_NAMES_FR = Object.freeze([
 
 const BACKFILL_MONTH_MENU_SLOTS = 12;
 const BACKFILL_MONTH_SLOT_PREFIX = 'BACKFILL_MENU_SLOT_';
+const BACKFILL_PROGRESS_PREFIX = 'BACKFILL_PROGRESS_';
+const BACKFILL_MAX_RUNTIME_MS = 5.5 * 60 * 1000; // 5 minutes 30 seconds
 
 const HEADER_LABELS = Object.freeze({
   dms: HEADERS.STOCK.DATE_MISE_EN_STOCK,
@@ -3255,6 +3257,76 @@ function getBackfillMenuSlot_(slot) {
   return null;
 }
 
+function getBackfillFilterKey_(filter) {
+  if (filter && typeof filter.year === 'number' && typeof filter.monthIndex === 'number') {
+    return `Y${filter.year}-M${String(filter.monthIndex + 1).padStart(2, '0')}`;
+  }
+  return 'ALL';
+}
+
+function getBackfillFilterLabel_(filter) {
+  if (filter && typeof filter.year === 'number' && typeof filter.monthIndex === 'number') {
+    return formatMonthLabel_(filter.year, filter.monthIndex);
+  }
+  return 'tous les mois';
+}
+
+function loadBackfillProgress_(filterKey) {
+  const props = PropertiesService.getDocumentProperties();
+  const raw = props.getProperty(`${BACKFILL_PROGRESS_PREFIX}${filterKey}`);
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed.nextIndex === 'number') {
+      return parsed;
+    }
+  } catch (err) {
+    props.deleteProperty(`${BACKFILL_PROGRESS_PREFIX}${filterKey}`);
+  }
+  return null;
+}
+
+function saveBackfillProgress_(filterKey, state) {
+  const props = PropertiesService.getDocumentProperties();
+  props.setProperty(`${BACKFILL_PROGRESS_PREFIX}${filterKey}`, JSON.stringify(state));
+}
+
+function clearBackfillProgress_(filterKey) {
+  const props = PropertiesService.getDocumentProperties();
+  props.deleteProperty(`${BACKFILL_PROGRESS_PREFIX}${filterKey}`);
+}
+
+function shouldResumeBackfill_(filter, progress, totalRows) {
+  if (!progress) {
+    return false;
+  }
+
+  const ui = SpreadsheetApp.getUi();
+  const label = getBackfillFilterLabel_(filter);
+  const processed = Math.min(progress.nextIndex, totalRows);
+  const remaining = Math.max(totalRows - processed, 0);
+  const details = [];
+  if (Number(progress.copied)) {
+    details.push(`${progress.copied} vente(s) copiée(s)`);
+  }
+  if (Number(progress.duplicates)) {
+    details.push(`${progress.duplicates} doublon(s)`);
+  }
+  if (Number(progress.missingDate)) {
+    details.push(`${progress.missingDate} sans date`);
+  }
+  if (Number(progress.skippedByFilter)) {
+    details.push(`${progress.skippedByFilter} hors période`);
+  }
+  const detailsSuffix = details.length ? `\n\nProgression enregistrée : ${details.join(', ')}.` : '';
+  const message = remaining > 0
+    ? `Une recopie précédente pour ${label} s'est arrêtée avant la fin (${processed}/${totalRows}). Veux-tu reprendre où elle s'est arrêtée ?${detailsSuffix}`
+    : `Une recopie précédente pour ${label} est enregistrée mais aucune ligne restante n'a été détectée. Reprendre malgré tout ?${detailsSuffix}`;
+
+  const response = ui.alert('Recopie comptable', message, ui.ButtonSet.YES_NO);
+  return response === ui.Button.YES;
+}
+
 function registerBackfillMenu_(menu, ss) {
   const backfillMenu = SpreadsheetApp.getUi().createMenu('Recopier les ventes en compta');
   backfillMenu.addItem('Tous les mois', 'backfillMonthlyLedgers');
@@ -3631,13 +3703,42 @@ function runBackfillMonthlyLedgers_(filter) {
 
   const width = ventes.getLastColumn();
   const data = ventes.getRange(2, 1, lastRow - 1, width).getValues();
+  const totalRows = data.length;
+
+  const filterKey = getBackfillFilterKey_(filter);
+  let progress = loadBackfillProgress_(filterKey);
+  let resumeProgress = false;
+
+  if (progress && (progress.nextIndex > 0 || progress.copied || progress.duplicates || progress.missingDate || progress.skippedByFilter)) {
+    resumeProgress = shouldResumeBackfill_(filter, progress, totalRows);
+    if (!resumeProgress) {
+      clearBackfillProgress_(filterKey);
+      progress = null;
+    }
+  }
+
+  let startIndex = 0;
   let copied = 0;
   let duplicates = 0;
   let missingDate = 0;
   let skippedByFilter = 0;
 
-  for (let i = 0; i < data.length; i++) {
+  if (progress && resumeProgress) {
+    startIndex = Math.max(0, Math.min(Number(progress.nextIndex) || 0, totalRows));
+    copied = Number(progress.copied) || 0;
+    duplicates = Number(progress.duplicates) || 0;
+    missingDate = Number(progress.missingDate) || 0;
+    skippedByFilter = Number(progress.skippedByFilter) || 0;
+  }
+
+  const startTime = Date.now();
+  let timedOut = false;
+  let nextIndex = startIndex;
+
+  for (let i = startIndex; i < data.length; i++) {
     const row = data[i];
+    nextIndex = i + 1;
+
     let dateCell = colDate ? row[colDate - 1] : null;
     if (!(dateCell instanceof Date) || isNaN(dateCell)) {
       if (typeof dateCell === 'number') {
@@ -3702,6 +3803,11 @@ function runBackfillMonthlyLedgers_(filter) {
     } else {
       duplicates++;
     }
+
+    if ((Date.now() - startTime) >= BACKFILL_MAX_RUNTIME_MS && i < data.length - 1) {
+      timedOut = true;
+      break;
+    }
   }
 
   const messageParts = [`${copied} vente(s) copiée(s).`];
@@ -3719,6 +3825,22 @@ function runBackfillMonthlyLedgers_(filter) {
     ? `Recopie ${formatMonthLabel_(filter.year, filter.monthIndex)}`
     : 'Recopie comptable';
 
+  if (timedOut && nextIndex < data.length) {
+    saveBackfillProgress_(filterKey, {
+      nextIndex,
+      copied,
+      duplicates,
+      missingDate,
+      skippedByFilter,
+      totalRows,
+      lastUpdated: new Date().toISOString()
+    });
+    messageParts.push(`Limite de temps atteinte (${nextIndex}/${totalRows}). Relance la recopie pour continuer.`);
+    ss.toast(messageParts.join(' '), title, 8);
+    return;
+  }
+
+  clearBackfillProgress_(filterKey);
   ss.toast(messageParts.join(' '), title, 8);
 }
 
