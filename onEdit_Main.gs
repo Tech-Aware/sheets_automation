@@ -831,7 +831,7 @@ function computeSkuPaletteColor_(sku) {
   return SKU_COLOR_PALETTE[index] || null;
 }
 
-function applySkuPaletteFormatting_(sheet, skuCol, articleCol) {
+function applySkuPaletteFormatting_(sheet, skuCol, _articleCol) {
   if (!sheet || !skuCol || skuCol < 1) {
     return;
   }
@@ -850,8 +850,6 @@ function applySkuPaletteFormatting_(sheet, skuCol, articleCol) {
   const fontColors = range.getFontColors();
 
   const skuIndex = skuCol - 1;
-  const articleIndex = articleCol && articleCol >= 1 && articleCol <= width ? articleCol - 1 : -1;
-
   for (let r = 0; r < values.length; r++) {
     const rowValues = values[r];
     const firstCellText = normText_(rowValues[0] || '');
@@ -864,23 +862,18 @@ function applySkuPaletteFormatting_(sheet, skuCol, articleCol) {
 
     const skuValue = skuIndex < rowValues.length ? String(rowValues[skuIndex] || '').trim() : '';
     const paletteColor = computeSkuPaletteColor_(skuValue);
-    const background = paletteColor && paletteColor.background ? paletteColor.background : SKU_COLOR_DEFAULT.background;
     const textColor = paletteColor && paletteColor.text ? paletteColor.text : SKU_COLOR_DEFAULT.text;
 
     const rowBackgrounds = backgrounds[r];
+    const rowFontColors = fontColors[r];
     for (let c = 0; c < rowBackgrounds.length; c++) {
-      rowBackgrounds[c] = background;
-    }
-
-    if (articleIndex >= 0) {
-      fontColors[r][articleIndex] = textColor;
+      rowBackgrounds[c] = SKU_COLOR_DEFAULT.background;
+      rowFontColors[c] = textColor;
     }
   }
 
   range.setBackgrounds(backgrounds);
-  if (articleIndex >= 0) {
-    range.setFontColors(fontColors);
-  }
+  range.setFontColors(fontColors);
 }
 
 function ensureLedgerWeekHighlight_(sheet, headersLen) {
