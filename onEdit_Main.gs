@@ -888,16 +888,8 @@ function ensureLedgerWeekHighlight_(sheet, headersLen) {
     return;
   }
 
-  const width = Math.min(headersLen, sheet.getMaxColumns());
-  if (width < 1) {
-    return;
-  }
-
-  const height = Math.max(sheet.getMaxRows() - 1, 1);
-  const range = sheet.getRange(2, 1, height, width);
-
   const rules = sheet.getConditionalFormatRules() || [];
-  const retained = rules.filter(rule => {
+  const filteredRules = rules.filter(rule => {
     if (!rule || typeof rule.getDescription !== 'function') {
       return true;
     }
@@ -905,24 +897,50 @@ function ensureLedgerWeekHighlight_(sheet, headersLen) {
     return description !== LEDGER_WEEK_RULE_DESCRIPTION && description !== LEDGER_MONTH_TOTAL_RULE_DESCRIPTION;
   });
 
-  const weekRule = SpreadsheetApp.newConditionalFormatRule()
-    .setRanges([range])
-    .whenFormulaSatisfied('=REGEXMATCH($A2;"^(SEMAINE|TOTAL VENTE SEMAINE)")')
-    .setBackground('#B8FF5C')
-    .setBold(true)
-    .setDescription(LEDGER_WEEK_RULE_DESCRIPTION)
-    .build();
+  if (filteredRules.length !== rules.length) {
+    sheet.setConditionalFormatRules(filteredRules);
+  }
 
-  const monthRule = SpreadsheetApp.newConditionalFormatRule()
-    .setRanges([range])
-    .whenFormulaSatisfied('=$A2="TOTAL VENTE MOIS"')
-    .setBackground('#B8FF5C')
-    .setBold(true)
-    .setDescription(LEDGER_MONTH_TOTAL_RULE_DESCRIPTION)
-    .build();
+  const lastRow = sheet.getLastRow();
+  if (lastRow <= 1) {
+    return;
+  }
 
-  retained.push(weekRule, monthRule);
-  sheet.setConditionalFormatRules(retained);
+  const width = Math.min(headersLen, sheet.getMaxColumns());
+  if (width < 1) {
+    return;
+  }
+
+  const dataRowCount = lastRow - 1;
+  const range = sheet.getRange(2, 1, dataRowCount, width);
+  const values = range.getDisplayValues();
+  const backgrounds = range.getBackgrounds();
+  const fontWeights = range.getFontWeights();
+
+  let touched = false;
+  for (let r = 0; r < values.length; r++) {
+    const firstCellText = normText_(values[r][0] || '');
+    const isWeekHeader = firstCellText.startsWith('semaine') || firstCellText.startsWith('total vente semaine');
+    const isMonthTotal = firstCellText === 'total vente mois';
+    if (!isWeekHeader && !isMonthTotal) {
+      continue;
+    }
+
+    const rowBackgrounds = backgrounds[r];
+    const rowFontWeights = fontWeights[r];
+    for (let c = 0; c < width; c++) {
+      rowBackgrounds[c] = '#B8FF5C';
+      rowFontWeights[c] = 'bold';
+    }
+    touched = true;
+  }
+
+  if (!touched) {
+    return;
+  }
+
+  range.setBackgrounds(backgrounds);
+  range.setFontWeights(fontWeights);
 }
 
 function buildBaseToStockDate_(ss) {
@@ -2831,6 +2849,7 @@ function copySaleToMonthlySheet_(ss, sale) {
   updateWeeklyTotals_(sheet, weekIndex + 1, headersLen);
   updateMonthlyTotals_(sheet, headersLen);
   applySkuPaletteFormatting_(sheet, MONTHLY_LEDGER_INDEX.SKU + 1, MONTHLY_LEDGER_INDEX.LIBELLE + 1);
+  ensureLedgerWeekHighlight_(sheet, headersLen);
   return true;
 }
 
