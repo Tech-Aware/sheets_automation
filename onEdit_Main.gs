@@ -89,12 +89,23 @@ const DEFAULT_VENTES_HEADERS = Object.freeze([
 
 const MONTHLY_LEDGER_HEADERS = Object.freeze([
   'ID',
+  'SKU',
   'LIBELLÉS',
   'DATE DE VENTE',
   'MARGE BRUTE',
   'COEFF MARGE',
   'NBR PCS VENDU'
 ]);
+
+const MONTHLY_LEDGER_INDEX = Object.freeze({
+  ID: MONTHLY_LEDGER_HEADERS.indexOf('ID'),
+  SKU: MONTHLY_LEDGER_HEADERS.indexOf('SKU'),
+  LIBELLE: MONTHLY_LEDGER_HEADERS.indexOf('LIBELLÉS'),
+  DATE_VENTE: MONTHLY_LEDGER_HEADERS.indexOf('DATE DE VENTE'),
+  MARGE_BRUTE: MONTHLY_LEDGER_HEADERS.indexOf('MARGE BRUTE'),
+  COEFF_MARGE: MONTHLY_LEDGER_HEADERS.indexOf('COEFF MARGE'),
+  NB_PIECES: MONTHLY_LEDGER_HEADERS.indexOf('NBR PCS VENDU')
+});
 
 const MONTH_NAMES_FR = Object.freeze([
   'Janvier',
@@ -2612,30 +2623,47 @@ function copySaleToMonthlySheet_(ss, sale) {
   const saleRowNumber = totalRowNumber;
 
   const saleRow = Array(headersLen).fill('');
-  saleRow[0] = rawId || '';
-  saleRow[1] = sale.libelle || '';
-  saleRow[2] = sale.dateVente;
+  if (MONTHLY_LEDGER_INDEX.ID >= 0) {
+    saleRow[MONTHLY_LEDGER_INDEX.ID] = rawId || '';
+  }
+  if (MONTHLY_LEDGER_INDEX.SKU >= 0) {
+    saleRow[MONTHLY_LEDGER_INDEX.SKU] = rawSku || '';
+  }
+  if (MONTHLY_LEDGER_INDEX.LIBELLE >= 0) {
+    saleRow[MONTHLY_LEDGER_INDEX.LIBELLE] = sale.libelle || '';
+  }
+  if (MONTHLY_LEDGER_INDEX.DATE_VENTE >= 0) {
+    saleRow[MONTHLY_LEDGER_INDEX.DATE_VENTE] = sale.dateVente;
+  }
 
   const margeSource = sale.margeBrute;
   const margeValue = (margeSource === '' || margeSource === null || margeSource === undefined)
     ? NaN
     : (typeof margeSource === 'number' ? margeSource : valueToNumber_(margeSource));
-  saleRow[3] = Number.isFinite(margeValue) ? roundCurrency_(margeValue) : '';
+  if (MONTHLY_LEDGER_INDEX.MARGE_BRUTE >= 0) {
+    saleRow[MONTHLY_LEDGER_INDEX.MARGE_BRUTE] = Number.isFinite(margeValue) ? roundCurrency_(margeValue) : '';
+  }
 
   const coeffSource = sale.coeffMarge;
   const coeffValue = (coeffSource === '' || coeffSource === null || coeffSource === undefined)
     ? NaN
     : (typeof coeffSource === 'number' ? coeffSource : valueToNumber_(coeffSource));
-  saleRow[4] = Number.isFinite(coeffValue) ? Math.round(coeffValue * 100) / 100 : '';
+  if (MONTHLY_LEDGER_INDEX.COEFF_MARGE >= 0) {
+    saleRow[MONTHLY_LEDGER_INDEX.COEFF_MARGE] = Number.isFinite(coeffValue)
+      ? Math.round(coeffValue * 100) / 100
+      : '';
+  }
 
   const piecesSource = sale.nbPieces;
   const piecesValue = (piecesSource === '' || piecesSource === null || piecesSource === undefined)
     ? NaN
     : (typeof piecesSource === 'number' ? piecesSource : valueToNumber_(piecesSource));
-  if (Number.isFinite(piecesValue)) {
-    saleRow[5] = piecesValue;
-  } else if (piecesSource !== undefined && piecesSource !== null && piecesSource !== '') {
-    saleRow[5] = piecesSource;
+  if (MONTHLY_LEDGER_INDEX.NB_PIECES >= 0) {
+    if (Number.isFinite(piecesValue)) {
+      saleRow[MONTHLY_LEDGER_INDEX.NB_PIECES] = piecesValue;
+    } else if (piecesSource !== undefined && piecesSource !== null && piecesSource !== '') {
+      saleRow[MONTHLY_LEDGER_INDEX.NB_PIECES] = piecesSource;
+    }
   }
 
   sheet.getRange(saleRowNumber, 1, 1, headersLen).setValues([saleRow]);
@@ -2677,8 +2705,10 @@ function initializeMonthlyLedgerSheet_(sheet, monthStart) {
     sheet.getRange(row, 1).setValue(label).setFontWeight('bold');
     row++;
 
+    const weekTotalRow = Array(headersLen).fill('');
+    weekTotalRow[0] = `TOTAL VENTE SEMAINE ${i + 1}`;
     sheet.getRange(row, 1, 1, headersLen)
-      .setValues([[`TOTAL VENTE SEMAINE ${i + 1}`, '', '', '', '', '']]);
+      .setValues([weekTotalRow]);
     sheet.getRange(row, 1).setFontWeight('bold');
     row++;
 
@@ -2686,8 +2716,10 @@ function initializeMonthlyLedgerSheet_(sheet, monthStart) {
     row++;
   }
 
+  const monthTotalRow = Array(headersLen).fill('');
+  monthTotalRow[0] = `TOTAL VENTE MOIS`;
   sheet.getRange(row, 1, 1, headersLen)
-    .setValues([[`TOTAL VENTE MOIS`, '', '', '', '', '']]);
+    .setValues([monthTotalRow]);
   sheet.getRange(row, 1).setFontWeight('bold');
 
   applyMonthlySheetFormats_(sheet);
@@ -2695,10 +2727,18 @@ function initializeMonthlyLedgerSheet_(sheet, monthStart) {
 
 function applyMonthlySheetFormats_(sheet) {
   const maxRows = sheet.getMaxRows();
-  sheet.getRange(1, 3, maxRows, 1).setNumberFormat('dd/MM/yyyy');
-  sheet.getRange(1, 4, maxRows, 1).setNumberFormat('#,##0.00');
-  sheet.getRange(1, 5, maxRows, 1).setNumberFormat('0.00');
-  sheet.getRange(1, 6, maxRows, 1).setNumberFormat('0');
+  if (MONTHLY_LEDGER_INDEX.DATE_VENTE >= 0) {
+    sheet.getRange(1, MONTHLY_LEDGER_INDEX.DATE_VENTE + 1, maxRows, 1).setNumberFormat('dd/MM/yyyy');
+  }
+  if (MONTHLY_LEDGER_INDEX.MARGE_BRUTE >= 0) {
+    sheet.getRange(1, MONTHLY_LEDGER_INDEX.MARGE_BRUTE + 1, maxRows, 1).setNumberFormat('#,##0.00');
+  }
+  if (MONTHLY_LEDGER_INDEX.COEFF_MARGE >= 0) {
+    sheet.getRange(1, MONTHLY_LEDGER_INDEX.COEFF_MARGE + 1, maxRows, 1).setNumberFormat('0.00');
+  }
+  if (MONTHLY_LEDGER_INDEX.NB_PIECES >= 0) {
+    sheet.getRange(1, MONTHLY_LEDGER_INDEX.NB_PIECES + 1, maxRows, 1).setNumberFormat('0');
+  }
 }
 
 function sortWeekRowsByDate_(sheet, weekNumber, headersLen) {
@@ -2713,7 +2753,8 @@ function sortWeekRowsByDate_(sheet, weekNumber, headersLen) {
   if (dataCount <= 1) return;
 
   const firstDataRow = labelIdx + 2;
-  sheet.getRange(firstDataRow, 1, dataCount, headersLen).sort({ column: 3, ascending: true });
+  const dateColumn = MONTHLY_LEDGER_INDEX.DATE_VENTE >= 0 ? MONTHLY_LEDGER_INDEX.DATE_VENTE + 1 : 3;
+  sheet.getRange(firstDataRow, 1, dataCount, headersLen).sort({ column: dateColumn, ascending: true });
 }
 
 function updateWeeklyTotals_(sheet, weekNumber, headersLen) {
@@ -2741,21 +2782,29 @@ function updateWeeklyTotals_(sheet, weekNumber, headersLen) {
 
     for (let i = 0; i < rows.length; i++) {
       const row = rows[i];
-      const hasIdOrLabel = (String(row[0] || '').trim() !== '') || (String(row[1] || '').trim() !== '');
-      if (!hasIdOrLabel) {
+      const hasKeyInfo = [MONTHLY_LEDGER_INDEX.ID, MONTHLY_LEDGER_INDEX.SKU, MONTHLY_LEDGER_INDEX.LIBELLE]
+        .filter(idx => idx >= 0)
+        .some(idx => String(row[idx] || '').trim() !== '');
+      if (!hasKeyInfo) {
         continue;
       }
       rowCount++;
 
       let marge = NaN;
-      if (row[3] !== '' && row[3] !== null && row[3] !== undefined) {
-        marge = valueToNumber_(row[3]);
+      if (MONTHLY_LEDGER_INDEX.MARGE_BRUTE >= 0) {
+        const margeCell = row[MONTHLY_LEDGER_INDEX.MARGE_BRUTE];
+        if (margeCell !== '' && margeCell !== null && margeCell !== undefined) {
+          marge = valueToNumber_(margeCell);
+        }
       }
       if (Number.isFinite(marge)) sumMarge += marge;
 
       let coeff = NaN;
-      if (row[4] !== '' && row[4] !== null && row[4] !== undefined) {
-        coeff = valueToNumber_(row[4]);
+      if (MONTHLY_LEDGER_INDEX.COEFF_MARGE >= 0) {
+        const coeffCell = row[MONTHLY_LEDGER_INDEX.COEFF_MARGE];
+        if (coeffCell !== '' && coeffCell !== null && coeffCell !== undefined) {
+          coeff = valueToNumber_(coeffCell);
+        }
       }
       if (Number.isFinite(coeff)) {
         sumCoeff += coeff;
@@ -2763,17 +2812,28 @@ function updateWeeklyTotals_(sheet, weekNumber, headersLen) {
       }
 
       let pieces = NaN;
-      if (row[5] !== '' && row[5] !== null && row[5] !== undefined) {
-        pieces = valueToNumber_(row[5]);
+      if (MONTHLY_LEDGER_INDEX.NB_PIECES >= 0) {
+        const piecesCell = row[MONTHLY_LEDGER_INDEX.NB_PIECES];
+        if (piecesCell !== '' && piecesCell !== null && piecesCell !== undefined) {
+          pieces = valueToNumber_(piecesCell);
+        }
       }
       if (Number.isFinite(pieces)) sumPieces += pieces;
     }
 
     if (rowCount > 0) {
       totals[0] = `TOTAL VENTE SEMAINE ${weekNumber} : ${rowCount}`;
-      totals[3] = roundCurrency_(sumMarge);
-      totals[4] = countCoeff ? Math.round((sumCoeff / countCoeff) * 100) / 100 : '';
-      totals[5] = sumPieces;
+      if (MONTHLY_LEDGER_INDEX.MARGE_BRUTE >= 0) {
+        totals[MONTHLY_LEDGER_INDEX.MARGE_BRUTE] = roundCurrency_(sumMarge);
+      }
+      if (MONTHLY_LEDGER_INDEX.COEFF_MARGE >= 0) {
+        totals[MONTHLY_LEDGER_INDEX.COEFF_MARGE] = countCoeff
+          ? Math.round((sumCoeff / countCoeff) * 100) / 100
+          : '';
+      }
+      if (MONTHLY_LEDGER_INDEX.NB_PIECES >= 0) {
+        totals[MONTHLY_LEDGER_INDEX.NB_PIECES] = sumPieces;
+      }
     }
   }
 
@@ -2806,22 +2866,30 @@ function updateMonthlyTotals_(sheet, headersLen) {
         continue;
       }
 
-      const hasIdOrLabel = (row[0] !== '' && row[0] !== null) || String(row[1] || '').trim() !== '';
-      if (!hasIdOrLabel) {
+      const hasKeyInfo = [MONTHLY_LEDGER_INDEX.ID, MONTHLY_LEDGER_INDEX.SKU, MONTHLY_LEDGER_INDEX.LIBELLE]
+        .filter(idx => idx >= 0)
+        .some(idx => String(row[idx] || '').trim() !== '');
+      if (!hasKeyInfo) {
         continue;
       }
 
       countRows++;
 
       let marge = NaN;
-      if (row[3] !== '' && row[3] !== null && row[3] !== undefined) {
-        marge = valueToNumber_(row[3]);
+      if (MONTHLY_LEDGER_INDEX.MARGE_BRUTE >= 0) {
+        const margeCell = row[MONTHLY_LEDGER_INDEX.MARGE_BRUTE];
+        if (margeCell !== '' && margeCell !== null && margeCell !== undefined) {
+          marge = valueToNumber_(margeCell);
+        }
       }
       if (Number.isFinite(marge)) sumMarge += marge;
 
       let coeff = NaN;
-      if (row[4] !== '' && row[4] !== null && row[4] !== undefined) {
-        coeff = valueToNumber_(row[4]);
+      if (MONTHLY_LEDGER_INDEX.COEFF_MARGE >= 0) {
+        const coeffCell = row[MONTHLY_LEDGER_INDEX.COEFF_MARGE];
+        if (coeffCell !== '' && coeffCell !== null && coeffCell !== undefined) {
+          coeff = valueToNumber_(coeffCell);
+        }
       }
       if (Number.isFinite(coeff)) {
         sumCoeff += coeff;
@@ -2829,17 +2897,28 @@ function updateMonthlyTotals_(sheet, headersLen) {
       }
 
       let pieces = NaN;
-      if (row[5] !== '' && row[5] !== null && row[5] !== undefined) {
-        pieces = valueToNumber_(row[5]);
+      if (MONTHLY_LEDGER_INDEX.NB_PIECES >= 0) {
+        const piecesCell = row[MONTHLY_LEDGER_INDEX.NB_PIECES];
+        if (piecesCell !== '' && piecesCell !== null && piecesCell !== undefined) {
+          pieces = valueToNumber_(piecesCell);
+        }
       }
       if (Number.isFinite(pieces)) sumPieces += pieces;
     }
 
     if (countRows > 0) {
       totals[0] = `TOTAL VENTE MOIS : ${countRows}`;
-      totals[3] = roundCurrency_(sumMarge);
-      totals[4] = countCoeff ? Math.round((sumCoeff / countCoeff) * 100) / 100 : '';
-      totals[5] = sumPieces;
+      if (MONTHLY_LEDGER_INDEX.MARGE_BRUTE >= 0) {
+        totals[MONTHLY_LEDGER_INDEX.MARGE_BRUTE] = roundCurrency_(sumMarge);
+      }
+      if (MONTHLY_LEDGER_INDEX.COEFF_MARGE >= 0) {
+        totals[MONTHLY_LEDGER_INDEX.COEFF_MARGE] = countCoeff
+          ? Math.round((sumCoeff / countCoeff) * 100) / 100
+          : '';
+      }
+      if (MONTHLY_LEDGER_INDEX.NB_PIECES >= 0) {
+        totals[MONTHLY_LEDGER_INDEX.NB_PIECES] = sumPieces;
+      }
     }
   }
 
