@@ -129,6 +129,7 @@ const SKU_COLOR_OVERRIDES = Object.freeze({
 const SKU_COLOR_DEFAULT = Object.freeze({ background: '#FFFFFF', text: '#000000' });
 
 const ENABLE_LEDGER_DEBUG_LOGS = true;
+const BACKFILL_PROGRESS_KEY = 'MONTHLY_LEDGER_BACKFILL_PROGRESS';
 
 const LEDGER_WEEK_RULE_DESCRIPTION = 'auto-ledger-week-highlight';
 const LEDGER_MONTH_TOTAL_RULE_DESCRIPTION = 'auto-ledger-month-total-highlight';
@@ -277,6 +278,67 @@ function restorePreviousCellValue_(sheet, row, col) {
 
   props.deleteProperty(key);
   return true;
+}
+
+function getBackfillProgressContext_(filter) {
+  if (filter && typeof filter.year === 'number' && typeof filter.monthIndex === 'number') {
+    return { mode: 'filtered', year: filter.year, monthIndex: filter.monthIndex };
+  }
+  return { mode: 'all' };
+}
+
+function loadBackfillProgress_(props, filter) {
+  if (!props) return null;
+  const raw = props.getProperty(BACKFILL_PROGRESS_KEY);
+  if (!raw) return null;
+
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (err) {
+    props.deleteProperty(BACKFILL_PROGRESS_KEY);
+    return null;
+  }
+
+  if (!parsed || typeof parsed.nextIndex !== 'number' || parsed.nextIndex < 0) {
+    props.deleteProperty(BACKFILL_PROGRESS_KEY);
+    return null;
+  }
+
+  const context = getBackfillProgressContext_(filter);
+  if (parsed.mode !== context.mode) {
+    return null;
+  }
+
+  if (context.mode === 'filtered') {
+    if (parsed.year !== context.year || parsed.monthIndex !== context.monthIndex) {
+      return null;
+    }
+  }
+
+  return parsed;
+}
+
+function saveBackfillProgress_(props, filter, nextIndex) {
+  if (!props || nextIndex === null || nextIndex === undefined) return;
+  const context = getBackfillProgressContext_(filter);
+  const payload = {
+    mode: context.mode,
+    nextIndex: Math.max(0, Math.floor(nextIndex)),
+    timestamp: Date.now()
+  };
+
+  if (context.mode === 'filtered') {
+    payload.year = context.year;
+    payload.monthIndex = context.monthIndex;
+  }
+
+  props.setProperty(BACKFILL_PROGRESS_KEY, JSON.stringify(payload));
+}
+
+function clearBackfillProgress_(props) {
+  if (!props) return;
+  props.deleteProperty(BACKFILL_PROGRESS_KEY);
 }
 
 function getDateOrNull_(value) {
@@ -3655,14 +3717,66 @@ function runBackfillMonthlyLedgers_(filter) {
 
   const width = ventes.getLastColumn();
   const data = ventes.getRange(2, 1, lastRow - 1, width).getValues();
+  const props = PropertiesService.getDocumentProperties();
+  const progress = loadBackfillProgress_(props, filter);
+  const dataLength = data.length;
+  const context = getBackfillProgressContext_(filter);
+  let startIndex = 0;
+
+  if (progress && progress.nextIndex >= dataLength) {
+    ledgerLog_('[Backfill] Progression précédente supprimée (jeu de données réduit)', {
+      nextIndex: progress.nextIndex,
+      dataLength,
+      context
+    });
+    clearBackfillProgress_(props);
+  } else if (progress && progress.nextIndex < dataLength) {
+    const resumeRow = progress.nextIndex + 2;
+    let resume = true;
+
+    try {
+      const ui = SpreadsheetApp.getUi();
+      const monthLabel = context.mode === 'filtered'
+        ? ` (${formatMonthLabel_(context.year, context.monthIndex)})`
+        : '';
+      const choice = ui.alert(
+        'Recopie interrompue',
+        `Une précédente recopie${monthLabel} s'est arrêtée à la ligne ${resumeRow}. Reprendre à partir de cette ligne ?`,
+        ui.ButtonSet.YES_NO
+      );
+      resume = choice === ui.Button.YES;
+      if (!resume) {
+        ledgerLog_('[Backfill] Reprise ignorée par l\'utilisateur', {
+          rowIndex: resumeRow,
+          context
+        });
+      }
+    } catch (err) {
+      resume = true;
+    }
+
+    if (resume) {
+      startIndex = progress.nextIndex;
+      ledgerLog_('[Backfill] Reprise à la suite d\'une recopie interrompue', {
+        startIndex,
+        rowIndex: resumeRow,
+        context
+      });
+    } else {
+      clearBackfillProgress_(props);
+    }
+  }
+
   let copied = 0;
   let duplicates = 0;
   let missingDate = 0;
   let skippedByFilter = 0;
 
-  for (let i = 0; i < data.length; i++) {
+  for (let i = startIndex; i < data.length; i++) {
+    saveBackfillProgress_(props, filter, i);
     const row = data[i];
     const rowIndex = i + 2;
+    const advanceProgress = () => saveBackfillProgress_(props, filter, i + 1);
     const idVal = colId ? row[colId - 1] : '';
     const libelle = colLibelle ? row[colLibelle - 1] : '';
     const sku = colSku ? row[colSku - 1] : '';
@@ -3687,6 +3801,7 @@ function runBackfillMonthlyLedgers_(filter) {
         date: rawDateValue
       });
       missingDate++;
+      advanceProgress();
       continue;
     }
 
@@ -3699,6 +3814,7 @@ function runBackfillMonthlyLedgers_(filter) {
           date: dateCell
         });
         skippedByFilter++;
+        advanceProgress();
         continue;
       }
     }
@@ -3745,7 +3861,11 @@ function runBackfillMonthlyLedgers_(filter) {
         date: dateCell
       });
     }
+
+    advanceProgress();
   }
+
+  clearBackfillProgress_(props);
 
   const messageParts = [`${copied} vente(s) copiée(s).`];
   if (duplicates) {
