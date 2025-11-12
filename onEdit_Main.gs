@@ -128,6 +128,8 @@ const SKU_COLOR_OVERRIDES = Object.freeze({
 
 const SKU_COLOR_DEFAULT = Object.freeze({ background: '#FFFFFF', text: '#000000' });
 
+const ENABLE_LEDGER_DEBUG_LOGS = true;
+
 const LEDGER_WEEK_RULE_DESCRIPTION = 'auto-ledger-week-highlight';
 const LEDGER_MONTH_TOTAL_RULE_DESCRIPTION = 'auto-ledger-month-total-highlight';
 
@@ -165,6 +167,21 @@ function onEdit(e) {
 }
 
 // --- utilitaires généraux ---
+
+function ledgerLog_(message, details) {
+  if (!ENABLE_LEDGER_DEBUG_LOGS) return;
+  if (details === undefined) {
+    Logger.log(message);
+  } else if (typeof details === 'string') {
+    Logger.log(`${message} ${details}`);
+  } else {
+    try {
+      Logger.log(`${message} ${JSON.stringify(details)}`);
+    } catch (err) {
+      Logger.log(`${message} ${details}`);
+    }
+  }
+}
 
 function escReg_(s){ 
   return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); 
@@ -2772,6 +2789,13 @@ function copySaleToMonthlySheet_(ss, sale) {
       const notes = sheet.getRange(2, 1, last - 1, 1).getNotes();
       const alreadyPresent = notes.some(row => row[0] === dedupeKey);
       if (alreadyPresent) {
+        ledgerLog_('[MonthlyLedger] Doublon détecté lors de la recopie', {
+          sheet: sheetName,
+          key: dedupeKey,
+          id: rawId || '',
+          sku: rawSku || '',
+          libelle: sale.libelle || ''
+        });
         return false;
       }
     }
@@ -3638,7 +3662,12 @@ function runBackfillMonthlyLedgers_(filter) {
 
   for (let i = 0; i < data.length; i++) {
     const row = data[i];
-    let dateCell = colDate ? row[colDate - 1] : null;
+    const rowIndex = i + 2;
+    const idVal = colId ? row[colId - 1] : '';
+    const libelle = colLibelle ? row[colLibelle - 1] : '';
+    const sku = colSku ? row[colSku - 1] : '';
+    const rawDateValue = colDate ? row[colDate - 1] : null;
+    let dateCell = rawDateValue;
     if (!(dateCell instanceof Date) || isNaN(dateCell)) {
       if (typeof dateCell === 'number') {
         dateCell = new Date(dateCell);
@@ -3651,20 +3680,28 @@ function runBackfillMonthlyLedgers_(filter) {
     }
 
     if (!(dateCell instanceof Date) || isNaN(dateCell)) {
+      ledgerLog_('[Backfill] Ligne ignorée (date de vente manquante)', {
+        rowIndex,
+        id: idVal,
+        sku,
+        date: rawDateValue
+      });
       missingDate++;
       continue;
     }
 
     if (filter && typeof filter.year === 'number' && typeof filter.monthIndex === 'number') {
       if (dateCell.getFullYear() !== filter.year || dateCell.getMonth() !== filter.monthIndex) {
+        ledgerLog_('[Backfill] Ligne ignorée (hors filtre mois)', {
+          rowIndex,
+          id: idVal,
+          sku,
+          date: dateCell
+        });
         skippedByFilter++;
         continue;
       }
     }
-
-    const idVal = colId ? row[colId - 1] : '';
-    const libelle = colLibelle ? row[colLibelle - 1] : '';
-    const sku = colSku ? row[colSku - 1] : '';
 
     let prixVente = NaN;
     if (colPrix) {
@@ -3701,6 +3738,12 @@ function runBackfillMonthlyLedgers_(filter) {
       copied++;
     } else {
       duplicates++;
+      ledgerLog_('[Backfill] Ligne ignorée (doublon en compta mensuelle)', {
+        rowIndex,
+        id: idVal,
+        sku,
+        date: dateCell
+      });
     }
   }
 
