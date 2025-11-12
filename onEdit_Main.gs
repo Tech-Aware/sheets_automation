@@ -909,7 +909,7 @@ function ensureLedgerWeekHighlight_(sheet, headersLen) {
     .setRanges([range])
     .whenFormulaSatisfied('=REGEXMATCH($A2;"^(SEMAINE|TOTAL VENTE SEMAINE)")')
     .setBackground('#B8FF5C')
-    .setFontWeight('bold')
+    .setBold(true)
     .setDescription(LEDGER_WEEK_RULE_DESCRIPTION)
     .build();
 
@@ -917,7 +917,7 @@ function ensureLedgerWeekHighlight_(sheet, headersLen) {
     .setRanges([range])
     .whenFormulaSatisfied('=$A2="TOTAL VENTE MOIS"')
     .setBackground('#B8FF5C')
-    .setFontWeight('bold')
+    .setBold(true)
     .setDescription(LEDGER_MONTH_TOTAL_RULE_DESCRIPTION)
     .build();
 
