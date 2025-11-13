@@ -180,6 +180,7 @@ function registerBackfillMenu_(menu, ss) {
 function registerStockActionsMenu_(ui) {
   const stockMenu = ui.createMenu('Actions Stock');
   stockMenu
+    .addItem('Valider toutes les saisies prêtes', 'validateAllSales')
     .addItem('Cocher "Mis en ligne" (sélection)', 'bulkSetStockStatusMisEnLigne')
     .addItem('Cocher "Publié" (sélection)', 'bulkSetStockStatusPublie')
     .addItem('Cocher "Vendu" (sélection)', 'bulkSetStockStatusVendu');
@@ -194,7 +195,6 @@ function onOpen(e) {
   const maintenance = ui.createMenu('Maintenance')
     .addItem('Recalculer les SKU du Stock', 'recalcStock')
     .addItem('Mettre à jour les dates de mise en stock', 'syncMiseEnStockFromAchats')
-    .addItem('Valider toutes les saisies prêtes', 'validateAllSales')
     .addItem('Trier les ventes (date décroissante)', 'sortVentesByDate')
     .addItem('Retirer du Stock les ventes importées', 'purgeStockFromVentes');
 
