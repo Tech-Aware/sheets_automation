@@ -625,8 +625,6 @@ function handleStock(e) {
         clearPriceAlertIfAny_(sh, r, C_PRIX);
         const priceCell = sh.getRange(r, C_PRIX);
         priceCell.clearContent();
-        priceCell.setBackground(null);
-        priceCell.setFontColor(null);
       } else {
         clearPriceAlertIfAny_(sh, r, C_PRIX);
       }
@@ -661,8 +659,6 @@ function handleStock(e) {
         clearPriceAlertIfAny_(sh, r, C_PRIX);
         const priceCell = sh.getRange(r, C_PRIX);
         priceCell.clearContent();
-        priceCell.setBackground(null);
-        priceCell.setFontColor(null);
       } else {
         clearPriceAlertIfAny_(sh, r, C_PRIX);
       }
@@ -751,8 +747,6 @@ function handleStock(e) {
         clearPriceAlertIfAny_(sh, r, C_PRIX);
         const priceCell = sh.getRange(r, C_PRIX);
         priceCell.clearContent();
-        priceCell.setBackground(null);
-        priceCell.setFontColor(null);
       } else {
         clearPriceAlertIfAny_(sh, r, C_PRIX);
       }

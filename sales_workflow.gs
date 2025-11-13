@@ -362,14 +362,13 @@ function initializeMonthlyLedgerSheet_(sheet, monthStart) {
   for (let i = 0; i < weekRanges.length; i++) {
     const range = weekRanges[i];
     const label = `SEMAINE ${i + 1} ${formatDateString_(range.start)} AU ${formatDateString_(range.end)}`;
-    sheet.getRange(row, 1).setValue(label).setFontWeight('bold');
+    sheet.getRange(row, 1).setValue(label);
     row++;
 
     const weekTotalRow = Array(headersLen).fill('');
     weekTotalRow[0] = `TOTAL VENTE SEMAINE ${i + 1}`;
     sheet.getRange(row, 1, 1, headersLen)
       .setValues([weekTotalRow]);
-    sheet.getRange(row, 1).setFontWeight('bold');
     row++;
 
     sheet.getRange(row, 1, 1, headersLen).clearContent();
@@ -380,7 +379,6 @@ function initializeMonthlyLedgerSheet_(sheet, monthStart) {
   monthTotalRow[0] = `TOTAL VENTE MOIS`;
   sheet.getRange(row, 1, 1, headersLen)
     .setValues([monthTotalRow]);
-  sheet.getRange(row, 1).setFontWeight('bold');
 
   applyMonthlySheetFormats_(sheet);
   applySkuPaletteFormatting_(sheet, MONTHLY_LEDGER_INDEX.SKU + 1, MONTHLY_LEDGER_INDEX.LIBELLE + 1);
@@ -500,7 +498,7 @@ function updateWeeklyTotals_(sheet, weekNumber, headersLen) {
   }
 
   sheet.getRange(totalRowNumber, 1, 1, headersLen).setValues([totals]);
-  sheet.getRange(totalRowNumber, 1).setFontWeight('bold').setNote('');
+  sheet.getRange(totalRowNumber, 1).setNote('');
 }
 
 function updateMonthlyTotals_(sheet, headersLen) {
@@ -585,7 +583,7 @@ function updateMonthlyTotals_(sheet, headersLen) {
   }
 
   sheet.getRange(monthRowNumber, 1, 1, headersLen).setValues([totals]);
-  sheet.getRange(monthRowNumber, 1).setFontWeight('bold').setNote('');
+  sheet.getRange(monthRowNumber, 1).setNote('');
 }
 
 function valueToNumber_(value) {

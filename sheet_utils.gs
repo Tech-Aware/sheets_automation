@@ -507,9 +507,6 @@ function enforceChronologicalDates_(sheet, row, cols, options) {
 
   function markViolation(cell, message) {
     violations.push(message);
-    if (!cell) return;
-    cell.setBackground('#f8d7da');
-    cell.setFontColor('#721c24');
   }
 
   if (requireAllDates) {
@@ -556,12 +553,6 @@ function enforceChronologicalDates_(sheet, row, cols, options) {
   }
 
   if (!violations.length) {
-    [dmsCell, dmlCell, dpubCell, dventeCell].forEach(cell => {
-      if (cell) {
-        cell.setBackground(null);
-        cell.setFontColor(null);
-      }
-    });
     return result;
   }
 
@@ -619,74 +610,12 @@ function computeSkuPaletteColor_(sku) {
   return SKU_COLOR_PALETTE[index] || SKU_COLOR_DEFAULT;
 }
 
-function applySkuPaletteFormatting_(sheet, skuCol, articleCol) {
-  if (!sheet || !skuCol || !articleCol) return;
-  const lastRow = sheet.getLastRow();
-  if (lastRow < 2) return;
-
-  const skuRange = sheet.getRange(2, skuCol, lastRow - 1, 1);
-  const skuValues = skuRange.getValues();
-  const articleRange = sheet.getRange(2, articleCol, lastRow - 1, 1);
-  const articleValues = articleRange.getValues();
-
-  const backgrounds = [];
-  const fontColors = [];
-
-  for (let i = 0; i < skuValues.length; i++) {
-    const sku = skuValues[i][0];
-    if (!sku) {
-      backgrounds.push(['#FFFFFF']);
-      fontColors.push(['#000000']);
-      continue;
-    }
-
-    const color = computeSkuPaletteColor_(sku);
-    backgrounds.push([color.background]);
-    fontColors.push([color.text]);
-
-    const article = articleValues[i][0];
-    if (article) {
-      articleRange.getCell(i + 1, 1).setFontWeight('bold');
-    }
-  }
-
-  skuRange.setBackgrounds(backgrounds);
-  skuRange.setFontColors(fontColors);
+function applySkuPaletteFormatting_() {
+  // Mise en forme supprimée : fonction volontairement vide.
 }
 
-function ensureLedgerWeekHighlight_(sheet, headersLen) {
-  if (!sheet) return;
-  const lastRow = sheet.getLastRow();
-  if (lastRow < 2) return;
-
-  const range = sheet.getRange(2, 1, lastRow - 1, headersLen);
-  const rules = sheet.getConditionalFormatRules();
-  const filtered = rules.filter(rule => {
-    const condition = rule.getBooleanCondition && rule.getBooleanCondition();
-    if (!condition) return true;
-
-    if (condition.getCriteriaType() !== SpreadsheetApp.BooleanCriteria.CUSTOM_FORMULA) {
-      return true;
-    }
-
-    const values = condition.getCriteriaValues();
-    if (!values || !values.length) return true;
-    const formula = values[0];
-    return formula !== '=$A2="Semaine"' && formula !== '=$A2="Total mensuel"';
-  });
-
-  const buildRule = (formula, background) => SpreadsheetApp.newConditionalFormatRule()
-    .whenFormulaSatisfied(formula)
-    .setBackground(background)
-    .setBold(true)
-    .setRanges([range])
-    .build();
-
-  filtered.push(
-    buildRule('=$A2="Semaine"', '#f0f0f0'),
-    buildRule('=$A2="Total mensuel"', '#d1ecf1')
-  );
-  sheet.setConditionalFormatRules(filtered);
+function ensureLedgerWeekHighlight_() {
+  // Mise en forme supprimée : fonction volontairement vide.
 }
 
 function buildBaseToStockDate_(ss) {
@@ -804,15 +733,11 @@ function ensureValidPriceOrWarn_(sh, row, C_PRIX) {
 
   // Prix numérique strictement positif
   if (typeof v === 'number' && !isNaN(v) && v > 0) {
-    cell.setBackground(null);
-    cell.setFontColor(null);
     return true;
   }
 
   const disp = cell.getDisplayValue();
   if (!disp || disp.indexOf('⚠️') === -1) {
-    cell.setBackground('#0000FF');  // bleu fort
-    cell.setFontColor('#FFFF00');   // jaune
     cell.setValue(`⚠️ Vous devez obligatoirement fournir un ${HEADERS.STOCK.PRIX_VENTE}`);
   }
 
@@ -827,7 +752,5 @@ function clearPriceAlertIfAny_(sh, row, C_PRIX) {
 
   if (disp && disp.indexOf('⚠️') === 0) {
     cell.clearContent();
-    cell.setBackground(null);
-    cell.setFontColor(null);
   }
 }
