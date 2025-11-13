@@ -109,7 +109,9 @@ function handleStock(e) {
       return null;
     }
 
-    const nextDate = computeDateFromPrevious_(key);
+    const nextDate = key === 'dvente'
+      ? new Date()
+      : computeDateFromPrevious_(key);
     const cell = sh.getRange(r, entry.column);
     cell.setValue(nextDate);
     cell.setNumberFormat('dd/MM/yyyy');

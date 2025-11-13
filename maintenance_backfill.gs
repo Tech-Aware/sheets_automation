@@ -809,9 +809,7 @@ function validateAllSales() {
     || ventesWhere(h => h.includes('delai') && h.includes('vente'));
   const widthVentes     = Math.max(ventesHeaders.length, DEFAULT_VENTES_HEADERS.length, ventes.getLastColumn());
 
-  const toAppend = [];
-  const rowsToDel = [];
-  let moved = 0;
+  const readySales = [];
   const invalidChronoRows = [];
   const missingShippingRows = [];
   const unknownShippingRows = [];
@@ -917,17 +915,20 @@ function validateAllSales() {
     if (COL_DELAI_PUB) newRow[COL_DELAI_PUB - 1] = dPub;
     if (COL_DELAI_VENTE) newRow[COL_DELAI_VENTE - 1] = dVente;
 
-    toAppend.push(newRow);
-
-    applyShippingFeeToAchats_(ss, idValue, perItemFee);
-
-    rowsToDel.push(rowIndex);
-    moved++;
+    readySales.push({
+      rowIndex,
+      ventesRow: newRow,
+      idValue,
+      perItemFee
+    });
   }
 
-  if (toAppend.length > 0) {
+  const moved = readySales.length;
+
+  if (moved > 0) {
     const startV = Math.max(2, ventes.getLastRow() + 1);
-    ventes.getRange(startV, 1, toAppend.length, widthVentes).setValues(toAppend);
+    const rowsPayload = readySales.map(entry => entry.ventesRow);
+    ventes.getRange(startV, 1, rowsPayload.length, widthVentes).setValues(rowsPayload);
 
     const lastV = ventes.getLastRow();
     if (lastV > 2 && COL_DATE_VENTE) {
@@ -936,8 +937,14 @@ function validateAllSales() {
       ventes.getRange(2, COL_DATE_VENTE, lastV - 1, 1).setNumberFormat('dd/MM/yyyy');
     }
 
-    rowsToDel.sort((a, b) => b - a);
-    rowsToDel.forEach(r => stock.deleteRow(r));
+    readySales.forEach(entry => {
+      applyShippingFeeToAchats_(ss, entry.idValue, entry.perItemFee);
+    });
+
+    readySales
+      .map(entry => entry.rowIndex)
+      .sort((a, b) => b - a)
+      .forEach(r => stock.deleteRow(r));
   }
 
   const ui = SpreadsheetApp.getUi();
