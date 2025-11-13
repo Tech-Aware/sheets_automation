@@ -1,15 +1,23 @@
 """High level helpers that reproduce the Achats → Stock → Ventes workflow."""
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass as _dataclass
 from datetime import date
+from sys import version_info
 from typing import Optional
 
 from ..config import HEADERS
 from ..datasources.workbook import TableData
 
 
-@dataclass(slots=True)
+# ``slots`` support for :func:`dataclasses.dataclass` only arrived in Python 3.10.
+# The UI is expected to run on Python 3.9 (32-bit), so we silently drop the
+# argument on older interpreters while keeping the memory optimisation available
+# on newer ones.
+_DATACLASS_KWARGS = {"slots": True} if version_info >= (3, 10) else {}
+
+
+@_dataclass(**_DATACLASS_KWARGS)
 class PurchaseInput:
     article: str
     marque: str
@@ -20,7 +28,7 @@ class PurchaseInput:
     date_livraison: Optional[str] = None
 
 
-@dataclass(slots=True)
+@_dataclass(**_DATACLASS_KWARGS)
 class StockInput:
     purchase_id: str
     sku: str
@@ -29,7 +37,7 @@ class StockInput:
     taille: str = ""
 
 
-@dataclass(slots=True)
+@_dataclass(**_DATACLASS_KWARGS)
 class SaleInput:
     sku: str
     prix_vente: float
