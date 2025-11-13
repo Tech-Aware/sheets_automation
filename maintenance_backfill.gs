@@ -177,6 +177,16 @@ function registerBackfillMenu_(menu, ss) {
   menu.addSubMenu(backfillMenu);
 }
 
+function registerStockActionsMenu_(ui) {
+  const stockMenu = ui.createMenu('Actions Stock');
+  stockMenu
+    .addItem('Cocher "Mis en ligne" (sélection)', 'bulkSetStockStatusMisEnLigne')
+    .addItem('Cocher "Publié" (sélection)', 'bulkSetStockStatusPublie')
+    .addItem('Cocher "Vendu" (sélection)', 'bulkSetStockStatusVendu');
+
+  stockMenu.addToUi();
+}
+
 // === MENU ===
 
 function onOpen(e) {
@@ -191,6 +201,7 @@ function onOpen(e) {
   registerBackfillMenu_(maintenance, SpreadsheetApp.getActive());
 
   maintenance.addToUi();
+  registerStockActionsMenu_(ui);
 }
 
 function noopBackfillMonthlyLedgerMenu() {

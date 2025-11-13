@@ -852,3 +852,345 @@ function handleStock(e) {
     applySkuPaletteFormatting_(sh, C_SKU, C_LABEL);
   }
 }
+
+function bulkSetStockStatusMisEnLigne() {
+  bulkSetStockStatusForKey_({
+    chronologyKey: 'dmis',
+    statusLabel: HEADERS.STOCK.MIS_EN_LIGNE,
+    getSelectionColumn: ctx => ctx.columns.mis,
+    getCheckboxColumn: ctx => ctx.combinedFlags.dmis ? 0 : ctx.columns.mis,
+    getDateColumn: ctx => ctx.columns.dmis,
+    isCombined: ctx => ctx.combinedFlags.dmis
+  });
+}
+
+function bulkSetStockStatusPublie() {
+  bulkSetStockStatusForKey_({
+    chronologyKey: 'dpub',
+    statusLabel: HEADERS.STOCK.PUBLIE,
+    getSelectionColumn: ctx => ctx.columns.pub,
+    getCheckboxColumn: ctx => ctx.combinedFlags.dpub ? 0 : ctx.columns.pub,
+    getDateColumn: ctx => ctx.columns.dpub,
+    isCombined: ctx => ctx.combinedFlags.dpub
+  });
+}
+
+function bulkSetStockStatusVendu() {
+  bulkSetStockStatusForKey_({
+    chronologyKey: 'dvente',
+    statusLabel: HEADERS.STOCK.VENDU,
+    getSelectionColumn: ctx => ctx.columns.vendu,
+    getCheckboxColumn: ctx => ctx.combinedFlags.dvente ? 0 : ctx.columns.vendu,
+    getDateColumn: ctx => ctx.columns.dvente,
+    isCombined: ctx => ctx.combinedFlags.dvente
+  });
+}
+
+function bulkSetStockStatusForKey_(config) {
+  const ss = SpreadsheetApp.getActive();
+  const sh = ss.getActiveSheet();
+  if (!sh || sh.getName() !== 'Stock') {
+    ss.toast('Ouvre la feuille "Stock" et sélectionne la colonne souhaitée.', 'Stock', 6);
+    return;
+  }
+
+  const context = getStockStatusColumnContext_(sh);
+  if (!context) {
+    ss.toast('Impossible d\'identifier les colonnes de statut du stock.', 'Stock', 6);
+    return;
+  }
+
+  const selectionColumn = config.getSelectionColumn(context);
+  const dateColumn = config.getDateColumn(context);
+  if (!selectionColumn || !dateColumn) {
+    ss.toast(`Colonne introuvable pour "${config.statusLabel}".`, 'Stock', 6);
+    return;
+  }
+
+  const checkboxColumn = typeof config.getCheckboxColumn === 'function'
+    ? config.getCheckboxColumn(context)
+    : selectionColumn;
+  const isCombined = typeof config.isCombined === 'function'
+    ? config.isCombined(context)
+    : false;
+
+  const selection = ss.getSelection();
+  const rangeList = selection ? selection.getActiveRangeList() : null;
+  let ranges = [];
+  if (rangeList) {
+    ranges = rangeList.getRanges();
+  } else if (selection && selection.getActiveRange()) {
+    ranges = [selection.getActiveRange()];
+  }
+
+  if (!ranges.length) {
+    ss.toast(`Sélectionne les cases "${config.statusLabel}" à mettre à jour.`, 'Stock', 5);
+    return;
+  }
+
+  for (let i = 0; i < ranges.length; i++) {
+    const range = ranges[i];
+    if (!range) continue;
+    if (range.getNumColumns() !== 1 || range.getColumn() !== selectionColumn) {
+      ss.toast(`La sélection doit être limitée à la colonne "${config.statusLabel}".`, 'Stock', 6);
+      return;
+    }
+  }
+
+  const chronology = context.chronology;
+  const combinedFlags = context.combinedFlags || {};
+  const lastColumn = sh.getLastColumn();
+  let totalUpdated = 0;
+
+  ranges.forEach(range => {
+    const numRows = range.getNumRows();
+    const startRow = range.getRow();
+    if (numRows <= 0) {
+      return;
+    }
+
+    const blockValues = sh.getRange(startRow, 1, numRows, lastColumn).getValues();
+    const columnBuffers = new Map();
+    const blockValidationClears = [];
+    const blockFormats = [];
+
+    function applyValue(column, rowOffset, value) {
+      if (!column) return;
+      let buffer = columnBuffers.get(column);
+      if (!buffer) {
+        buffer = [];
+        for (let i = 0; i < numRows; i++) {
+          buffer.push([blockValues[i][column - 1]]);
+        }
+        columnBuffers.set(column, buffer);
+      }
+      buffer[rowOffset][0] = value;
+      blockValues[rowOffset][column - 1] = value;
+    }
+
+    let blockUpdated = false;
+
+    for (let offset = 0; offset < numRows; offset++) {
+      const rowIndex = startRow + offset;
+      if (rowIndex <= 1) {
+        continue;
+      }
+
+      const rowValues = blockValues[offset];
+      const rowDates = {};
+      for (let i = 0; i < chronology.length; i++) {
+        const entry = chronology[i];
+        rowDates[entry.key] = entry.column
+          ? getDateOrNull_(rowValues[entry.column - 1])
+          : null;
+      }
+
+      if (rowDates[config.chronologyKey]) {
+        continue;
+      }
+
+      const newDate = computeChronologyDateFromRow_(rowDates, chronology, config.chronologyKey);
+      if (!newDate) {
+        continue;
+      }
+
+      if (isCombined) {
+        blockValidationClears.push({ rowIndex, column: dateColumn });
+        applyValue(dateColumn, offset, newDate);
+      } else {
+        if (checkboxColumn) {
+          applyValue(checkboxColumn, offset, true);
+          rowValues[checkboxColumn - 1] = true;
+        }
+        applyValue(dateColumn, offset, newDate);
+      }
+
+      rowDates[config.chronologyKey] = newDate;
+      rowValues[dateColumn - 1] = newDate;
+      blockFormats.push({ rowIndex, column: dateColumn });
+
+      propagateChronologyForwardForRow_(
+        rowDates,
+        chronology,
+        config.chronologyKey,
+        rowValues,
+        offset,
+        rowIndex,
+        applyValue,
+        blockFormats,
+        blockValidationClears,
+        combinedFlags
+      );
+
+      blockUpdated = true;
+      totalUpdated++;
+    }
+
+    if (!blockUpdated) {
+      return;
+    }
+
+    if (blockValidationClears.length) {
+      blockValidationClears.forEach(target => {
+        sh.getRange(target.rowIndex, target.column).clearDataValidations();
+      });
+    }
+
+    columnBuffers.forEach((values, column) => {
+      sh.getRange(startRow, column, numRows, 1).setValues(values);
+    });
+
+    if (blockFormats.length) {
+      blockFormats.forEach(target => {
+        sh.getRange(target.rowIndex, target.column).setNumberFormat('dd/MM/yyyy');
+      });
+    }
+  });
+
+  if (totalUpdated > 0) {
+    ss.toast(`${totalUpdated} ligne(s) mises à jour pour "${config.statusLabel}".`, 'Stock', 5);
+  } else {
+    ss.toast(`Aucune nouvelle date à renseigner pour "${config.statusLabel}".`, 'Stock', 5);
+  }
+}
+
+function getStockStatusColumnContext_(sheet) {
+  if (!sheet) {
+    return null;
+  }
+
+  const lastColumn = sheet.getLastColumn();
+  if (!lastColumn) {
+    return null;
+  }
+
+  const headers = sheet.getRange(1, 1, 1, lastColumn).getValues()[0];
+  const resolver = makeHeaderResolver_(headers);
+  if (!resolver) {
+    return null;
+  }
+
+  const colExact = resolver.colExact.bind(resolver);
+  const combinedMisCol = resolveCombinedMisEnLigneColumn_(resolver);
+  const legacyMisCols = combinedMisCol ? { checkboxCol: 0, dateCol: 0 } : resolveLegacyMisEnLigneColumn_(resolver);
+  const useCombinedMisCol = !!combinedMisCol;
+
+  const combinedPubCol = resolveCombinedPublicationColumn_(resolver);
+  const legacyPubCols = combinedPubCol ? { checkboxCol: 0, dateCol: 0 } : resolveLegacyPublicationColumns_(resolver);
+  const useCombinedPubCol = !!combinedPubCol;
+
+  const combinedVenduCol = resolveCombinedVenduColumn_(resolver);
+  const legacyVenduCols = combinedVenduCol ? { checkboxCol: 0, dateCol: 0 } : resolveLegacyVenduColumns_(resolver);
+  const useCombinedVenduCol = !!combinedVenduCol;
+
+  const C_MIS = useCombinedMisCol ? combinedMisCol : legacyMisCols.checkboxCol;
+  const C_DMIS = useCombinedMisCol ? combinedMisCol : legacyMisCols.dateCol;
+  const C_PUB = useCombinedPubCol ? combinedPubCol : legacyPubCols.checkboxCol;
+  const C_DPUB = useCombinedPubCol ? combinedPubCol : legacyPubCols.dateCol;
+  const C_VENDU = useCombinedVenduCol ? combinedVenduCol : legacyVenduCols.checkboxCol;
+  let C_DVENTE = useCombinedVenduCol ? combinedVenduCol : legacyVenduCols.dateCol;
+  if (!C_DVENTE) {
+    C_DVENTE = colExact(HEADERS.STOCK.DATE_VENTE_ALT) || 0;
+  }
+  const C_DMS = colExact(HEADERS.STOCK.DATE_MISE_EN_STOCK) || 0;
+
+  const chronology = [
+    { key: 'dms', column: C_DMS, statusCol: 0 },
+    { key: 'dmis', column: C_DMIS, statusCol: C_MIS },
+    { key: 'dpub', column: C_DPUB, statusCol: C_PUB },
+    { key: 'dvente', column: C_DVENTE, statusCol: C_VENDU }
+  ];
+
+  const combinedFlags = {
+    dmis: useCombinedMisCol && C_MIS && C_DMIS && C_MIS === C_DMIS,
+    dpub: useCombinedPubCol && C_PUB && C_DPUB && C_PUB === C_DPUB,
+    dvente: useCombinedVenduCol && C_VENDU && C_DVENTE && C_VENDU === C_DVENTE
+  };
+
+  return {
+    headers,
+    resolver,
+    columns: {
+      mis: C_MIS,
+      dmis: C_DMIS,
+      pub: C_PUB,
+      dpub: C_DPUB,
+      vendu: C_VENDU,
+      dvente: C_DVENTE,
+      dms: C_DMS
+    },
+    chronology,
+    combinedFlags
+  };
+}
+
+function computeChronologyDateFromRow_(rowDates, chronology, key) {
+  const index = chronology.findIndex(entry => entry.key === key);
+  if (index < 0) {
+    return getTomorrow_();
+  }
+
+  if (key === 'dvente') {
+    return new Date();
+  }
+
+  const previous = chronology[index - 1];
+  if (previous) {
+    const baseDate = rowDates[previous.key];
+    if (baseDate) {
+      const shifted = addDays_(baseDate, 1);
+      if (shifted) {
+        return shifted;
+      }
+    }
+  }
+
+  return getTomorrow_();
+}
+
+function propagateChronologyForwardForRow_(
+  rowDates,
+  chronology,
+  startKey,
+  rowValues,
+  rowOffset,
+  rowIndex,
+  applyValue,
+  formatTargets,
+  validationClears,
+  combinedFlags
+) {
+  const startIndex = chronology.findIndex(entry => entry.key === startKey);
+  if (startIndex < 0) {
+    return;
+  }
+
+  for (let i = startIndex + 1; i < chronology.length; i++) {
+    const entry = chronology[i];
+    if (!entry.column || !entry.statusCol) {
+      continue;
+    }
+
+    const statusValue = rowValues[entry.statusCol - 1];
+    if (!isStatusActiveValue_(statusValue)) {
+      continue;
+    }
+
+    if (rowDates[entry.key]) {
+      continue;
+    }
+
+    const nextDate = computeChronologyDateFromRow_(rowDates, chronology, entry.key);
+    if (!nextDate) {
+      continue;
+    }
+
+    rowDates[entry.key] = nextDate;
+    rowValues[entry.column - 1] = nextDate;
+    applyValue(entry.column, rowOffset, nextDate);
+    formatTargets.push({ rowIndex, column: entry.column });
+    if (combinedFlags[entry.key]) {
+      validationClears.push({ rowIndex, column: entry.column });
+    }
+  }
+}
