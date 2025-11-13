@@ -4,6 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, List, Sequence
+import sys
 
 try:  # pragma: no cover - optional dependency detection
     from openpyxl import load_workbook
@@ -11,7 +12,13 @@ except Exception:  # pragma: no cover - fallback when optional dep missing
     load_workbook = None  # type: ignore
 
 
-@dataclass(slots=True)
+# ``dataclasses`` added support for ``slots`` in Python 3.10.  The production
+# environment still runs Python 3.9, so silently drop the argument there while
+# keeping the optimization available on newer interpreters.
+_DATACLASS_KWARGS = {"slots": True} if sys.version_info >= (3, 10) else {}
+
+
+@dataclass(**_DATACLASS_KWARGS)
 class TableData:
     """Represents a sheet: its headers and a list of rows as dicts."""
 
