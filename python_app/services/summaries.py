@@ -7,7 +7,7 @@ from typing import Iterable, Mapping
 from ..config import HEADERS
 
 
-@dataclass(slots=True)
+@dataclass
 class InventorySnapshot:
     """Lightweight summary derived from Achats/Stock/Ventes tables."""
 
