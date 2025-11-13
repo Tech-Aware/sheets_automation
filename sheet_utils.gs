@@ -675,14 +675,14 @@ function buildBaseToStockDate_(ss) {
 
   const headersA = achats.getRange(1, 1, 1, achats.getLastColumn()).getValues()[0];
   const resolverA = makeHeaderResolver_(headersA);
-  const colWhere = resolverA.colWhere.bind(resolverA);
-  const colExact = resolverA.colExact.bind(resolverA);
+  const colWhereA = resolverA.colWhere.bind(resolverA);
+  const colExactA = resolverA.colExact.bind(resolverA);
 
-  const COL_REF = colExact(HEADERS.ACHATS.REFERENCE) || colWhere(h => h.includes('reference'));
-  const COL_STP = colExact(HEADERS.ACHATS.DATE_MISE_EN_STOCK)
-    || colExact(HEADERS.ACHATS.DATE_MISE_EN_STOCK_ALT)
-    || colWhere(h => h.includes('mis en stock'))
-    || colWhere(h => h.includes('mise en stock'));
+  const COL_REF = colExactA(HEADERS.ACHATS.REFERENCE) || colWhereA(h => h.includes('reference'));
+  const COL_STP = colExactA(HEADERS.ACHATS.DATE_MISE_EN_STOCK)
+    || colExactA(HEADERS.ACHATS.DATE_MISE_EN_STOCK_ALT)
+    || colWhereA(h => h.includes('mis en stock'))
+    || colWhereA(h => h.includes('mise en stock'));
   if (!COL_REF || !COL_STP) return Object.create(null);
 
   const refVals = achats.getRange(2, COL_REF, lastA - 1, 1).getValues();
