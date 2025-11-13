@@ -188,19 +188,27 @@ function registerStockActionsMenu_(ui) {
   stockMenu.addToUi();
 }
 
+function registerSalesActionsMenu_(ui, ss) {
+  const salesMenu = ui.createMenu('Actions Ventes');
+  salesMenu
+    .addItem('Trier les ventes (date décroissante)', 'sortVentesByDate')
+    .addItem('Retirer du Stock les ventes importées', 'purgeStockFromVentes');
+
+  registerBackfillMenu_(salesMenu, ss);
+  salesMenu.addToUi();
+}
+
 // === MENU ===
 
 function onOpen(e) {
   const ui = SpreadsheetApp.getUi();
+  const ss = SpreadsheetApp.getActive();
   const maintenance = ui.createMenu('Maintenance')
     .addItem('Recalculer les SKU du Stock', 'recalcStock')
-    .addItem('Mettre à jour les dates de mise en stock', 'syncMiseEnStockFromAchats')
-    .addItem('Trier les ventes (date décroissante)', 'sortVentesByDate')
-    .addItem('Retirer du Stock les ventes importées', 'purgeStockFromVentes');
-
-  registerBackfillMenu_(maintenance, SpreadsheetApp.getActive());
+    .addItem('Mettre à jour les dates de mise en stock', 'syncMiseEnStockFromAchats');
 
   maintenance.addToUi();
+  registerSalesActionsMenu_(ui, ss);
   registerStockActionsMenu_(ui);
 }
 
