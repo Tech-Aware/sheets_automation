@@ -601,7 +601,3 @@ function renumberStockByBrand_(onlyOld) {
 
   stock.getRange(2, COL_NEW, newSkuColValues.length, 1).setValues(newSkuColValues);
 }
-
-// === STOCK → horodatages + validations / déplacement vers Ventes ===
-
-function handleStock(e) {
