@@ -201,3 +201,29 @@ const preservedValues = stockSheetExisting.rows.map(row => row[2]);
 console.log('Existing numbered SKUs scenario:', preservedValues);
 assert.deepStrictEqual(preservedValues, ['JLF-54', 'JLF-55', 'JLF-56']);
 console.log('Existing SKUs preserved and new suffix assigned correctly.');
+
+function assertDateParts(date, expectedYear, expectedMonth, expectedDay) {
+  assert.ok(date && Object.prototype.toString.call(date) === '[object Date]' && !isNaN(date), 'Expected a valid date');
+  assert.strictEqual(date.getFullYear(), expectedYear);
+  assert.strictEqual(date.getMonth(), expectedMonth);
+  assert.strictEqual(date.getDate(), expectedDay);
+}
+
+function parseDateThroughSandbox(input) {
+  const literal = JSON.stringify(input);
+  return vm.runInNewContext(`getDateOrNull_(${literal})`, sandbox);
+}
+
+function expectParsedDate(input, year, month, day) {
+  const parsed = parseDateThroughSandbox(input);
+  assertDateParts(parsed, year, month, day);
+}
+
+// --- Date parsing regression tests ---
+expectParsedDate('15/01/2024', 2024, 0, 15);
+expectParsedDate('15-01-24', 2024, 0, 15);
+expectParsedDate('2024-12-31', 2024, 11, 31);
+
+assert.strictEqual(parseDateThroughSandbox(''), null);
+assert.strictEqual(parseDateThroughSandbox('not a date'), null);
+console.log('Date parsing helper covers slash-first, dash-first, and ISO formats.');

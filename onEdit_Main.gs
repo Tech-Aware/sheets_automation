@@ -7,10 +7,23 @@ const HEADERS = Object.freeze({
     GENRE_DATA: 'GENRE(data)',
     GENRE_DATA_ALT: 'GENRE(DATA)',
     GENRE_LEGACY: 'GENRE',
+    DATE_ACHAT: "DATE D'ACHAT",
+    GRADE: 'GRADE',
+    FOURNISSEUR: 'FOURNISSEUR/CODE',
+    MOIS: 'MOIS',
+    MOIS_NUM: 'MOIS NUM',
     REFERENCE: 'REFERENCE',
     DATE_LIVRAISON: 'DATE DE LIVRAISON',
+    DELAI_LIVRAISON: 'DELAI DE LIVRAISON',
     QUANTITE_RECUE: 'QUANTITÉ RECUE',
     QUANTITE_RECUE_ALT: 'QUANTITE RECUE',
+    QUANTITE_COMMANDEE: 'QUANTITÉ COMMANDÉE',
+    PRIX_ACHAT_SHIP: "PRIX D'ACHAT SHIP INCLUS",
+    PRIX_UNITAIRE_BRUTE: 'PRIX UNITAIRE BRUTE',
+    FRAIS_LAVAGE: 'FRAIS DE LAVAGE',
+    TOTAL_TTC: 'TOTAL TTC',
+    PRIX_UNITAIRE_TTC: 'PRIX UNITAIRE TTC',
+    TRACKING: 'TRACKING',
     PRET_STOCK: 'PRËT POUR MISE EN STOCK',
     PRET_STOCK_ALT: 'PRÊT POUR MISE EN STOCK',
     DATE_MISE_EN_STOCK: 'MIS EN STOCK LE',
@@ -169,7 +182,7 @@ function getDateOrNull_(value) {
       return direct;
     }
 
-    const slashMatch = trimmed.match(/^(\d{1,2})[\/](\d{1,2})[\/](\d{2,4})$/);
+    const slashMatch = trimmed.match(/^(\d{1,2})[\/\.\-](\d{1,2})[\/\.\-](\d{2,4})$/);
     if (slashMatch) {
       const day = parseInt(slashMatch[1], 10);
       const month = parseInt(slashMatch[2], 10) - 1;
@@ -415,7 +428,13 @@ function handleAchats(e) {
   const COL_GEN_LEGACY = colExact(HEADERS.ACHATS.GENRE_LEGACY) || colWhere(h => h.includes('genre'));
   const COL_GEN  = COL_GEN_DATA || (COL_GEN_LEGACY && COL_GEN_LEGACY !== COL_GEN_DATA ? COL_GEN_LEGACY : 0);
   const COL_REF  = colExact(HEADERS.ACHATS.REFERENCE) || colWhere(h => h.includes('reference'));
-  const COL_DLIV = colExact(HEADERS.ACHATS.DATE_LIVRAISON) || colWhere(h => h.includes('livraison'));
+  const isLivraisonDateHeader = (header) => header.includes('livraison')
+    && header.includes('date')
+    && !header.includes('delai');
+  const COL_DLIV = colExact(HEADERS.ACHATS.DATE_LIVRAISON)
+    || colWhere(isLivraisonDateHeader);
+  const COL_DACHAT = colExact(HEADERS.ACHATS.DATE_ACHAT)
+    || colWhere(h => h.includes('date') && h.includes('achat'));
   const COL_QTY  = colExact(HEADERS.ACHATS.QUANTITE_RECUE)
     || colExact(HEADERS.ACHATS.QUANTITE_RECUE_ALT)
     || colWhere(h => h.includes('quantite') && (h.includes('recu') || h.includes('recue')));
@@ -426,6 +445,16 @@ function handleAchats(e) {
     || colExact(HEADERS.ACHATS.DATE_MISE_EN_STOCK_ALT)
     || colWhere(h => h.includes('mis en stock'))
     || colWhere(h => h.includes('mise en stock'));
+
+  function readDateFromColumn_(columnIndex) {
+    if (!columnIndex) return null;
+    const cell = sh.getRange(row, columnIndex);
+    const fromValue = getDateOrNull_(cell.getValue());
+    if (fromValue) {
+      return fromValue;
+    }
+    return getDateOrNull_(cell.getDisplayValue());
+  }
 
   // -------------------------
   // 0) MODIF REFERENCE (F) → MAJ PRÉFIXE DES SKU DANS STOCK
@@ -578,19 +607,10 @@ function handleAchats(e) {
   const qty     = Number(sh.getRange(row, COL_QTY).getValue());
   if (!skuBase || !Number.isFinite(qty) || qty <= 0) return;
 
-  // Date de livraison robuste
-  if (!COL_DLIV) return;
-  const raw = sh.getRange(row, COL_DLIV).getValue();
-  let dateLiv;
-  if (raw instanceof Date && !isNaN(raw)) {
-    dateLiv = raw;
-  } else {
-    const s = sh.getRange(row, COL_DLIV).getDisplayValue();
-    const m = s && s.match(/^\s*(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{2,4})\s*$/);
-    if (!m) return;
-    const d = +m[1], mo = +m[2], y = +(m[3].length === 2 ? ("20"+m[3]) : m[3]);
-    dateLiv = new Date(y, mo - 1, d);
-  }
+  // Date de livraison robuste (avec repli sur "Date d'achat" si nécessaire)
+  if (!COL_DLIV && !COL_DACHAT) return;
+  const dateLiv = readDateFromColumn_(COL_DLIV) || readDateFromColumn_(COL_DACHAT);
+  if (!dateLiv) return;
 
   const target = ss.getSheetByName("Stock");
   if (!target) return;
