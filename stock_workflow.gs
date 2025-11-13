@@ -856,6 +856,3 @@ function handleStock(e) {
     applySkuPaletteFormatting_(sh, C_SKU, C_LABEL);
   }
 }
-
-// Déplace la ligne de "Stock" vers "Ventes" (et calcule les délais)
-function exportVente_(e, row, C_ID, C_LABEL, C_SKU, C_PRIX, C_DVENTE, C_STAMPV, baseToDmsMap, options) {
