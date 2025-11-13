@@ -2,16 +2,30 @@
 from __future__ import annotations
 
 import argparse
+import sys
 import tkinter as tk
 from pathlib import Path
 from tkinter import messagebox
 
 import customtkinter as ctk
 
-from .config import HEADERS, MONTH_NAMES_FR
-from .datasources.workbook import WorkbookRepository
-from .services.summaries import build_inventory_snapshot
-from .ui.tables import ScrollableTable
+# ``python python_app/main.py`` was failing because ``__package__`` is empty when a
+# module is executed as a script.  To keep relative imports working both for
+# ``python -m python_app.main`` and direct execution, fall back to absolute
+# imports after adding the repository root to ``sys.path``.
+try:  # pragma: no cover - defensive import path configuration
+    from .config import HEADERS, MONTH_NAMES_FR
+    from .datasources.workbook import WorkbookRepository
+    from .services.summaries import build_inventory_snapshot
+    from .ui.tables import ScrollableTable
+except ImportError:  # pragma: no cover - executed when run as a script
+    package_root = Path(__file__).resolve().parent.parent
+    if str(package_root) not in sys.path:
+        sys.path.append(str(package_root))
+    from python_app.config import HEADERS, MONTH_NAMES_FR
+    from python_app.datasources.workbook import WorkbookRepository
+    from python_app.services.summaries import build_inventory_snapshot
+    from python_app.ui.tables import ScrollableTable
 
 
 class VintageErpApp(ctk.CTk):
