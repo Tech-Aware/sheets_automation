@@ -162,6 +162,54 @@ function getTomorrow_() {
   return date;
 }
 
+function ensureLegacyFormattingCleared_(ss) {
+  if (!ss || typeof PropertiesService === 'undefined') {
+    return;
+  }
+
+  const props = PropertiesService.getDocumentProperties();
+  if (!props) return;
+
+  const flag = props.getProperty(LEGACY_FORMATTING_CLEANUP_KEY);
+  if (flag === 'done') {
+    return;
+  }
+
+  const targetNames = ['Achats', 'Stock', 'Ventes'];
+  for (let i = 0; i < targetNames.length; i++) {
+    resetSheetStyling_(ss.getSheetByName(targetNames[i]));
+  }
+
+  const sheets = ss.getSheets ? ss.getSheets() : [];
+  for (let i = 0; i < sheets.length; i++) {
+    const sheet = sheets[i];
+    if (!sheet) continue;
+    const name = (sheet.getName && sheet.getName()) || '';
+    if (typeof name === 'string' && name.toLowerCase().startsWith('compta ')) {
+      resetSheetStyling_(sheet);
+    }
+  }
+
+  props.setProperty(LEGACY_FORMATTING_CLEANUP_KEY, 'done');
+}
+
+function resetSheetStyling_(sheet) {
+  if (!sheet) return;
+
+  const totalRows = sheet.getMaxRows ? sheet.getMaxRows() : sheet.getLastRow();
+  const totalCols = sheet.getMaxColumns ? sheet.getMaxColumns() : sheet.getLastColumn();
+  if (totalRows > 0 && totalCols > 0) {
+    const range = sheet.getRange(1, 1, totalRows, totalCols);
+    range.setBackground('#ffffff');
+    range.setFontColor('#000000');
+    range.setFontWeight('normal');
+  }
+
+  if (typeof sheet.setConditionalFormatRules === 'function') {
+    sheet.setConditionalFormatRules([]);
+  }
+}
+
 function resolveCombinedPretPourStockColumn_(resolver) {
   if (!resolver) return 0;
   const colExact = resolver.colExact ? resolver.colExact.bind(resolver) : () => 0;
