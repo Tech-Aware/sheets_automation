@@ -3,18 +3,58 @@ from __future__ import annotations
 
 import tkinter as tk
 from tkinter import ttk
-from typing import Iterable, Sequence
+from typing import Callable, Iterable, Sequence
 
 
 class ScrollableTable(ttk.Frame):
-    """Very small helper that wraps a Treeview with scrollbars."""
+    """Small helper that wraps a Treeview with scrollbars and inline editing."""
 
-    def __init__(self, master, headers: Sequence[str], rows: Iterable[dict], *, height: int = 15):
+    def __init__(
+        self,
+        master,
+        headers: Sequence[str],
+        rows: Iterable[dict],
+        *,
+        height: int = 15,
+        column_width: int = 140,
+        on_cell_edited: Callable[[int, str, str], None] | None = None,
+    ):
         super().__init__(master)
-        self.tree = ttk.Treeview(self, columns=headers, show="headings", height=height)
-        for header in headers:
+        self.on_cell_edited = on_cell_edited
+        self._editor: tk.Entry | None = None
+        self._editing_item: str | None = None
+        self._editing_column: str | None = None
+        self._item_to_row_index: dict[str, int] = {}
+        self._headers = list(headers)
+        style = ttk.Style(self)
+        try:  # ``clam`` provides better contrast for striped rows
+            style.theme_use("clam")
+        except tk.TclError:
+            pass
+        style.configure(
+            "Scrollable.Treeview",
+            font=("Segoe UI", 11),
+            rowheight=28,
+            background="#fcfcfc",
+            fieldbackground="#fcfcfc",
+        )
+        style.configure("Scrollable.Treeview.Heading", font=("Segoe UI", 11, "bold"))
+        style.map(
+            "Scrollable.Treeview",
+            background=[("selected", "#0F62FE")],
+            foreground=[("selected", "white")],
+        )
+        self.tree = ttk.Treeview(
+            self,
+            columns=self._headers,
+            show="headings",
+            height=height,
+            style="Scrollable.Treeview",
+        )
+        for header in self._headers:
             self.tree.heading(header, text=header)
-            self.tree.column(header, width=140, anchor=tk.W)
+            self.tree.column(header, width=column_width, anchor=tk.W)
+        self.tree.tag_configure("even", background="#f2f4f8")
         vsb = ttk.Scrollbar(self, orient="vertical", command=self.tree.yview)
         hsb = ttk.Scrollbar(self, orient="horizontal", command=self.tree.xview)
         self.tree.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
@@ -23,16 +63,78 @@ class ScrollableTable(ttk.Frame):
         hsb.grid(row=1, column=0, sticky="ew")
         self.grid_rowconfigure(0, weight=1)
         self.grid_columnconfigure(0, weight=1)
-        for row in rows:
-            values = [row.get(header, "") for header in headers]
-            self.tree.insert("", tk.END, values=values)
+        self._insert_rows(rows)
+        self.tree.bind("<Double-1>", self._begin_edit)
 
     def refresh(self, rows: Iterable[dict]):
         for child in self.tree.get_children():
             self.tree.delete(child)
-        for row in rows:
-            values = [row.get(col, "") for col in self.tree["columns"]]
-            self.tree.insert("", tk.END, values=values)
+        self._item_to_row_index.clear()
+        self._insert_rows(rows)
+
+    # ------------------------------------------------------------------
+    # Inline editing helpers
+    # ------------------------------------------------------------------
+    def _insert_rows(self, rows: Iterable[dict]):
+        for idx, row in enumerate(rows):
+            values = [row.get(header, "") for header in self._headers]
+            item = self.tree.insert(
+                "",
+                tk.END,
+                values=values,
+                tags=("even" if idx % 2 == 0 else "odd",),
+            )
+            self._item_to_row_index[item] = idx
+
+    def _begin_edit(self, event):
+        if self._editor is not None:
+            self._finalize_edit()
+        region = self.tree.identify("region", event.x, event.y)
+        if region != "cell":
+            return
+        item = self.tree.identify_row(event.y)
+        column = self.tree.identify_column(event.x)
+        if not item or column == "#0":
+            return
+        column_index = int(column.replace("#", "")) - 1
+        if column_index < 0 or column_index >= len(self._headers):
+            return
+        column_id = self._headers[column_index]
+        bbox = self.tree.bbox(item, column_id)
+        if not bbox:
+            return
+        x, y, width, height = bbox
+        value = self.tree.set(item, column_id)
+        self._editing_item = item
+        self._editing_column = column_id
+        self._editor = tk.Entry(self.tree)
+        self._editor.insert(0, value)
+        self._editor.select_range(0, tk.END)
+        self._editor.focus()
+        self._editor.place(x=x, y=y, width=width, height=height)
+        self._editor.bind("<Return>", self._finalize_edit)
+        self._editor.bind("<Escape>", self._cancel_edit)
+        self._editor.bind("<FocusOut>", self._finalize_edit)
+
+    def _finalize_edit(self, _event=None):
+        if not self._editor or self._editing_item is None or self._editing_column is None:
+            return
+        new_value = self._editor.get()
+        self.tree.set(self._editing_item, self._editing_column, new_value)
+        row_index = self._item_to_row_index.get(self._editing_item)
+        if row_index is not None and self.on_cell_edited is not None:
+            self.on_cell_edited(row_index, self._editing_column, new_value)
+        self._cleanup_editor()
+
+    def _cancel_edit(self, _event=None):
+        self._cleanup_editor()
+
+    def _cleanup_editor(self):
+        if self._editor is not None:
+            self._editor.destroy()
+        self._editor = None
+        self._editing_item = None
+        self._editing_column = None
 
 
 __all__ = ["ScrollableTable"]

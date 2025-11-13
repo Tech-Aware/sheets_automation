@@ -81,7 +81,26 @@ class TableView(ctk.CTkFrame):
     def __init__(self, master, table):
         super().__init__(master)
         self.pack(fill="both", expand=True)
-        ScrollableTable(self, table.headers[:10], table.rows).pack(fill="both", expand=True, padx=8, pady=8)
+        self.table = table
+        helper = ctk.CTkFrame(self)
+        helper.pack(fill="x", padx=12, pady=(12, 0))
+        self.status_var = tk.StringVar(value="Double-cliquez sur une cellule pour la modifier.")
+        ctk.CTkLabel(helper, textvariable=self.status_var, anchor="w").pack(side="left")
+        ScrollableTable(
+            self,
+            table.headers[:10],
+            table.rows,
+            height=20,
+            on_cell_edited=self._on_cell_edit,
+            column_width=160,
+        ).pack(fill="both", expand=True, padx=12, pady=12)
+
+    def _on_cell_edit(self, row_index: int, column: str, new_value: str):
+        try:
+            self.table.rows[row_index][column] = new_value
+        except (IndexError, KeyError):
+            pass
+        self.status_var.set(f"Ligne {row_index + 1} – {column} mis à jour")
 
 
 class CalendarView(ctk.CTkFrame):
