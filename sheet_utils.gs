@@ -601,30 +601,36 @@ function applySkuPaletteFormatting_(sheet, skuCol, articleCol) {
 
 function ensureLedgerWeekHighlight_(sheet, headersLen) {
   if (!sheet) return;
-  const range = sheet.getRange(2, 1, sheet.getLastRow() - 1, headersLen);
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) return;
+
+  const range = sheet.getRange(2, 1, lastRow - 1, headersLen);
   const rules = sheet.getConditionalFormatRules();
   const filtered = rules.filter(rule => {
-    return rule.getDescription() !== LEDGER_WEEK_RULE_DESCRIPTION
-      && rule.getDescription() !== LEDGER_MONTH_TOTAL_RULE_DESCRIPTION;
+    const condition = rule.getBooleanCondition && rule.getBooleanCondition();
+    if (!condition) return true;
+
+    if (condition.getCriteriaType() !== SpreadsheetApp.BooleanCriteria.CUSTOM_FORMULA) {
+      return true;
+    }
+
+    const values = condition.getCriteriaValues();
+    if (!values || !values.length) return true;
+    const formula = values[0];
+    return formula !== '=$A2="Semaine"' && formula !== '=$A2="Total mensuel"';
   });
 
-  const rule = SpreadsheetApp.newConditionalFormatRule()
-    .whenFormulaSatisfied('=$A2="Semaine"')
-    .setBackground('#f0f0f0')
+  const buildRule = (formula, background) => SpreadsheetApp.newConditionalFormatRule()
+    .whenFormulaSatisfied(formula)
+    .setBackground(background)
     .setBold(true)
     .setRanges([range])
-    .setDescription(LEDGER_WEEK_RULE_DESCRIPTION)
     .build();
 
-  const totalRule = SpreadsheetApp.newConditionalFormatRule()
-    .whenFormulaSatisfied('=$A2="Total mensuel"')
-    .setBackground('#d1ecf1')
-    .setBold(true)
-    .setRanges([range])
-    .setDescription(LEDGER_MONTH_TOTAL_RULE_DESCRIPTION)
-    .build();
-
-  filtered.push(rule, totalRule);
+  filtered.push(
+    buildRule('=$A2="Semaine"', '#f0f0f0'),
+    buildRule('=$A2="Total mensuel"', '#d1ecf1')
+  );
   sheet.setConditionalFormatRules(filtered);
 }
 
