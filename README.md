@@ -6,7 +6,7 @@ Ce dépôt contenait initialement les scripts Google Apps Script pilotant le fic
 - Code localisé dans `python_app/`.
 - Chargement des onglets Achats/Stock/Ventes/Compta directement depuis `Prerelease 1.2.xlsx` via `openpyxl`.
 - Tableau de bord : cartes KPI calculées à l'aide de `services.summaries.build_inventory_snapshot`.
-- Onglets tables : `ui.tables.ScrollableTable` encapsule un `ttk.Treeview` scrollable pour naviguer dans les données (10 premières colonnes affichées pour rester lisible).
+- Onglets tables : `ui.tables.ScrollableTable` encapsule un `ttk.Treeview` scrollable pour naviguer dans les données (10 premières colonnes affichées pour rester lisible). Un double-clic sur une cellule permet désormais de modifier sa valeur directement depuis l'application.
 - Calendrier : liste des noms de mois français définis dans `config.MONTH_NAMES_FR`.
 
 ### Démarrage
