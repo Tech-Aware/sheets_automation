@@ -8,6 +8,7 @@ Ce dépôt contenait initialement les scripts Google Apps Script pilotant le fic
 - Tableau de bord : cartes KPI calculées à l'aide de `services.summaries.build_inventory_snapshot`.
 - Onglets tables : `ui.tables.ScrollableTable` encapsule un `ttk.Treeview` scrollable pour naviguer dans les données (10 premières colonnes affichées pour rester lisible). Un double-clic sur une cellule permet désormais de modifier sa valeur directement depuis l'application.
 - Calendrier : liste des noms de mois français définis dans `config.MONTH_NAMES_FR`.
+- Workflow Achats → Stock → Ventes : un nouvel onglet "Workflow" orchestre l'ajout d'une commande Achats, sa mise en stock, l'enregistrement de la vente (avec écriture comptable) et la gestion des retours depuis l'interface.
 
 ### Démarrage
 ```bash
@@ -24,6 +25,7 @@ python -m python_app.main /chemin/vers/mon_fichier.xlsx
 - `python_app/config.py` : transcription Python des constantes `config.gs` (HEADERS, noms de mois, etc.).
 - `python_app/datasources/workbook.py` : dépôt pour charger les feuilles Excel (`TableData`).
 - `python_app/services/summaries.py` : calcul du snapshot inventaire (stock vs ventes, marges moyennes).
+- `python_app/services/workflow.py` : réplique le flux Achats > Stock > Ventes/Compta et expose une API manipulée par l'onglet Workflow.
 - `python_app/ui/tables.py` : composant table scrollable.
 - `python_app/main.py` : point d'entrée CustomTkinter (`VintageErpApp`).
 
