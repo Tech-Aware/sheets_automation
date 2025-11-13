@@ -611,7 +611,7 @@ function ensureLedgerWeekHighlight_(sheet, headersLen) {
   const rule = SpreadsheetApp.newConditionalFormatRule()
     .whenFormulaSatisfied('=$A2="Semaine"')
     .setBackground('#f0f0f0')
-    .setFontWeight('bold')
+    .setBold(true)
     .setRanges([range])
     .setDescription(LEDGER_WEEK_RULE_DESCRIPTION)
     .build();
@@ -619,7 +619,7 @@ function ensureLedgerWeekHighlight_(sheet, headersLen) {
   const totalRule = SpreadsheetApp.newConditionalFormatRule()
     .whenFormulaSatisfied('=$A2="Total mensuel"')
     .setBackground('#d1ecf1')
-    .setFontWeight('bold')
+    .setBold(true)
     .setRanges([range])
     .setDescription(LEDGER_MONTH_TOTAL_RULE_DESCRIPTION)
     .build();
