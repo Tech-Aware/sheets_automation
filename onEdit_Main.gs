@@ -8,17 +8,29 @@ const HEADERS = Object.freeze({
     GENRE_DATA_ALT: 'GENRE(DATA)',
     GENRE_LEGACY: 'GENRE',
     REFERENCE: 'REFERENCE',
+    DATE_ACHAT: "DATE D'ACHAT",
     DATE_LIVRAISON: 'DATE DE LIVRAISON',
+    DATE_RECEPTION: 'DATE DE RÉCEPTION',
+    DELAI_LIVRAISON: 'DELAI DE LIVRAISON',
+    GRADE: 'GRADE',
+    FOURNISSEUR_CODE: 'FOURNISSEUR/CODE',
+    MOIS: 'MOIS',
+    MOIS_NUM: 'MOIS NUM',
+    PRIX_ACHAT_SHIP_INCLUS: "PRIX D'ACHAT SHIP INCLUS",
     QUANTITE_RECUE: 'QUANTITÉ RECUE',
     QUANTITE_RECUE_ALT: 'QUANTITE RECUE',
+    QUANTITE_COMMANDEE: 'QUANTITÉ COMMANDÉE',
+    PRIX_UNITAIRE_BRUTE: 'PRIX UNITAIRE BRUTE',
     PRET_STOCK: 'PRËT POUR MISE EN STOCK',
     PRET_STOCK_ALT: 'PRÊT POUR MISE EN STOCK',
     PRET_STOCK_COMBINED: 'PRÊT POUR MISE EN STOCK | DATE',
     DATE_MISE_EN_STOCK: 'MIS EN STOCK LE',
     DATE_MISE_EN_STOCK_ALT: 'DATE DE MISE EN STOCK',
     FRAIS_COLISSAGE: 'FRAIS DE COLISSAGE',
+    FRAIS_LAVAGE: 'FRAIS DE LAVAGE',
     PRIX_UNITAIRE_TTC: 'PRIX UNITAIRE TTC',
-    TOTAL_TTC: 'TOTAL TTC'
+    TOTAL_TTC: 'TOTAL TTC',
+    TRACKING: 'TRACKING'
   }),
   STOCK: Object.freeze({
     ID: 'ID',
@@ -576,14 +588,21 @@ function applyShippingFeeToAchats_(ss, achatId, fee) {
   if (!COL_ID) return;
 
   const COL_FRAIS = colExact(HEADERS.ACHATS.FRAIS_COLISSAGE)
-    || colWhere(h => h.includes('frais') && h.includes('colis'));
+    || colExact(HEADERS.ACHATS.FRAIS_LAVAGE)
+    || colWhere(h => h.includes('frais') && (h.includes('colis') || h.includes('lavage')));
   const COL_TOTAL = colExact(HEADERS.ACHATS.TOTAL_TTC)
     || colWhere(h => h.includes('total') && h.includes('ttc'));
-  const COL_QTY = colExact(HEADERS.ACHATS.QUANTITE_RECUE)
-    || colExact(HEADERS.ACHATS.QUANTITE_RECUE_ALT)
+  const COL_QTY_PRIMARY = colExact(HEADERS.ACHATS.QUANTITE_RECUE)
+    || colExact(HEADERS.ACHATS.QUANTITE_RECUE_ALT);
+  const COL_QTY_FALLBACK = colExact(HEADERS.ACHATS.QUANTITE_COMMANDEE)
     || colWhere(h => h.includes('quantite'));
-  const COL_PRIX = colExact(HEADERS.ACHATS.PRIX_UNITAIRE_TTC)
+  const COL_QTY = COL_QTY_PRIMARY || COL_QTY_FALLBACK;
+  const COL_PRIX_PRIMARY = colExact(HEADERS.ACHATS.PRIX_UNITAIRE_TTC)
     || colWhere(h => h.includes('prix') && h.includes('ttc'));
+  const COL_PRIX_FALLBACK = colExact(HEADERS.ACHATS.PRIX_ACHAT_SHIP_INCLUS)
+    || colExact(HEADERS.ACHATS.PRIX_UNITAIRE_BRUTE)
+    || colWhere(h => h.includes('prix') && (h.includes('ship') || h.includes('brut')));
+  const COL_PRIX = COL_PRIX_PRIMARY || COL_PRIX_FALLBACK;
   const COL_COMMANDE = colWhere(h => h.includes('commande'));
 
   const idValues = achats.getRange(2, COL_ID, lastRow - 1, 1).getValues();
@@ -1081,9 +1100,15 @@ function handleAchats(e) {
   const COL_GEN  = COL_GEN_DATA || (COL_GEN_LEGACY && COL_GEN_LEGACY !== COL_GEN_DATA ? COL_GEN_LEGACY : 0);
   const COL_REF  = colExact(HEADERS.ACHATS.REFERENCE) || colWhere(h => h.includes('reference'));
   const COL_DLIV = colExact(HEADERS.ACHATS.DATE_LIVRAISON) || colWhere(h => h.includes('livraison'));
+  const COL_DATE_RECEPTION = colExact(HEADERS.ACHATS.DATE_RECEPTION)
+    || colWhere(h => h.includes('reception') && h.includes('date'));
+  const COL_DATE_ACHAT = colExact(HEADERS.ACHATS.DATE_ACHAT)
+    || colWhere(h => h.includes('date') && h.includes('achat'));
   const COL_QTY  = colExact(HEADERS.ACHATS.QUANTITE_RECUE)
     || colExact(HEADERS.ACHATS.QUANTITE_RECUE_ALT)
     || colWhere(h => h.includes('quantite') && (h.includes('recu') || h.includes('recue')));
+  const COL_QTY_COMMANDEE = colExact(HEADERS.ACHATS.QUANTITE_COMMANDEE)
+    || colWhere(h => h.includes('quantite') && h.includes('command'));
   const legacyReadyCol = colExact(HEADERS.ACHATS.PRET_STOCK)
     || colExact(HEADERS.ACHATS.PRET_STOCK_ALT)
     || colWhere(h => h.includes('pret') && h.includes('stock'));
@@ -1096,12 +1121,20 @@ function handleAchats(e) {
   const COL_READY = useCombinedReadyCol ? combinedReadyCol : legacyReadyCol;
   const COL_STP = useCombinedReadyCol ? combinedReadyCol : legacyStpCol;
   const COL_FRAIS = colExact(HEADERS.ACHATS.FRAIS_COLISSAGE)
-    || colWhere(h => h.includes('frais') && h.includes('colis'));
+    || colExact(HEADERS.ACHATS.FRAIS_LAVAGE)
+    || colWhere(h => h.includes('frais') && (h.includes('colis') || h.includes('lavage')));
   const COL_PRIX_TTC = colExact(HEADERS.ACHATS.PRIX_UNITAIRE_TTC)
     || colWhere(h => h.includes('prix') && h.includes('ttc') && h.includes('unit'));
+  const COL_PRIX_SHIP = colExact(HEADERS.ACHATS.PRIX_ACHAT_SHIP_INCLUS)
+    || colWhere(h => h.includes('prix') && h.includes('ship'));
+  const COL_PRIX_BRUTE = colExact(HEADERS.ACHATS.PRIX_UNITAIRE_BRUTE)
+    || colWhere(h => h.includes('prix') && h.includes('brut'));
   const COL_TOTAL_TTC = colExact(HEADERS.ACHATS.TOTAL_TTC)
     || colWhere(h => h.includes('total') && h.includes('ttc'));
   const isCombinedReadyCell = useCombinedReadyCol && COL_READY && COL_STP && COL_READY === COL_STP;
+  const COL_QTY_FOR_TOTALS = COL_QTY || COL_QTY_COMMANDEE;
+  const COL_PRIX_FOR_TOTALS = COL_PRIX_TTC || COL_PRIX_SHIP || COL_PRIX_BRUTE;
+  const HAS_DELIVERY_REFERENCE = !!(COL_DLIV || COL_DATE_RECEPTION || COL_DATE_ACHAT);
 
   function buildCheckboxRule_() {
     return SpreadsheetApp
@@ -1109,6 +1142,37 @@ function handleAchats(e) {
       .requireCheckbox()
       .setAllowInvalid(false)
       .build();
+  }
+
+  function getDateFromColumn_(column) {
+    if (!column) return null;
+    const cell = sh.getRange(row, column);
+    const raw = cell.getValue();
+    const parsed = getDateOrNull_(raw);
+    if (parsed) {
+      return parsed;
+    }
+    const display = cell.getDisplayValue();
+    return getDateOrNull_(display);
+  }
+
+  function getDeliveryReferenceDate_() {
+    if (!HAS_DELIVERY_REFERENCE) return null;
+    const candidates = [];
+    if (COL_DLIV) candidates.push(COL_DLIV);
+    if (COL_DATE_RECEPTION && candidates.indexOf(COL_DATE_RECEPTION) === -1) {
+      candidates.push(COL_DATE_RECEPTION);
+    }
+    if (COL_DATE_ACHAT && candidates.indexOf(COL_DATE_ACHAT) === -1) {
+      candidates.push(COL_DATE_ACHAT);
+    }
+    for (let i = 0; i < candidates.length; i++) {
+      const date = getDateFromColumn_(candidates[i]);
+      if (date) {
+        return date;
+      }
+    }
+    return null;
   }
 
   function isCheckboxValidation_(validation) {
@@ -1276,14 +1340,9 @@ function handleAchats(e) {
       }
 
       let stamp = null;
-      if (COL_DLIV) {
-        const deliveryCell = sh.getRange(row, COL_DLIV);
-        const deliveryValue = deliveryCell.getValue();
-        const deliveryDate = getDateOrNull_(deliveryValue)
-          || getDateOrNull_(deliveryCell.getDisplayValue());
-        if (deliveryDate) {
-          stamp = addDays_(deliveryDate, 1);
-        }
+      const deliveryDate = getDeliveryReferenceDate_();
+      if (deliveryDate) {
+        stamp = addDays_(deliveryDate, 1);
       }
 
       if (!stamp) {
@@ -1339,9 +1398,11 @@ function handleAchats(e) {
     }
 
     let baseTotal = NaN;
-    if (COL_QTY && COL_PRIX_TTC) {
-      const qtyVal = toNumber_(sh.getRange(row, COL_QTY).getValue());
-      const priceVal = toNumber_(sh.getRange(row, COL_PRIX_TTC).getValue());
+    if (COL_QTY_FOR_TOTALS && COL_PRIX_FOR_TOTALS) {
+      const qtyRange = sh.getRange(row, COL_QTY_FOR_TOTALS);
+      const priceRange = sh.getRange(row, COL_PRIX_FOR_TOTALS);
+      const qtyVal = toNumber_(qtyRange.getValue());
+      const priceVal = toNumber_(priceRange.getValue());
       if (Number.isFinite(qtyVal) && Number.isFinite(priceVal)) {
         baseTotal = qtyVal * priceVal;
       }
@@ -1394,24 +1455,21 @@ function handleAchats(e) {
     ? String(sh.getRange(row, fallbackGenreCol).getDisplayValue() || "").trim()
     : "";
   const genre   = genrePrimary || genreFallback;
-  if (!COL_REF || !COL_QTY) return;
+  if (!COL_REF) return;
   const skuBase = String(sh.getRange(row, COL_REF).getDisplayValue() || "").trim();
-  const qty     = Number(sh.getRange(row, COL_QTY).getValue());
+  let qty = NaN;
+  if (COL_QTY) {
+    qty = Number(sh.getRange(row, COL_QTY).getValue());
+  }
+  if ((!Number.isFinite(qty) || qty <= 0) && COL_QTY_FOR_TOTALS && COL_QTY_FOR_TOTALS !== COL_QTY) {
+    qty = Number(sh.getRange(row, COL_QTY_FOR_TOTALS).getValue());
+  }
   if (!skuBase || !Number.isFinite(qty) || qty <= 0) return;
 
   // Date de livraison robuste
-  if (!COL_DLIV) return;
-  const raw = sh.getRange(row, COL_DLIV).getValue();
-  let dateLiv;
-  if (raw instanceof Date && !isNaN(raw)) {
-    dateLiv = raw;
-  } else {
-    const s = sh.getRange(row, COL_DLIV).getDisplayValue();
-    const m = s && s.match(/^\s*(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{2,4})\s*$/);
-    if (!m) return;
-    const d = +m[1], mo = +m[2], y = +(m[3].length === 2 ? ("20"+m[3]) : m[3]);
-    dateLiv = new Date(y, mo - 1, d);
-  }
+  if (!HAS_DELIVERY_REFERENCE) return;
+  const dateLiv = getDeliveryReferenceDate_();
+  if (!dateLiv) return;
 
   const target = ss.getSheetByName("Stock");
   if (!target) return;
@@ -2715,8 +2773,12 @@ function getAchatsRecordByIdOrSku_(ss, idVal, sku) {
 
   const colId = resolver.colExact(HEADERS.ACHATS.ID);
   const colRef = resolver.colExact(HEADERS.ACHATS.REFERENCE);
-  const colPrix = resolver.colExact(HEADERS.ACHATS.PRIX_UNITAIRE_TTC);
-  const colDate = resolver.colExact(HEADERS.ACHATS.DATE_LIVRAISON);
+  const colPrix = resolver.colExact(HEADERS.ACHATS.PRIX_UNITAIRE_TTC)
+    || resolver.colExact(HEADERS.ACHATS.PRIX_ACHAT_SHIP_INCLUS)
+    || resolver.colExact(HEADERS.ACHATS.PRIX_UNITAIRE_BRUTE);
+  const colDate = resolver.colExact(HEADERS.ACHATS.DATE_LIVRAISON)
+    || resolver.colExact(HEADERS.ACHATS.DATE_RECEPTION)
+    || resolver.colExact(HEADERS.ACHATS.DATE_ACHAT);
 
   const keyId = idVal !== undefined && idVal !== null && String(idVal).trim() !== ''
     ? normText_(idVal)
@@ -2733,9 +2795,10 @@ function getAchatsRecordByIdOrSku_(ss, idVal, sku) {
     if (!idMatch && !refMatch) continue;
 
     const prixCell = colPrix ? row[colPrix - 1] : null;
-    const prixAchat = typeof prixCell === 'number' && Number.isFinite(prixCell) ? prixCell : null;
+    const prixNumber = toNumber_(prixCell);
+    const prixAchat = Number.isFinite(prixNumber) ? prixNumber : null;
     const dateCell = colDate ? row[colDate - 1] : null;
-    const dateReception = dateCell instanceof Date && !isNaN(dateCell) ? dateCell : null;
+    const dateReception = getDateOrNull_(dateCell);
 
     return { prixAchat, dateReception };
   }
