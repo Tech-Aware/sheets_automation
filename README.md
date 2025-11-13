@@ -12,7 +12,7 @@ Ce dépôt contenait initialement les scripts Google Apps Script pilotant le fic
 ### Démarrage
 ```bash
 pip install customtkinter openpyxl
-python -m python_app.main  # prend « Prerelease 1.2.xlsx » par défaut
+python -m python_app.main  # charge automatiquement « Prerelease 1.2.xlsx » depuis la racine du dépôt
 ```
 
 Vous pouvez passer un autre chemin vers un fichier Excel compatible :

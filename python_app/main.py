@@ -96,24 +96,28 @@ class CalendarView(ctk.CTkFrame):
         listbox.pack(fill="both", expand=True, padx=32, pady=16)
 
 
+DEFAULT_WORKBOOK = Path(__file__).resolve().parent.parent / "Prerelease 1.2.xlsx"
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Vintage ERP UI")
     parser.add_argument(
         "workbook",
         nargs="?",
-        default="Prerelease 1.2.xlsx",
+        default=DEFAULT_WORKBOOK,
         type=Path,
-        help="Path to the Excel workbook (defaults to Prerelease 1.2.xlsx)",
+        help="Path to the Excel workbook (defaults to Prerelease 1.2.xlsx located at the repo root)",
     )
     return parser.parse_args(argv)
 
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
+    workbook_path = Path(args.workbook)
     try:
-        repo = WorkbookRepository(args.workbook)
+        repo = WorkbookRepository(workbook_path)
     except FileNotFoundError:
-        messagebox.showerror("Workbook introuvable", f"Impossible d'ouvrir {args.workbook!s}")
+        messagebox.showerror("Workbook introuvable", f"Impossible d'ouvrir {workbook_path!s}")
         return 1
     app = VintageErpApp(repo)
     app.mainloop()
