@@ -1,0 +1,976 @@
+function getAvailableSalesMonths_(ss) {
+  const ventes = ss.getSheetByName('Ventes');
+  if (!ventes) return [];
+
+  const lastRow = ventes.getLastRow();
+  if (lastRow < 2) return [];
+
+  const headers = ventes.getRange(1, 1, 1, ventes.getLastColumn()).getValues()[0];
+  const resolver = makeHeaderResolver_(headers);
+  const colDate = resolver.colExact(HEADERS.VENTES.DATE_VENTE)
+    || resolver.colWhere(h => h.includes('date') && h.includes('vente'));
+
+  if (!colDate) return [];
+
+  const dates = ventes.getRange(2, colDate, lastRow - 1, 1).getValues();
+  const monthsMap = new Map();
+
+  for (let i = 0; i < dates.length; i++) {
+    let cell = dates[i][0];
+    if (cell instanceof Date && !isNaN(cell)) {
+      // already proper date
+    } else if (typeof cell === 'number') {
+      cell = new Date(cell);
+    } else if (typeof cell === 'string' && cell.trim()) {
+      const parsed = new Date(cell);
+      cell = isNaN(parsed) ? null : parsed;
+    } else {
+      cell = null;
+    }
+
+    if (!(cell instanceof Date) || isNaN(cell)) continue;
+
+    const year = cell.getFullYear();
+    const monthIndex = cell.getMonth();
+    const key = `${year}-${String(monthIndex + 1).padStart(2, '0')}`;
+    if (!monthsMap.has(key)) {
+      monthsMap.set(key, { year, monthIndex });
+    }
+  }
+
+  const months = Array.from(monthsMap.values());
+  months.sort((a, b) => {
+    if (a.year !== b.year) return b.year - a.year;
+    return b.monthIndex - a.monthIndex;
+  });
+
+  return months.map(({ year, monthIndex }) => ({
+    year,
+    monthIndex,
+    label: formatMonthLabel_(year, monthIndex),
+    key: `${year}-${String(monthIndex + 1).padStart(2, '0')}`
+  }));
+}
+
+function setBackfillMenuSlot_(slot, payload) {
+  const props = PropertiesService.getDocumentProperties();
+  const key = `${BACKFILL_MONTH_SLOT_PREFIX}${slot}`;
+  if (payload) {
+    props.setProperty(key, JSON.stringify(payload));
+  } else {
+    props.deleteProperty(key);
+  }
+}
+
+function getBackfillMenuSlot_(slot) {
+  const props = PropertiesService.getDocumentProperties();
+  const key = `${BACKFILL_MONTH_SLOT_PREFIX}${slot}`;
+  const raw = props.getProperty(key);
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    if (
+      parsed &&
+      typeof parsed.year === 'number' &&
+      typeof parsed.monthIndex === 'number'
+    ) {
+      return parsed;
+    }
+  } catch (err) {
+    props.deleteProperty(key);
+  }
+  return null;
+}
+
+function getBackfillFilterKey_(filter) {
+  if (filter && typeof filter.year === 'number' && typeof filter.monthIndex === 'number') {
+    return `Y${filter.year}-M${String(filter.monthIndex + 1).padStart(2, '0')}`;
+  }
+  return 'ALL';
+}
+
+function getBackfillFilterLabel_(filter) {
+  if (filter && typeof filter.year === 'number' && typeof filter.monthIndex === 'number') {
+    return formatMonthLabel_(filter.year, filter.monthIndex);
+  }
+  return 'tous les mois';
+}
+
+function loadBackfillProgress_(filterKey) {
+  const props = PropertiesService.getDocumentProperties();
+  const raw = props.getProperty(`${BACKFILL_PROGRESS_PREFIX}${filterKey}`);
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed.nextIndex === 'number') {
+      return parsed;
+    }
+  } catch (err) {
+    props.deleteProperty(`${BACKFILL_PROGRESS_PREFIX}${filterKey}`);
+  }
+  return null;
+}
+
+function saveBackfillProgress_(filterKey, state) {
+  const props = PropertiesService.getDocumentProperties();
+  props.setProperty(`${BACKFILL_PROGRESS_PREFIX}${filterKey}`, JSON.stringify(state));
+}
+
+function clearBackfillProgress_(filterKey) {
+  const props = PropertiesService.getDocumentProperties();
+  props.deleteProperty(`${BACKFILL_PROGRESS_PREFIX}${filterKey}`);
+}
+
+function shouldResumeBackfill_(filter, progress, totalRows) {
+  if (!progress) {
+    return false;
+  }
+
+  const ui = SpreadsheetApp.getUi();
+  const label = getBackfillFilterLabel_(filter);
+  const processed = Math.min(progress.nextIndex, totalRows);
+  const remaining = Math.max(totalRows - processed, 0);
+  const details = [];
+  if (Number(progress.copied)) {
+    details.push(`${progress.copied} vente(s) copiée(s)`);
+  }
+  if (Number(progress.duplicates)) {
+    details.push(`${progress.duplicates} doublon(s)`);
+  }
+  if (Number(progress.missingDate)) {
+    details.push(`${progress.missingDate} sans date`);
+  }
+  if (Number(progress.skippedByFilter)) {
+    details.push(`${progress.skippedByFilter} hors période`);
+  }
+  const detailsSuffix = details.length ? `\n\nProgression enregistrée : ${details.join(', ')}.` : '';
+  const message = remaining > 0
+    ? `Une recopie précédente pour ${label} s'est arrêtée avant la fin (${processed}/${totalRows}). Veux-tu reprendre où elle s'est arrêtée ?${detailsSuffix}`
+    : `Une recopie précédente pour ${label} est enregistrée mais aucune ligne restante n'a été détectée. Reprendre malgré tout ?${detailsSuffix}`;
+
+  const response = ui.alert('Recopie comptable', message, ui.ButtonSet.YES_NO);
+  return response === ui.Button.YES;
+}
+
+function registerBackfillMenu_(menu, ss) {
+  const backfillMenu = SpreadsheetApp.getUi().createMenu('Recopier les ventes en compta');
+  backfillMenu.addItem('Tous les mois', 'backfillMonthlyLedgers');
+
+  const months = getAvailableSalesMonths_(ss);
+
+  let assigned = 0;
+  for (let slot = 1; slot <= BACKFILL_MONTH_MENU_SLOTS; slot++) {
+    const month = months[slot - 1];
+    if (month) {
+      setBackfillMenuSlot_(slot, month);
+      backfillMenu.addItem(month.label, `backfillMonthlyLedgersSlot${slot}`);
+      assigned++;
+    } else {
+      setBackfillMenuSlot_(slot, null);
+    }
+  }
+
+  if (assigned === 0) {
+    backfillMenu.addItem('Aucun mois disponible', 'noopBackfillMonthlyLedgerMenu');
+  }
+
+  menu.addSubMenu(backfillMenu);
+}
+
+// === MENU ===
+
+function onOpen(e) {
+  const ui = SpreadsheetApp.getUi();
+  const maintenance = ui.createMenu('Maintenance')
+    .addItem('Recalculer les SKU du Stock', 'recalcStock')
+    .addItem('Mettre à jour les dates de mise en stock', 'syncMiseEnStockFromAchats')
+    .addItem('Valider toutes les saisies prêtes', 'validateAllSales')
+    .addItem('Trier les ventes (date décroissante)', 'sortVentesByDate')
+    .addItem('Retirer du Stock les ventes importées', 'purgeStockFromVentes');
+
+  registerBackfillMenu_(maintenance, SpreadsheetApp.getActive());
+
+  maintenance.addToUi();
+}
+
+function noopBackfillMonthlyLedgerMenu() {
+  SpreadsheetApp.getActive().toast('Aucun mois de vente disponible pour la recopie.', 'Recopie comptable', 5);
+}
+
+function backfillMonthlyLedgersSlot1() { backfillMonthlyLedgersForAssignedMonth_(1); }
+function backfillMonthlyLedgersSlot2() { backfillMonthlyLedgersForAssignedMonth_(2); }
+function backfillMonthlyLedgersSlot3() { backfillMonthlyLedgersForAssignedMonth_(3); }
+function backfillMonthlyLedgersSlot4() { backfillMonthlyLedgersForAssignedMonth_(4); }
+function backfillMonthlyLedgersSlot5() { backfillMonthlyLedgersForAssignedMonth_(5); }
+function backfillMonthlyLedgersSlot6() { backfillMonthlyLedgersForAssignedMonth_(6); }
+function backfillMonthlyLedgersSlot7() { backfillMonthlyLedgersForAssignedMonth_(7); }
+function backfillMonthlyLedgersSlot8() { backfillMonthlyLedgersForAssignedMonth_(8); }
+function backfillMonthlyLedgersSlot9() { backfillMonthlyLedgersForAssignedMonth_(9); }
+function backfillMonthlyLedgersSlot10() { backfillMonthlyLedgersForAssignedMonth_(10); }
+function backfillMonthlyLedgersSlot11() { backfillMonthlyLedgersForAssignedMonth_(11); }
+function backfillMonthlyLedgersSlot12() { backfillMonthlyLedgersForAssignedMonth_(12); }
+
+function sortVentesByDate() {
+  const ss = SpreadsheetApp.getActive();
+  const ventes = ss.getSheetByName('Ventes');
+  if (!ventes) {
+    ss.toast('Feuille Ventes introuvable', 'Tri des ventes', 5);
+    return;
+  }
+
+  const lastRow = ventes.getLastRow();
+  if (lastRow <= 2) {
+    ss.toast('Aucune donnée à trier', 'Tri des ventes', 5);
+    return;
+  }
+
+  const lastColumn = ventes.getLastColumn();
+  const ventesHeaders = ventes.getRange(1, 1, 1, lastColumn).getValues()[0];
+  const resolver = makeHeaderResolver_(ventesHeaders);
+  const colDate = resolver.colExact(HEADERS.VENTES.DATE_VENTE)
+    || resolver.colWhere(h => h.includes('date') && h.includes('vente'))
+    || 2;
+
+  ventes
+    .getRange(2, 1, lastRow - 1, lastColumn)
+    .sort({ column: colDate, ascending: false });
+  ventes.getRange(2, colDate, lastRow - 1, 1).setNumberFormat('dd/MM/yyyy');
+
+  ss.toast('Les ventes ont été triées par date décroissante.', 'Tri des ventes', 5);
+}
+
+// Recalcul des SKU uniquement dans Stock
+function recalcStock() {
+  const ss = SpreadsheetApp.getActive();
+  const stock  = ss.getSheetByName('Stock');
+  if (!stock) {
+    SpreadsheetApp.getActive().toast('Feuille Stock introuvable', 'Recalcul SKU', 5);
+    return;
+  }
+
+  const last = stock.getLastRow();
+  if (last < 2) {
+    SpreadsheetApp.getActive().toast('Aucune ligne dans Stock', 'Recalcul SKU', 5);
+    return;
+  }
+
+  const stockHeaders = stock.getRange(1,1,1,stock.getLastColumn()).getValues()[0];
+  const resolver = makeHeaderResolver_(stockHeaders);
+
+  let C_DATE = resolver.colExact(HEADERS.STOCK.DATE_LIVRAISON);
+  if (!C_DATE) C_DATE = 4;
+
+  const width = stock.getLastColumn();
+
+  stock.getRange(2, 1, last - 1, width)
+       .sort({ column: C_DATE, ascending: true });
+  stock.getRange(2, C_DATE, last - 1, 1)
+       .setNumberFormat('dd/MM/yyyy');
+
+  SpreadsheetApp.getActive().toast(
+    'Tri du stock terminé (aucune renumérotation de SKU effectuée).',
+    'Recalcul SKU',
+    5
+  );
+}
+
+// Met à jour "DATE DE MISE EN STOCK" dans Stock à partir de Achats!V
+function syncMiseEnStockFromAchats() {
+  const ss = SpreadsheetApp.getActive();
+  const achats = ss.getSheetByName('Achats');
+  const stock  = ss.getSheetByName('Stock');
+  if (!achats || !stock) {
+    SpreadsheetApp.getActive().toast('Feuilles Achats/Stock introuvables', 'Mise à jour DMS', 5);
+    return;
+  }
+
+  const lastA = achats.getLastRow();
+  if (lastA < 2) {
+    SpreadsheetApp.getActive().toast('Aucune donnée dans Achats', 'Mise à jour DMS', 5);
+    return;
+  }
+
+  const mapBaseToDMS = buildBaseToStockDate_(ss);
+
+  const lastS = stock.getLastRow();
+  if (lastS < 2) {
+    SpreadsheetApp.getActive().toast('Aucune donnée dans Stock', 'Mise à jour DMS', 5);
+    return;
+  }
+
+  const headersS = stock.getRange(1,1,1,stock.getLastColumn()).getValues()[0];
+  const resolverS = makeHeaderResolver_(headersS);
+
+  const C_SKU  = resolverS.colExact(HEADERS.STOCK.SKU)
+    || resolverS.colExact(HEADERS.STOCK.REFERENCE);
+  const C_DMS  = resolverS.colExact(HEADERS.STOCK.DATE_MISE_EN_STOCK);
+  if (!C_SKU || !C_DMS) {
+    SpreadsheetApp.getActive().toast(
+      `Colonnes ${HEADERS.STOCK.SKU} ou "${HEADERS.STOCK.DATE_MISE_EN_STOCK}" introuvables`,
+      'Mise à jour DMS',
+      5
+    );
+    return;
+  }
+
+  const skuVals = stock.getRange(2, C_SKU, lastS - 1, 1).getValues();
+  const dmsRange = stock.getRange(2, C_DMS, lastS - 1, 1);
+  const dmsVals = dmsRange.getValues();
+
+  let updated = 0;
+  let cleared = 0;
+  for (let i = 0; i < skuVals.length; i++) {
+    const base = extractSkuBase_(skuVals[i][0]);
+    if (!base) continue;
+
+    const dt = mapBaseToDMS[base];
+    if (dt instanceof Date && !isNaN(dt)) {
+      if (!(dmsVals[i][0] instanceof Date) || dmsVals[i][0].getTime() !== dt.getTime()) {
+        dmsVals[i][0] = dt;
+        updated++;
+      }
+    } else if (dmsVals[i][0]) {
+      dmsVals[i][0] = null;
+      cleared++;
+    }
+  }
+
+  dmsRange.setValues(dmsVals);
+
+  SpreadsheetApp.getActive().toast(
+    `Dates de mise en stock mises à jour sur ${updated} ligne(s) et effacées sur ${cleared} ligne(s).`,
+    'Mise à jour DMS',
+    5
+  );
+}
+
+function purgeStockFromVentes() {
+  const ss = SpreadsheetApp.getActive();
+  const stock = ss.getSheetByName('Stock');
+  const ventes = ss.getSheetByName('Ventes');
+
+  if (!stock || !ventes) {
+    ss.toast('Feuilles "Stock" ou "Ventes" introuvables.', 'Purge du stock', 6);
+    return;
+  }
+
+  const stockLast = stock.getLastRow();
+  const ventesLast = ventes.getLastRow();
+  if (stockLast < 2) {
+    ss.toast('Aucune ligne à traiter dans "Stock".', 'Purge du stock', 6);
+    return;
+  }
+  if (ventesLast < 2) {
+    ss.toast('Aucune vente disponible pour le rapprochement.', 'Purge du stock', 6);
+    return;
+  }
+
+  const stockHeaders = stock.getRange(1, 1, 1, stock.getLastColumn()).getValues()[0];
+  const ventesHeaders = ventes.getRange(1, 1, 1, ventes.getLastColumn()).getValues()[0];
+  const stockResolver = makeHeaderResolver_(stockHeaders);
+  const ventesResolver = makeHeaderResolver_(ventesHeaders);
+
+  const C_STOCK_ID = stockResolver.colExact(HEADERS.STOCK.ID);
+  const C_STOCK_SKU = stockResolver.colExact(HEADERS.STOCK.SKU)
+    || stockResolver.colExact(HEADERS.STOCK.REFERENCE);
+  const C_STOCK_LABEL = stockResolver.colExact(HEADERS.STOCK.LIBELLE)
+    || stockResolver.colExact(HEADERS.STOCK.LIBELLE_ALT)
+    || stockResolver.colExact(HEADERS.STOCK.ARTICLE)
+    || stockResolver.colExact(HEADERS.STOCK.ARTICLE_ALT);
+  const C_VENTE_ID = ventesResolver.colExact(HEADERS.VENTES.ID);
+  const C_VENTE_SKU = ventesResolver.colExact(HEADERS.VENTES.SKU);
+
+  if (!C_STOCK_ID || !C_STOCK_SKU || !C_VENTE_ID || !C_VENTE_SKU) {
+    ss.toast(
+      `Colonnes ${HEADERS.STOCK.ID} ou ${HEADERS.STOCK.SKU} introuvables dans Stock/Ventes.`,
+      'Purge du stock',
+      8
+    );
+    return;
+  }
+
+  const ventesWidth = ventes.getLastColumn();
+  const ventesValues = ventes.getRange(2, 1, ventesLast - 1, ventesWidth).getValues();
+  const venteCounts = new Map();
+  let ventesIgnorées = 0;
+
+  function buildKey(idValue, skuValue) {
+    const id = idValue === null || idValue === undefined ? '' : String(idValue).trim();
+    const sku = skuValue === null || skuValue === undefined ? '' : String(skuValue).trim().toLowerCase();
+    if (!id || !sku) return '';
+    return id + '|' + sku;
+  }
+
+  for (let i = 0; i < ventesValues.length; i++) {
+    const row = ventesValues[i];
+    const key = buildKey(row[C_VENTE_ID - 1], row[C_VENTE_SKU - 1]);
+    if (!key) {
+      ventesIgnorées++;
+      continue;
+    }
+    venteCounts.set(key, (venteCounts.get(key) || 0) + 1);
+  }
+
+  if (!venteCounts.size) {
+    ss.toast('Aucun couple ID+SKU exploitable dans "Ventes".', 'Purge du stock', 6);
+    return;
+  }
+
+  const stockWidth = stock.getLastColumn();
+  const stockValues = stock.getRange(2, 1, stockLast - 1, stockWidth).getValues();
+  const rowsToDelete = [];
+  const deletedItems = [];
+
+  for (let i = 0; i < stockValues.length; i++) {
+    const row = stockValues[i];
+    const key = buildKey(row[C_STOCK_ID - 1], row[C_STOCK_SKU - 1]);
+    const count = key ? venteCounts.get(key) : 0;
+    if (count && count > 0) {
+      rowsToDelete.push(i + 2);
+      deletedItems.push({
+        rowNumber: i + 2,
+        id: row[C_STOCK_ID - 1],
+        sku: row[C_STOCK_SKU - 1],
+        label: C_STOCK_LABEL ? row[C_STOCK_LABEL - 1] : ''
+      });
+      if (count === 1) {
+        venteCounts.delete(key);
+      } else {
+        venteCounts.set(key, count - 1);
+      }
+    }
+  }
+
+  if (!rowsToDelete.length) {
+    Logger.log('Purge du stock : aucune correspondance trouvée. %s vente(s) ignorée(s).', ventesIgnorées);
+    ss.toast('Aucune ligne du stock ne correspond aux ventes.', 'Purge du stock', 6);
+    return;
+  }
+
+  rowsToDelete.sort((a, b) => b - a);
+  rowsToDelete.forEach(row => stock.deleteRow(row));
+
+  const restants = Array.from(venteCounts.values()).reduce((sum, val) => sum + val, 0);
+  const remainingSales = [];
+  venteCounts.forEach((remaining, key) => {
+    if (remaining > 0) {
+      const [venteId, venteSku] = key.split('|');
+      remainingSales.push({ id: venteId, sku: venteSku, remaining });
+    }
+  });
+  const messageParts = [`${rowsToDelete.length} ligne(s) supprimée(s) du Stock.`];
+  if (ventesIgnorées) {
+    messageParts.push(`${ventesIgnorées} vente(s) ignorée(s) (${HEADERS.VENTES.ID} ou ${HEADERS.VENTES.SKU} manquant).`);
+  }
+  if (restants) {
+    messageParts.push(`${restants} vente(s) sans correspondance dans le Stock.`);
+  }
+
+  ss.toast(messageParts.join(' '), 'Purge du stock', 8);
+  Logger.log(
+    'Purge du stock : %s ligne(s) supprimée(s), %s vente(s) ignorée(s), %s vente(s) sans correspondance.',
+    rowsToDelete.length,
+    ventesIgnorées,
+    restants
+  );
+  if (deletedItems.length) {
+    Logger.log('Détails des suppressions : %s', JSON.stringify(deletedItems));
+  }
+  if (remainingSales.length) {
+    Logger.log('Ventes restantes sans correspondance : %s', JSON.stringify(remainingSales));
+  }
+}
+
+function backfillMonthlyLedgers() {
+  runBackfillMonthlyLedgers_();
+}
+
+function backfillMonthlyLedgersForAssignedMonth_(slot) {
+  const ss = SpreadsheetApp.getActive();
+  const payload = getBackfillMenuSlot_(slot);
+  if (!payload) {
+    ss.toast('Ce mois n\'est plus disponible. Rouvre le menu pour le rafraîchir.', 'Recopie comptable', 6);
+    return;
+  }
+
+  runBackfillMonthlyLedgers_(payload);
+}
+
+function runBackfillMonthlyLedgers_(filter) {
+  const ss = SpreadsheetApp.getActive();
+  const ventes = ss.getSheetByName('Ventes');
+  if (!ventes) {
+    ss.toast('Feuille "Ventes" introuvable.', 'Recopie comptable', 6);
+    return;
+  }
+
+  const lastRow = ventes.getLastRow();
+  if (lastRow < 2) {
+    ss.toast('Aucune vente à recopier.', 'Recopie comptable', 5);
+    return;
+  }
+
+  const headers = ventes.getRange(1, 1, 1, ventes.getLastColumn()).getValues()[0];
+  const resolver = makeHeaderResolver_(headers);
+
+  const colId = resolver.colExact(HEADERS.VENTES.ID);
+  const colLibelle = resolver.colExact(HEADERS.VENTES.ARTICLE)
+    || resolver.colExact(HEADERS.VENTES.ARTICLE_ALT);
+  const colSku = resolver.colExact(HEADERS.VENTES.SKU);
+  const colDate = resolver.colExact(HEADERS.VENTES.DATE_VENTE);
+  const colPrix = resolver.colExact(HEADERS.VENTES.PRIX_VENTE)
+    || resolver.colExact(HEADERS.VENTES.PRIX_VENTE_ALT);
+
+  if (!colDate) {
+    ss.toast(`Colonne ${HEADERS.VENTES.DATE_VENTE} introuvable dans "Ventes".`, 'Recopie comptable', 8);
+    return;
+  }
+
+  const width = ventes.getLastColumn();
+  const data = ventes.getRange(2, 1, lastRow - 1, width).getValues();
+  const totalRows = data.length;
+
+  const filterKey = getBackfillFilterKey_(filter);
+  let progress = loadBackfillProgress_(filterKey);
+  let resumeProgress = false;
+
+  if (progress && (progress.nextIndex > 0 || progress.copied || progress.duplicates || progress.missingDate || progress.skippedByFilter)) {
+    resumeProgress = shouldResumeBackfill_(filter, progress, totalRows);
+    if (!resumeProgress) {
+      clearBackfillProgress_(filterKey);
+      progress = null;
+    }
+  }
+
+  let startIndex = 0;
+  let copied = 0;
+  let duplicates = 0;
+  let missingDate = 0;
+  let skippedByFilter = 0;
+
+  if (progress && resumeProgress) {
+    startIndex = Math.max(0, Math.min(Number(progress.nextIndex) || 0, totalRows));
+    copied = Number(progress.copied) || 0;
+    duplicates = Number(progress.duplicates) || 0;
+    missingDate = Number(progress.missingDate) || 0;
+    skippedByFilter = Number(progress.skippedByFilter) || 0;
+  }
+
+  const startTime = Date.now();
+  let timedOut = false;
+  let nextIndex = startIndex;
+
+  for (let i = startIndex; i < data.length; i++) {
+    const row = data[i];
+    nextIndex = i + 1;
+
+    let dateCell = colDate ? row[colDate - 1] : null;
+    if (!(dateCell instanceof Date) || isNaN(dateCell)) {
+      if (typeof dateCell === 'number') {
+        dateCell = new Date(dateCell);
+      } else if (typeof dateCell === 'string' && dateCell.trim()) {
+        const parsed = new Date(dateCell);
+        dateCell = isNaN(parsed) ? null : parsed;
+      } else {
+        dateCell = null;
+      }
+    }
+
+    if (!(dateCell instanceof Date) || isNaN(dateCell)) {
+      missingDate++;
+      continue;
+    }
+
+    if (filter && typeof filter.year === 'number' && typeof filter.monthIndex === 'number') {
+      if (dateCell.getFullYear() !== filter.year || dateCell.getMonth() !== filter.monthIndex) {
+        skippedByFilter++;
+        continue;
+      }
+    }
+
+    const idVal = colId ? row[colId - 1] : '';
+    const libelle = colLibelle ? row[colLibelle - 1] : '';
+    const sku = colSku ? row[colSku - 1] : '';
+
+    let prixVente = NaN;
+    if (colPrix) {
+      const rawPrix = row[colPrix - 1];
+      if (rawPrix !== '' && rawPrix !== null && rawPrix !== undefined) {
+        prixVente = valueToNumber_(rawPrix);
+      }
+    }
+
+    const achat = getAchatsRecordByIdOrSku_(ss, idVal, sku) || {};
+    const prixAchat = Number.isFinite(achat.prixAchat) ? achat.prixAchat : NaN;
+
+    let marge = '';
+    if (Number.isFinite(prixVente) && Number.isFinite(prixAchat)) {
+      marge = prixVente - prixAchat;
+    }
+
+    let coeff = '';
+    if (Number.isFinite(prixVente) && Number.isFinite(prixAchat) && prixAchat !== 0) {
+      coeff = prixVente / prixAchat;
+    }
+
+    const inserted = copySaleToMonthlySheet_(ss, {
+      id: idVal,
+      libelle,
+      dateVente: dateCell,
+      margeBrute: marge,
+      coeffMarge: coeff,
+      nbPieces: 1,
+      sku
+    });
+
+    if (inserted) {
+      copied++;
+    } else {
+      duplicates++;
+    }
+
+    if ((Date.now() - startTime) >= BACKFILL_MAX_RUNTIME_MS && i < data.length - 1) {
+      timedOut = true;
+      break;
+    }
+  }
+
+  const messageParts = [`${copied} vente(s) copiée(s).`];
+  if (duplicates) {
+    messageParts.push(`${duplicates} vente(s) déjà présentes ou ignorées.`);
+  }
+  if (missingDate) {
+    messageParts.push(`${missingDate} vente(s) sans date de vente.`);
+  }
+  if (filter && skippedByFilter && copied === 0) {
+    messageParts.push(`${skippedByFilter} ligne(s) ignorée(s) car hors du mois sélectionné.`);
+  }
+
+  const title = filter
+    ? `Recopie ${formatMonthLabel_(filter.year, filter.monthIndex)}`
+    : 'Recopie comptable';
+
+  if (timedOut && nextIndex < data.length) {
+    saveBackfillProgress_(filterKey, {
+      nextIndex,
+      copied,
+      duplicates,
+      missingDate,
+      skippedByFilter,
+      totalRows,
+      lastUpdated: new Date().toISOString()
+    });
+    messageParts.push(`Limite de temps atteinte (${nextIndex}/${totalRows}). Relance la recopie pour continuer.`);
+    ss.toast(messageParts.join(' '), title, 8);
+    return;
+  }
+
+  clearBackfillProgress_(filterKey);
+  ss.toast(messageParts.join(' '), title, 8);
+}
+
+// Validation groupée
+function validateAllSales() {
+  const ss = SpreadsheetApp.getActive();
+  const stock = ss.getSheetByName('Stock');
+  if (!stock) {
+    SpreadsheetApp.getUi().alert('Validation groupée', 'Feuille "Stock" introuvable.', SpreadsheetApp.getUi().ButtonSet.OK);
+    return;
+  }
+
+  const last = stock.getLastRow();
+  if (last < 2) {
+    SpreadsheetApp.getUi().alert('Validation groupée', 'Aucune ligne à traiter dans "Stock".', SpreadsheetApp.getUi().ButtonSet.OK);
+    return;
+  }
+
+  const stockHeaders = stock.getRange(1, 1, 1, stock.getLastColumn()).getValues()[0];
+  const resolver = makeHeaderResolver_(stockHeaders);
+  const colExact = resolver.colExact.bind(resolver);
+  const colWhere = resolver.colWhere.bind(resolver);
+
+  const C_ID       = colExact(HEADERS.STOCK.ID);
+  const C_LABEL    = colExact(HEADERS.STOCK.LIBELLE)
+    || colExact(HEADERS.STOCK.LIBELLE_ALT)
+    || colExact(HEADERS.STOCK.ARTICLE)
+    || colExact(HEADERS.STOCK.ARTICLE_ALT)
+    || colWhere(h => h.includes('libell'))
+    || colWhere(h => h.includes('article'))
+    || 2;
+  const C_SKU      = colExact(HEADERS.STOCK.SKU) || colExact(HEADERS.STOCK.REFERENCE);
+  const C_PRIX     = colExact(HEADERS.STOCK.PRIX_VENTE)
+    || colWhere(h => h.includes("prix") && h.includes("vente"));
+  const C_TAILLE   = colExact(HEADERS.STOCK.TAILLE_COLIS)
+    || colExact(HEADERS.STOCK.TAILLE_COLIS_ALT)
+    || colExact(HEADERS.STOCK.TAILLE)
+    || colWhere(isShippingSizeHeader_);
+  const tailleHeaderLabel = getHeaderLabel_(resolver, C_TAILLE, HEADERS.STOCK.TAILLE);
+  const C_LOT      = colExact(HEADERS.STOCK.LOT) || colWhere(h => h.includes('lot'));
+  const combinedVenduValidation = resolveCombinedVenduColumn_(resolver);
+  const legacyVenduValidation = combinedVenduValidation ? { checkboxCol: 0, dateCol: 0 } : resolveLegacyVenduColumns_(resolver);
+  let   C_VENDU    = combinedVenduValidation || legacyVenduValidation.checkboxCol;
+  let   C_DVENTE   = combinedVenduValidation || legacyVenduValidation.dateCol;
+  if (!C_VENDU) {
+    C_VENDU = colExact(HEADERS.STOCK.VENDU_ALT);
+  }
+  if (!C_DVENTE) {
+    C_DVENTE = colExact(HEADERS.STOCK.DATE_VENTE_ALT) || 10;
+  }
+  const C_VALIDATE = colExact(HEADERS.STOCK.VALIDER_SAISIE)
+    || colExact(HEADERS.STOCK.VALIDER_SAISIE_ALT)
+    || colWhere(h => h.includes("valider"));
+  const C_DMS      = colExact(HEADERS.STOCK.DATE_MISE_EN_STOCK)
+    || colWhere(h => h.includes("mise en stock"));
+  const combinedMisValidation = resolveCombinedMisEnLigneColumn_(resolver);
+  const legacyMisValidation = combinedMisValidation ? { checkboxCol: 0, dateCol: 0 } : resolveLegacyMisEnLigneColumn_(resolver);
+  const C_DMIS     = combinedMisValidation || legacyMisValidation.dateCol;
+  const combinedPubValidation = resolveCombinedPublicationColumn_(resolver);
+  const legacyPubValidation = combinedPubValidation ? { checkboxCol: 0, dateCol: 0 } : resolveLegacyPublicationColumns_(resolver);
+  const C_DPUB     = combinedPubValidation || legacyPubValidation.dateCol;
+
+  if (!C_SKU || !C_PRIX || !C_DVENTE) {
+    SpreadsheetApp.getUi().alert(
+      'Validation groupée',
+      `Colonnes ${HEADERS.STOCK.SKU} / ${HEADERS.STOCK.PRIX_VENTE} / ${HEADERS.STOCK.DATE_VENTE} introuvables. Vérifie les en-têtes.`,
+      SpreadsheetApp.getUi().ButtonSet.OK
+    );
+    return;
+  }
+
+  if (!C_TAILLE) {
+    SpreadsheetApp.getUi().alert(
+      'Validation groupée',
+      'Colonne taille introuvable ("TAILLE" / "TAILLE DU COLIS").',
+      SpreadsheetApp.getUi().ButtonSet.OK
+    );
+    return;
+  }
+
+  const lastCol = stock.getLastColumn();
+  const data = stock.getRange(2, 1, last - 1, lastCol).getValues();
+  const baseToDmsMap = buildBaseToStockDate_(ss);
+  const shippingLookup = buildShippingFeeLookup_(ss);
+  if (!shippingLookup) {
+    SpreadsheetApp.getUi().alert(
+      'Validation groupée',
+      'Feuille "Frais" introuvable ou incomplète. Impossible de calculer les frais de colissage.',
+      SpreadsheetApp.getUi().ButtonSet.OK
+    );
+    return;
+  }
+
+  const ventes = ss.getSheetByName('Ventes') || ss.insertSheet('Ventes');
+  if (ventes.getLastRow() === 0) {
+    ventes.getRange(1,1,1,DEFAULT_VENTES_HEADERS.length).setValues([DEFAULT_VENTES_HEADERS]);
+  }
+
+  const headerWidth = Math.max(DEFAULT_VENTES_HEADERS.length, ventes.getLastColumn());
+  const headerRange = ventes.getRange(1, 1, 1, headerWidth);
+  const ventesHeaders = headerRange.getValues()[0];
+  let headerMutated = false;
+  for (let i = 0; i < DEFAULT_VENTES_HEADERS.length; i++) {
+    if (!ventesHeaders[i]) {
+      ventesHeaders[i] = DEFAULT_VENTES_HEADERS[i];
+      headerMutated = true;
+    }
+  }
+  if (headerMutated) {
+    headerRange.setValues([ventesHeaders]);
+  }
+
+  const ventesResolver = makeHeaderResolver_(ventesHeaders);
+  const ventesExact = ventesResolver.colExact.bind(ventesResolver);
+  const ventesWhere = ventesResolver.colWhere.bind(ventesResolver);
+
+  const COL_ID_VENTE    = ventesExact(HEADERS.VENTES.ID);
+  const COL_DATE_VENTE  = ventesExact(HEADERS.VENTES.DATE_VENTE)
+    || ventesWhere(h => h.includes('date') && h.includes('vente'));
+  const COL_ARTICLE     = ventesExact(HEADERS.VENTES.ARTICLE)
+    || ventesWhere(h => h.includes('article'))
+    || ventesWhere(h => h.includes('libell'));
+  const COL_SKU_VENTE   = ventesExact(HEADERS.VENTES.SKU);
+  const COL_PRIX_VENTE  = ventesExact(HEADERS.VENTES.PRIX_VENTE)
+    || ventesExact(HEADERS.VENTES.PRIX_VENTE_ALT)
+    || ventesWhere(h => h.includes('prix') && h.includes('vente'));
+  const COL_FRAIS_VENTE = ventesExact(HEADERS.VENTES.FRAIS_COLISSAGE)
+    || ventesWhere(h => h.includes('frais') && h.includes('colis'));
+  const COL_TAILLE_VENTE = ventesExact(HEADERS.VENTES.TAILLE_COLIS)
+    || ventesExact(HEADERS.VENTES.TAILLE)
+    || ventesWhere(isShippingSizeHeader_);
+  const COL_LOT_VENTE   = ventesExact(HEADERS.VENTES.LOT)
+    || ventesWhere(h => h.includes('lot'));
+  const COL_DELAI_IMM   = ventesExact(HEADERS.VENTES.DELAI_IMMOBILISATION)
+    || ventesWhere(h => h.includes('immobilisation'));
+  const COL_DELAI_ML    = ventesExact(HEADERS.VENTES.DELAI_MISE_EN_LIGNE)
+    || ventesWhere(h => h.includes('mise en ligne'));
+  const COL_DELAI_PUB   = ventesExact(HEADERS.VENTES.DELAI_PUBLICATION)
+    || ventesWhere(h => h.includes('publication'));
+  const COL_DELAI_VENTE = ventesExact(HEADERS.VENTES.DELAI_VENTE)
+    || ventesWhere(h => h.includes('delai') && h.includes('vente'));
+  const widthVentes     = Math.max(ventesHeaders.length, DEFAULT_VENTES_HEADERS.length, ventes.getLastColumn());
+
+  const toAppend = [];
+  const rowsToDel = [];
+  let moved = 0;
+  const invalidChronoRows = [];
+  const missingShippingRows = [];
+  const unknownShippingRows = [];
+
+  const chronoCols = {
+    dms: C_DMS,
+    dmis: C_DMIS,
+    dpub: C_DPUB,
+    dvente: C_DVENTE
+  };
+
+  const msPerDay = 1000 * 60 * 60 * 24;
+  const daysDiff = (d2, d1) => {
+    if (!(d2 instanceof Date) || isNaN(d2) || !(d1 instanceof Date) || isNaN(d1)) return "";
+    return Math.round((d2.getTime() - d1.getTime()) / msPerDay);
+  };
+
+  for (let i = data.length - 1; i >= 0; i--) {
+    const row = data[i];
+    const rowIndex = i + 2;
+
+    const validateOk = C_VALIDATE ? (row[C_VALIDATE - 1] === true) : true;
+    if (!validateOk) continue;
+
+    const vendu = C_VENDU ? isStatusActiveValue_(row[C_VENDU - 1]) : false;
+    if (!vendu) continue;
+
+    const dateVente = row[C_DVENTE - 1];
+    if (!(dateVente instanceof Date) || isNaN(dateVente)) continue;
+
+    const prix = row[C_PRIX - 1];
+    const prixOk = (typeof prix === 'number' && !isNaN(prix) && prix > 0);
+    if (!prixOk) {
+      ensureValidPriceOrWarn_(stock, rowIndex, C_PRIX);
+      continue;
+    }
+
+    const chronoCheck = enforceChronologicalDates_(stock, rowIndex, chronoCols, { requireAllDates: true });
+    if (!chronoCheck.ok) {
+      if (C_VALIDATE) {
+        stock.getRange(rowIndex, C_VALIDATE).setValue(false);
+      }
+      invalidChronoRows.push({ row: rowIndex, message: chronoCheck.message });
+      continue;
+    }
+
+    const idValue = C_ID ? row[C_ID - 1] : '';
+    const label = row[C_LABEL - 1];
+    const sku   = C_SKU ? row[C_SKU - 1] : "";
+
+    const tailleRaw = C_TAILLE ? row[C_TAILLE - 1] : '';
+    const tailleVal = String(tailleRaw === null || tailleRaw === undefined ? '' : tailleRaw).trim();
+    if (!tailleVal) {
+      if (C_VALIDATE) {
+        stock.getRange(rowIndex, C_VALIDATE).setValue(false);
+      }
+      missingShippingRows.push(rowIndex);
+      continue;
+    }
+
+    const lotRaw = C_LOT ? row[C_LOT - 1] : '';
+    const lotVal = String(lotRaw === null || lotRaw === undefined ? '' : lotRaw).trim();
+    const fraisColis = shippingLookup(tailleVal, lotVal);
+    if (!Number.isFinite(fraisColis)) {
+      if (C_VALIDATE) {
+        stock.getRange(rowIndex, C_VALIDATE).setValue(false);
+      }
+      unknownShippingRows.push({ row: rowIndex, size: tailleVal, lot: lotVal });
+      continue;
+    }
+
+    const perItemFee = computePerItemShippingFee_(fraisColis, lotVal);
+
+    let dateMiseStock = C_DMS  ? row[C_DMS  - 1] : null;
+    if (!(dateMiseStock instanceof Date) || isNaN(dateMiseStock)) {
+      const base = extractSkuBase_(sku);
+      if (base) {
+        const dt = baseToDmsMap[base];
+        dateMiseStock = (dt instanceof Date && !isNaN(dt)) ? dt : null;
+      } else {
+        dateMiseStock = null;
+      }
+    }
+    const dateMiseLigne = C_DMIS ? row[C_DMIS - 1] : null;
+    const datePub       = C_DPUB ? row[C_DPUB - 1] : null;
+
+    const dImmobil = daysDiff(dateVente, dateMiseStock);
+    const dLigne   = daysDiff(dateMiseLigne, dateMiseStock);
+    const dPub     = daysDiff(datePub,  dateMiseLigne);
+    const dVente   = daysDiff(dateVente, datePub);
+
+    const newRow = Array(widthVentes).fill('');
+    if (COL_ID_VENTE) newRow[COL_ID_VENTE - 1] = idValue;
+    if (COL_DATE_VENTE) newRow[COL_DATE_VENTE - 1] = dateVente;
+    if (COL_ARTICLE) newRow[COL_ARTICLE - 1] = label;
+    if (COL_SKU_VENTE) newRow[COL_SKU_VENTE - 1] = sku;
+    if (COL_PRIX_VENTE) newRow[COL_PRIX_VENTE - 1] = prix;
+    if (COL_FRAIS_VENTE) newRow[COL_FRAIS_VENTE - 1] = perItemFee;
+    if (COL_TAILLE_VENTE) newRow[COL_TAILLE_VENTE - 1] = tailleVal;
+    if (COL_LOT_VENTE && lotVal) newRow[COL_LOT_VENTE - 1] = lotVal;
+    if (COL_DELAI_IMM) newRow[COL_DELAI_IMM - 1] = dImmobil;
+    if (COL_DELAI_ML) newRow[COL_DELAI_ML - 1] = dLigne;
+    if (COL_DELAI_PUB) newRow[COL_DELAI_PUB - 1] = dPub;
+    if (COL_DELAI_VENTE) newRow[COL_DELAI_VENTE - 1] = dVente;
+
+    toAppend.push(newRow);
+
+    applyShippingFeeToAchats_(ss, idValue, perItemFee);
+
+    rowsToDel.push(rowIndex);
+    moved++;
+  }
+
+  if (toAppend.length > 0) {
+    const startV = Math.max(2, ventes.getLastRow() + 1);
+    ventes.getRange(startV, 1, toAppend.length, widthVentes).setValues(toAppend);
+
+    const lastV = ventes.getLastRow();
+    if (lastV > 2 && COL_DATE_VENTE) {
+      ventes.getRange(2, 1, lastV - 1, ventes.getLastColumn())
+            .sort([{column: COL_DATE_VENTE, ascending: false}]);
+      ventes.getRange(2, COL_DATE_VENTE, lastV - 1, 1).setNumberFormat('dd/MM/yyyy');
+    }
+
+    rowsToDel.sort((a, b) => b - a);
+    rowsToDel.forEach(r => stock.deleteRow(r));
+  }
+
+  const ui = SpreadsheetApp.getUi();
+  ui.alert(
+    'Validation groupée terminée',
+    `${moved} ligne(s) ont été déplacées vers "Ventes".`,
+    ui.ButtonSet.OK
+  );
+
+  if (invalidChronoRows.length > 0) {
+    const first = invalidChronoRows[0];
+    const extra = invalidChronoRows.length > 1 ? ` (et ${invalidChronoRows.length - 1} autre(s) ligne(s))` : '';
+    const message = `Validation bloquée - ligne ${first.row}: ${first.message}${extra}`;
+    SpreadsheetApp.getActive().toast(message, 'Validation groupée', 8);
+  }
+
+  if (missingShippingRows.length > 0) {
+    const list = missingShippingRows.join(', ');
+    SpreadsheetApp.getActive().toast(
+      `Validation bloquée - renseigne la colonne ${tailleHeaderLabel} pour la/les ligne(s) ${list}.`,
+      'Validation groupée',
+      8
+    );
+  }
+
+  if (unknownShippingRows.length > 0) {
+    const first = unknownShippingRows[0];
+    const lotInfo = first.lot ? ` / lot ${first.lot}` : '';
+    const extra = unknownShippingRows.length > 1 ? ` (et ${unknownShippingRows.length - 1} autre(s) ligne(s))` : '';
+    SpreadsheetApp.getActive().toast(
+      `Frais de colissage introuvables - ligne ${first.row} (${first.size}${lotInfo})${extra}.`,
+      'Validation groupée',
+      8
+    );
+  }
+}

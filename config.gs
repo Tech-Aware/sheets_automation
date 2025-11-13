@@ -1,0 +1,159 @@
+const HEADERS = Object.freeze({
+  ACHATS: Object.freeze({
+    ID: 'ID',
+    ARTICLE: 'ARTICLES',
+    ARTICLE_ALT: 'ARTICLE',
+    MARQUE: 'MARQUE',
+    GENRE_DATA: 'GENRE(data)',
+    GENRE_DATA_ALT: 'GENRE(DATA)',
+    GENRE_LEGACY: 'GENRE',
+    REFERENCE: 'REFERENCE',
+    DATE_LIVRAISON: 'DATE DE LIVRAISON',
+    QUANTITE_RECUE: 'QUANTITÉ RECUE',
+    QUANTITE_RECUE_ALT: 'QUANTITE RECUE',
+    PRET_STOCK: 'PRËT POUR MISE EN STOCK',
+    PRET_STOCK_ALT: 'PRÊT POUR MISE EN STOCK',
+    PRET_STOCK_COMBINED: 'PRÊT POUR MISE EN STOCK | DATE',
+    DATE_MISE_EN_STOCK: 'MIS EN STOCK LE',
+    DATE_MISE_EN_STOCK_ALT: 'DATE DE MISE EN STOCK',
+    FRAIS_COLISSAGE: 'FRAIS DE COLISSAGE',
+    PRIX_UNITAIRE_TTC: 'PRIX UNITAIRE TTC',
+    TOTAL_TTC: 'TOTAL TTC'
+  }),
+  STOCK: Object.freeze({
+    ID: 'ID',
+    OLD_SKU: 'SKU(ancienne nomenclature)',
+    SKU: 'SKU',
+    REFERENCE: 'REFERENCE',
+    LIBELLE: 'LIBELLÉ',
+    LIBELLE_ALT: 'LIBELLE',
+    ARTICLE: 'ARTICLES',
+    ARTICLE_ALT: 'ARTICLE',
+    PRIX_VENTE: 'PRIX DE VENTE',
+    TAILLE_COLIS: 'TAILLE DU COLIS',
+    TAILLE_COLIS_ALT: 'TAILLE COLIS',
+    TAILLE: 'TAILLE',
+    LOT: 'LOT',
+    DATE_LIVRAISON: 'DATE DE LIVRAISON',
+    DATE_MISE_EN_STOCK: 'DATE DE MISE EN STOCK',
+    MIS_EN_LIGNE: 'MIS EN LIGNE | DATE DE MISE EN LIGNE',
+    MIS_EN_LIGNE_ALT: 'MIS EN LIGNE',
+    DATE_MISE_EN_LIGNE: 'MIS EN LIGNE | DATE DE MISE EN LIGNE',
+    DATE_MISE_EN_LIGNE_ALT: 'DATE DE MISE EN LIGNE',
+    PUBLIE: 'PUBLIÉ | DATE DE PUBLICATION',
+    PUBLIE_ALT: 'PUBLIÉ',
+    DATE_PUBLICATION: 'PUBLIÉ | DATE DE PUBLICATION',
+    DATE_PUBLICATION_ALT: 'DATE DE PUBLICATION',
+    VENDU: 'VENDU | DATE DE VENTE',
+    VENDU_ALT: 'VENDU',
+    DATE_VENTE: 'VENDU | DATE DE VENTE',
+    DATE_VENTE_ALT: 'DATE DE VENTE',
+    VENTE_EXPORTEE_LE: 'VENTE EXPORTEE LE',
+    VALIDER_SAISIE: 'VALIDER LA SAISIE',
+    VALIDER_SAISIE_ALT: 'VALIDER'
+  }),
+  VENTES: Object.freeze({
+    ID: 'ID',
+    DATE_VENTE: 'DATE DE VENTE',
+    ARTICLE: 'ARTICLE',
+    ARTICLE_ALT: 'ARTICLES',
+    SKU: 'SKU',
+    PRIX_VENTE: 'PRIX VENTE',
+    PRIX_VENTE_ALT: 'PRIX DE VENTE',
+    FRAIS_COLISSAGE: 'FRAIS DE COLISSAGE',
+    TAILLE_COLIS: 'TAILLE DU COLIS',
+    TAILLE: 'TAILLE',
+    LOT: 'LOT',
+    DELAI_IMMOBILISATION: "DÉLAI D'IMMOBILISATION",
+    DELAI_MISE_EN_LIGNE: 'DELAI DE MISE EN LIGNE',
+    DELAI_PUBLICATION: 'DELAI DE PUBLICATION',
+    DELAI_VENTE: 'DELAI DE VENTE',
+    RETOUR: 'RETOUR'
+  })
+});
+
+const DEFAULT_VENTES_HEADERS = Object.freeze([
+  HEADERS.VENTES.ID,
+  HEADERS.VENTES.DATE_VENTE,
+  HEADERS.VENTES.ARTICLE,
+  HEADERS.VENTES.SKU,
+  HEADERS.VENTES.PRIX_VENTE,
+  HEADERS.VENTES.DELAI_IMMOBILISATION,
+  HEADERS.VENTES.DELAI_MISE_EN_LIGNE,
+  HEADERS.VENTES.DELAI_PUBLICATION,
+  HEADERS.VENTES.DELAI_VENTE,
+  HEADERS.VENTES.FRAIS_COLISSAGE,
+  HEADERS.VENTES.TAILLE,
+  HEADERS.VENTES.LOT
+]);
+
+const MONTHLY_LEDGER_HEADERS = Object.freeze([
+  'ID',
+  'SKU',
+  'LIBELLÉS',
+  'DATE DE VENTE',
+  'MARGE BRUTE',
+  'COEFF MARGE',
+  'NBR PCS VENDU'
+]);
+
+const MONTHLY_LEDGER_INDEX = Object.freeze({
+  ID: MONTHLY_LEDGER_HEADERS.indexOf('ID'),
+  SKU: MONTHLY_LEDGER_HEADERS.indexOf('SKU'),
+  LIBELLE: MONTHLY_LEDGER_HEADERS.indexOf('LIBELLÉS'),
+  DATE_VENTE: MONTHLY_LEDGER_HEADERS.indexOf('DATE DE VENTE'),
+  MARGE_BRUTE: MONTHLY_LEDGER_HEADERS.indexOf('MARGE BRUTE'),
+  COEFF_MARGE: MONTHLY_LEDGER_HEADERS.indexOf('COEFF MARGE'),
+  NB_PIECES: MONTHLY_LEDGER_HEADERS.indexOf('NBR PCS VENDU')
+});
+
+const SKU_COLOR_PALETTE = Object.freeze([
+  Object.freeze({ background: '#FDEBD0', text: '#BA4A00' }),
+  Object.freeze({ background: '#FADBD8', text: '#943126' }),
+  Object.freeze({ background: '#E8DAEF', text: '#633974' }),
+  Object.freeze({ background: '#D6EAF8', text: '#1F618D' }),
+  Object.freeze({ background: '#D1F2EB', text: '#0E6655' }),
+  Object.freeze({ background: '#FCF3CF', text: '#7D6608' }),
+  Object.freeze({ background: '#F5EEF8', text: '#6C3483' }),
+  Object.freeze({ background: '#EBDEF0', text: '#512E5F' }),
+  Object.freeze({ background: '#E8F6F3', text: '#0B5345' }),
+  Object.freeze({ background: '#FEF5E7', text: '#935116' }),
+  Object.freeze({ background: '#EBF5FB', text: '#154360' }),
+  Object.freeze({ background: '#F9EBEA', text: '#78281F' })
+]);
+
+const SKU_COLOR_OVERRIDES = Object.freeze({
+  // Exemple : 'JLF': { background: '#E8F8F5', text: '#117A65' }
+});
+
+const SKU_COLOR_DEFAULT = Object.freeze({ background: '#FFFFFF', text: '#000000' });
+
+const LEDGER_WEEK_RULE_DESCRIPTION = 'auto-ledger-week-highlight';
+const LEDGER_MONTH_TOTAL_RULE_DESCRIPTION = 'auto-ledger-month-total-highlight';
+
+const MONTH_NAMES_FR = Object.freeze([
+  'Janvier',
+  'Février',
+  'Mars',
+  'Avril',
+  'Mai',
+  'Juin',
+  'Juillet',
+  'Août',
+  'Septembre',
+  'Octobre',
+  'Novembre',
+  'Décembre'
+]);
+
+const BACKFILL_MONTH_MENU_SLOTS = 12;
+const BACKFILL_MONTH_SLOT_PREFIX = 'BACKFILL_MENU_SLOT_';
+const BACKFILL_PROGRESS_PREFIX = 'BACKFILL_PROGRESS_';
+const BACKFILL_MAX_RUNTIME_MS = 5.5 * 60 * 1000; // 5 minutes 30 seconds
+
+const HEADER_LABELS = Object.freeze({
+  dms: HEADERS.STOCK.DATE_MISE_EN_STOCK,
+  dmis: HEADERS.STOCK.DATE_MISE_EN_LIGNE_ALT,
+  dpub: HEADERS.STOCK.DATE_PUBLICATION_ALT,
+  dvente: HEADERS.STOCK.DATE_VENTE_ALT
+});
