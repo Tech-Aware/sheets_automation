@@ -452,45 +452,82 @@ function updateAchatsTotalsWithFee_(achats, rowIndex, fee, cols) {
 }
 
 function enforceChronologicalDates_(sheet, row, cols, options) {
+  const result = { ok: true, message: '', violations: [] };
   if (!sheet || !row || !cols) {
-    return;
+    result.ok = false;
+    result.message = 'Contrôle chronologique indisponible (feuille ou colonnes manquantes).';
+    return result;
   }
 
-  const {
-    C_DMS,
-    C_DML,
-    C_DPUB,
-    C_DVENTE
-  } = cols;
+  const normalizedCols = {
+    dms: cols.C_DMS || cols.dms || cols.DMS || cols.dateMiseEnStock || 0,
+    dml: cols.C_DML || cols.C_DMIS || cols.dml || cols.dmis || cols.dateMiseEnLigne || 0,
+    dpub: cols.C_DPUB || cols.dpub || cols.datePublication || 0,
+    dvente: cols.C_DVENTE || cols.dvente || cols.dateVente || 0
+  };
 
-  const {
-    preventRegression,
-    warnOnly,
-    toastLabel
-  } = options || {};
+  const C_DMS = normalizedCols.dms;
+  const C_DML = normalizedCols.dml;
+  const C_DPUB = normalizedCols.dpub;
+  const C_DVENTE = normalizedCols.dvente;
 
-  const dmsCell = C_DMS ? sheet.getRange(row, C_DMS) : null;
-  const dmlCell = C_DML ? sheet.getRange(row, C_DML) : null;
-  const dpubCell = C_DPUB ? sheet.getRange(row, C_DPUB) : null;
-  const dventeCell = C_DVENTE ? sheet.getRange(row, C_DVENTE) : null;
+  const opts = options || {};
+  const preventRegression = !!opts.preventRegression;
+  const warnOnly = !!opts.warnOnly;
+  const toastLabel = opts.toastLabel;
+  const requireAllDates = !!opts.requireAllDates;
 
-  const dms = dmsCell ? getDateOrNull_(dmsCell.getValue()) : null;
-  const dml = dmlCell ? getDateOrNull_(dmlCell.getValue()) : null;
-  const dpub = dpubCell ? getDateOrNull_(dpubCell.getValue()) : null;
-  const dvente = dventeCell ? getDateOrNull_(dventeCell.getValue()) : null;
+  const labels = {
+    dms: (HEADER_LABELS && HEADER_LABELS.dms) || 'DATE DE MISE EN STOCK',
+    dml: (HEADER_LABELS && HEADER_LABELS.dmis) || 'DATE DE MISE EN LIGNE',
+    dpub: (HEADER_LABELS && HEADER_LABELS.dpub) || 'DATE DE PUBLICATION',
+    dvente: (HEADER_LABELS && HEADER_LABELS.dvente) || 'DATE DE VENTE'
+  };
+
+  function getCell(col) {
+    return col ? sheet.getRange(row, col) : null;
+  }
+
+  function getDateValue(cell) {
+    if (!cell) return null;
+    return getDateOrNull_(cell.getValue());
+  }
+
+  const dmsCell = getCell(C_DMS);
+  const dmlCell = getCell(C_DML);
+  const dpubCell = getCell(C_DPUB);
+  const dventeCell = getCell(C_DVENTE);
+
+  const dms = getDateValue(dmsCell);
+  const dml = getDateValue(dmlCell);
+  const dpub = getDateValue(dpubCell);
+  const dvente = getDateValue(dventeCell);
 
   const violations = [];
 
-  function markViolation(cell, label) {
+  function markViolation(cell, message) {
+    violations.push(message);
     if (!cell) return;
-    violations.push(label);
     cell.setBackground('#f8d7da');
     cell.setFontColor('#721c24');
   }
 
+  if (requireAllDates) {
+    [
+      { key: 'dms', cell: dmsCell, value: dms },
+      { key: 'dml', cell: dmlCell, value: dml },
+      { key: 'dpub', cell: dpubCell, value: dpub },
+      { key: 'dvente', cell: dventeCell, value: dvente }
+    ].forEach(entry => {
+      if (!normalizedCols[entry.key]) return;
+      if (entry.value instanceof Date && !isNaN(entry.value)) return;
+      markViolation(entry.cell, `${labels[entry.key]} manquante`);
+    });
+  }
+
   if (dml && dms && dml < dms) {
-    markViolation(dmlCell, HEADER_LABELS.dmis);
-    if (preventRegression) {
+    markViolation(dmlCell, `${labels.dml} < ${labels.dms}`);
+    if (preventRegression && C_DML) {
       const restored = restorePreviousCellValue_(sheet, row, C_DML);
       if (!restored) {
         dmlCell.setValue(dms);
@@ -499,8 +536,8 @@ function enforceChronologicalDates_(sheet, row, cols, options) {
   }
 
   if (dpub && dml && dpub < dml) {
-    markViolation(dpubCell, HEADER_LABELS.dpub);
-    if (preventRegression) {
+    markViolation(dpubCell, `${labels.dpub} < ${labels.dml}`);
+    if (preventRegression && C_DPUB) {
       const restored = restorePreviousCellValue_(sheet, row, C_DPUB);
       if (!restored) {
         dpubCell.setValue(dml);
@@ -509,8 +546,8 @@ function enforceChronologicalDates_(sheet, row, cols, options) {
   }
 
   if (dvente && dpub && dvente < dpub) {
-    markViolation(dventeCell, HEADER_LABELS.dvente);
-    if (preventRegression) {
+    markViolation(dventeCell, `${labels.dvente} < ${labels.dpub}`);
+    if (preventRegression && C_DVENTE) {
       const restored = restorePreviousCellValue_(sheet, row, C_DVENTE);
       if (!restored) {
         dventeCell.setValue(dpub);
@@ -525,15 +562,20 @@ function enforceChronologicalDates_(sheet, row, cols, options) {
         cell.setFontColor(null);
       }
     });
-    return;
+    return result;
   }
 
   const toastTitle = toastLabel || 'Chronologie invalide';
   const toastMessage = `${toastTitle} : ${violations.join(', ')}`;
+  result.ok = false;
+  result.message = toastMessage;
+  result.violations = violations.slice();
 
   if (!warnOnly && typeof SpreadsheetApp !== 'undefined') {
     SpreadsheetApp.getActiveSpreadsheet().toast(toastMessage, '⚠️ Avertissement', 5);
   }
+
+  return result;
 }
 
 function normalizeSkuBase_(value) {
