@@ -536,17 +536,30 @@ function enforceChronologicalDates_(sheet, row, cols, options) {
   }
 }
 
+function normalizeSkuBase_(value) {
+  if (value === null || value === undefined) return '';
+  return String(value).trim().toUpperCase();
+}
+
 function extractSkuBase_(sku) {
-  if (!sku) return '';
-  const match = String(sku).match(/^([A-Z]+)\d{2,}/i);
-  return match ? match[1].toUpperCase() : '';
+  const normalized = normalizeSkuBase_(sku);
+  if (!normalized) return '';
+  const match = normalized.match(/^([A-Z]+)/);
+  return match ? match[1] : '';
 }
 
 function extractSkuSuffix_(sku, expectedBase) {
-  if (!sku) return '';
-  const base = expectedBase || extractSkuBase_(sku);
-  if (!base) return '';
-  return String(sku).slice(base.length);
+  const normalizedSku = normalizeSkuBase_(sku);
+  const base = normalizeSkuBase_(expectedBase) || extractSkuBase_(normalizedSku);
+  if (!normalizedSku || !base || normalizedSku.indexOf(base) !== 0) {
+    return null;
+  }
+  const remainder = normalizedSku.slice(base.length);
+  if (!remainder) return null;
+  const match = remainder.match(/^-?(\d+)/);
+  if (!match) return null;
+  const value = parseInt(match[1], 10);
+  return Number.isFinite(value) && value > 0 ? value : null;
 }
 
 function computeSkuPaletteKey_(sku) {
@@ -664,7 +677,7 @@ function buildBaseToStockDate_(ss) {
     const dms = dmsValues[i][0];
     if (!sku || !ref) continue;
 
-    const base = String(ref).trim();
+    const base = normalizeSkuBase_(ref);
     if (!base) continue;
 
     if (dms instanceof Date && !isNaN(dms)) {
@@ -696,7 +709,7 @@ function buildBaseToStockDate_(ss) {
 
   const mapFallback = Object.create(null);
   for (let i = 0; i < refVals.length; i++) {
-    const base = String(refVals[i][0] || "").trim();
+    const base = normalizeSkuBase_(refVals[i][0]);
     const dt = stampVals[i][0];
     if (!base) continue;
     if (dt instanceof Date && !isNaN(dt)) {
@@ -732,7 +745,7 @@ function buildIdToSkuBaseMap_(ss) {
     if (idRaw === null || idRaw === undefined || idRaw === '') continue;
 
     const key = String(idRaw);
-    const base = String(refRaw || "").trim();
+    const base = normalizeSkuBase_(refRaw);
     if (base) {
       map[key] = base;
     }

@@ -86,7 +86,7 @@ function handleAchats(e) {
 
   function syncReadyDateToStock_() {
     if (!COL_STP || !COL_REF) return;
-    const refBase = String(sh.getRange(row, COL_REF).getDisplayValue() || '').trim();
+    const refBase = normalizeSkuBase_(sh.getRange(row, COL_REF).getDisplayValue() || '');
     if (!refBase) return;
 
     const cell = sh.getRange(row, COL_STP);
@@ -139,8 +139,8 @@ function handleAchats(e) {
   // 0) MODIF REFERENCE (F) → MAJ PRÉFIXE DES SKU DANS STOCK
   // -------------------------
   if (COL_REF && col === COL_REF) {
-    const oldBase = String(e.oldValue || "").trim();
-    const newBase = String(e.value     || "").trim();
+    const oldBase = normalizeSkuBase_(e.oldValue || "");
+    const newBase = normalizeSkuBase_(e.value     || "");
 
     // Si pas d’ancienne valeur ou pas de nouvelle, ou identiques → rien
     if (!oldBase || !newBase || oldBase === newBase) return;
@@ -337,7 +337,7 @@ function handleAchats(e) {
     : "";
   const genre   = genrePrimary || genreFallback;
   if (!COL_REF || !COL_QTY) return;
-  const skuBase = String(sh.getRange(row, COL_REF).getDisplayValue() || "").trim();
+  const skuBase = normalizeSkuBase_(sh.getRange(row, COL_REF).getDisplayValue() || '');
   const qty     = Number(sh.getRange(row, COL_QTY).getValue());
   if (!skuBase || !Number.isFinite(qty) || qty <= 0) return;
 
@@ -389,10 +389,11 @@ function handleAchats(e) {
       existingIdValues = target.getRange(2, COL_ID_STOCK, lastExistingStockRow - 1, 1).getValues();
     }
     const prefix = `${base}-`;
+    const legacyPrefix = base;
     const achatIdKey = (achatId === null || achatId === undefined || achatId === '') ? '' : String(achatId);
     for (let i = 0; i < existingSkuValues.length; i++) {
-      const rawSku = String(existingSkuValues[i][0] || "").trim();
-      if (!rawSku || rawSku.indexOf(prefix) !== 0) continue;
+      const rawSku = normalizeSkuBase_(existingSkuValues[i][0]);
+      if (!rawSku || (rawSku.indexOf(prefix) !== 0 && rawSku.indexOf(legacyPrefix) !== 0)) continue;
 
       let idMatches = true;
       let storedIdKey = '';
