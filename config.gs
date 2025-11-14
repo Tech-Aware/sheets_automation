@@ -96,7 +96,11 @@ const MONTHLY_LEDGER_HEADERS = Object.freeze([
   "PRIX D'ACHAT",
   'MARGE BRUTE',
   'COEFF MARGE',
-  'NBR PCS VENDU'
+  'NBR PCS VENDU',
+  'FRAIS',
+  'LIBELLÉS FRAIS',
+  'TYPE DE FRAIS',
+  'MONTANT FRAIS'
 ]);
 
 const MONTHLY_LEDGER_INDEX = Object.freeze({
@@ -110,6 +114,22 @@ const MONTHLY_LEDGER_INDEX = Object.freeze({
   COEFF_MARGE: MONTHLY_LEDGER_HEADERS.indexOf('COEFF MARGE'),
   NB_PIECES: MONTHLY_LEDGER_HEADERS.indexOf('NBR PCS VENDU')
 });
+
+const LEDGER_FEES_INDEX = Object.freeze({
+  SECTION: MONTHLY_LEDGER_HEADERS.indexOf('FRAIS'),
+  LIBELLE: MONTHLY_LEDGER_HEADERS.indexOf('LIBELLÉS FRAIS'),
+  TYPE: MONTHLY_LEDGER_HEADERS.indexOf('TYPE DE FRAIS'),
+  MONTANT: MONTHLY_LEDGER_HEADERS.indexOf('MONTANT FRAIS')
+});
+
+const LEDGER_FEE_TYPES = Object.freeze([
+  'Gestion matériel',
+  'Logistique',
+  'Amortissement',
+  'Publicité',
+  'Marketing',
+  'Autres'
+]);
 
 const SKU_COLOR_PALETTE = Object.freeze([
   Object.freeze({ background: '#FDEBD0', text: '#BA4A00' }),
