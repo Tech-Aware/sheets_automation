@@ -380,6 +380,7 @@ function ensureMonthlyLedgerSheet_(sheet, monthStart) {
   }
 
   synchronizeMonthlyLedgerHeaders_(sheet);
+  ensureLedgerFeesTable_(sheet);
   applyMonthlySheetFormats_(sheet);
   applyLedgerFeesGuidance_(sheet);
   applyLedgerFeesValidation_(sheet);
@@ -393,6 +394,7 @@ function initializeMonthlyLedgerSheet_(sheet, monthStart) {
 
   const headersLen = MONTHLY_LEDGER_HEADERS.length;
   sheet.getRange(1, 1, 1, headersLen).setValues([MONTHLY_LEDGER_HEADERS]);
+  ensureLedgerFeesTable_(sheet);
   sheet.setFrozenRows(1);
 
   const weekRanges = computeMonthlyWeekRanges_(monthStart);
@@ -446,28 +448,28 @@ function applyMonthlySheetFormats_(sheet) {
   if (MONTHLY_LEDGER_INDEX.NB_PIECES >= 0) {
     sheet.getRange(1, MONTHLY_LEDGER_INDEX.NB_PIECES + 1, maxRows, 1).setNumberFormat('0');
   }
-  if (LEDGER_FEES_INDEX.MONTANT >= 0) {
-    sheet.getRange(1, LEDGER_FEES_INDEX.MONTANT + 1, maxRows, 1).setNumberFormat('#,##0.00');
+  if (LEDGER_FEES_COLUMNS.MONTANT > 0) {
+    sheet.getRange(1, LEDGER_FEES_COLUMNS.MONTANT, maxRows, 1).setNumberFormat('#,##0.00');
   }
 }
 
 function applyLedgerFeesGuidance_(sheet) {
-  if (LEDGER_FEES_INDEX.LIBELLE >= 0) {
-    sheet.getRange(1, LEDGER_FEES_INDEX.LIBELLE + 1)
+  if (LEDGER_FEES_COLUMNS.LIBELLE > 0) {
+    sheet.getRange(1, LEDGER_FEES_COLUMNS.LIBELLE)
       .setNote('Renseignez ici le libellé précis du frais du mois (ex : location stand, commissions, etc.).');
   }
-  if (LEDGER_FEES_INDEX.TYPE >= 0) {
-    sheet.getRange(1, LEDGER_FEES_INDEX.TYPE + 1)
+  if (LEDGER_FEES_COLUMNS.TYPE > 0) {
+    sheet.getRange(1, LEDGER_FEES_COLUMNS.TYPE)
       .setNote('Sélectionnez le type de frais correspondant depuis la liste déroulante.');
   }
-  if (LEDGER_FEES_INDEX.MONTANT >= 0) {
-    sheet.getRange(1, LEDGER_FEES_INDEX.MONTANT + 1)
+  if (LEDGER_FEES_COLUMNS.MONTANT > 0) {
+    sheet.getRange(1, LEDGER_FEES_COLUMNS.MONTANT)
       .setNote('Saisissez le montant TTC du frais. La somme alimente automatiquement le coût de revient.');
   }
 }
 
 function applyLedgerFeesValidation_(sheet) {
-  if (LEDGER_FEES_INDEX.TYPE < 0) return;
+  if (!LEDGER_FEES_COLUMNS.TYPE) return;
   const maxRows = sheet.getMaxRows();
   if (maxRows < 2) return;
   const rule = SpreadsheetApp.newDataValidation()
@@ -475,7 +477,7 @@ function applyLedgerFeesValidation_(sheet) {
     .setAllowInvalid(false)
     .build();
   const rows = Math.max(maxRows - 1, 1);
-  sheet.getRange(2, LEDGER_FEES_INDEX.TYPE + 1, rows, 1).setDataValidation(rule);
+  sheet.getRange(2, LEDGER_FEES_COLUMNS.TYPE, rows, 1).setDataValidation(rule);
 }
 
 function sortWeekRowsByDate_(sheet, weekNumber, headersLen) {
@@ -628,13 +630,6 @@ function updateMonthlyTotals_(sheet, headersLen) {
   if (MONTHLY_LEDGER_INDEX.NB_PIECES >= 0) {
     totals[MONTHLY_LEDGER_INDEX.NB_PIECES] = summary.sumPieces;
   }
-  if (LEDGER_FEES_INDEX.LIBELLE >= 0) {
-    totals[LEDGER_FEES_INDEX.LIBELLE] = summary.sumFrais > 0 ? 'TOTAL FRAIS' : 'FRAIS';
-  }
-  if (LEDGER_FEES_INDEX.MONTANT >= 0) {
-    totals[LEDGER_FEES_INDEX.MONTANT] = roundCurrency_(summary.sumFrais);
-  }
-
   sheet.getRange(summary.monthRowNumber, 1, 1, headersLen).setValues([totals]);
   sheet.getRange(summary.monthRowNumber, 1).setNote('');
 }
@@ -667,10 +662,10 @@ function updateLedgerResultRow_(sheet, headersLen) {
     profitCell.setValue(`Bénéfice net : ${formatLedgerCurrencyLabel_(net)}`);
     profitCell.setNote('Bénéfice net = Chiffre d\'affaire - Coût de revient (frais inclus).');
   }
-  if (LEDGER_FEES_INDEX.MONTANT >= 0) {
-    const feeCell = sheet.getRange(resultRowNumber, LEDGER_FEES_INDEX.MONTANT + 1);
+  if (LEDGER_FEES_COLUMNS.MONTANT > 0) {
+    const feeCell = sheet.getRange(resultRowNumber, LEDGER_FEES_COLUMNS.MONTANT);
     feeCell.setValue(`Frais : ${formatLedgerCurrencyLabel_(totalFees)}`);
-    feeCell.setNote('Total cumulé des montants de frais saisis manuellement pour le mois.');
+    feeCell.setNote('Total cumulé des montants de frais saisis dans le tableau des colonnes K à M.');
   }
 }
 
@@ -731,14 +726,6 @@ function summarizeMonthlyLedgerData_(sheet, headersLen) {
     const hasKeyInfo = [MONTHLY_LEDGER_INDEX.ID, MONTHLY_LEDGER_INDEX.SKU, MONTHLY_LEDGER_INDEX.LIBELLE]
       .filter(idx => idx >= 0)
       .some(idx => String(row[idx] || '').trim() !== '');
-    if (LEDGER_FEES_INDEX.MONTANT >= 0) {
-      const feeCell = row[LEDGER_FEES_INDEX.MONTANT];
-      if (feeCell !== '' && feeCell !== null && feeCell !== undefined) {
-        const feeValue = valueToNumber_(feeCell);
-        if (Number.isFinite(feeValue)) summary.sumFrais += feeValue;
-      }
-    }
-
     if (!hasKeyInfo) {
       continue;
     }
@@ -789,6 +776,7 @@ function summarizeMonthlyLedgerData_(sheet, headersLen) {
     }
   }
 
+  summary.sumFrais = computeLedgerFeesTotal_(sheet);
   return summary;
 }
 
@@ -821,6 +809,34 @@ function synchronizeMonthlyLedgerHeaders_(sheet) {
   }
 
   sheet.getRange(1, 1, 1, headersLen).setValues([MONTHLY_LEDGER_HEADERS]);
+}
+
+function ensureLedgerFeesTable_(sheet) {
+  if (!LEDGER_FEES_TABLE || !LEDGER_FEES_TABLE.HEADERS || LEDGER_FEES_TABLE.HEADERS.length === 0) return;
+  if (!Number.isFinite(LEDGER_FEES_TABLE.START_COLUMN) || LEDGER_FEES_TABLE.START_COLUMN <= 0) return;
+  const requiredColumns = LEDGER_FEES_TABLE.START_COLUMN + LEDGER_FEES_TABLE.HEADERS.length - 1;
+  const currentColumns = sheet.getMaxColumns();
+  if (currentColumns < requiredColumns) {
+    sheet.insertColumnsAfter(currentColumns, requiredColumns - currentColumns);
+  }
+  sheet.getRange(1, LEDGER_FEES_TABLE.START_COLUMN, 1, LEDGER_FEES_TABLE.HEADERS.length)
+    .setValues([LEDGER_FEES_TABLE.HEADERS]);
+}
+
+function computeLedgerFeesTotal_(sheet) {
+  if (!LEDGER_FEES_COLUMNS.MONTANT) return 0;
+  const maxRows = sheet.getMaxRows();
+  if (maxRows < 2) return 0;
+  const rows = Math.max(maxRows - 1, 1);
+  const values = sheet.getRange(2, LEDGER_FEES_COLUMNS.MONTANT, rows, 1).getValues();
+  let total = 0;
+  for (let i = 0; i < values.length; i++) {
+    const raw = values[i][0];
+    if (raw === '' || raw === null || raw === undefined) continue;
+    const value = valueToNumber_(raw);
+    if (Number.isFinite(value)) total += value;
+  }
+  return total;
 }
 
 function valueToNumber_(value) {
