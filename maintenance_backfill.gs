@@ -636,6 +636,8 @@ function runBackfillMonthlyLedgers_(filter) {
       id: idVal,
       libelle,
       dateVente: dateCell,
+      prixVente: Number.isFinite(prixVente) ? prixVente : '',
+      prixAchat: Number.isFinite(prixAchat) ? prixAchat : '',
       margeBrute: marge,
       coeffMarge: coeff,
       nbPieces: 1,
