@@ -54,6 +54,8 @@ function exportVente_(e, row, C_ID, C_LABEL, C_SKU, C_PRIX, C_DVENTE, C_STAMPV, 
     || ventesWhere(h => h.includes('publication'));
   const COL_DELAI_VENTE = ventesExact(HEADERS.VENTES.DELAI_VENTE)
     || ventesWhere(h => h.includes('delai') && h.includes('vente'));
+  const COL_RETOUR      = ventesExact(HEADERS.VENTES.RETOUR)
+    || ventesWhere(h => h.includes('retour'));
   const widthVentes     = Math.max(ventesHeaders.length, DEFAULT_VENTES_HEADERS.length, ventes.getLastColumn());
 
   const dateCell = sh.getRange(row, C_DVENTE);
@@ -149,6 +151,7 @@ function exportVente_(e, row, C_ID, C_LABEL, C_SKU, C_PRIX, C_DVENTE, C_STAMPV, 
   if (COL_DELAI_ML) newRow[COL_DELAI_ML - 1] = delaiML;
   if (COL_DELAI_PUB) newRow[COL_DELAI_PUB - 1] = delaiPub;
   if (COL_DELAI_VENTE) newRow[COL_DELAI_VENTE - 1] = delaiVte;
+  if (COL_RETOUR) newRow[COL_RETOUR - 1] = false;
 
   ventes.getRange(start, 1, 1, newRow.length).setValues([newRow]);
 
@@ -223,11 +226,12 @@ function getAchatsRecordByIdOrSku_(ss, idVal, sku) {
 
 function copySaleToMonthlySheet_(ss, sale, options) {
   if (!sale || !(sale.dateVente instanceof Date) || isNaN(sale.dateVente)) {
-    return { inserted: false, updated: false };
+    return { inserted: false, updated: false, removed: false };
   }
 
   const opts = options || {};
   const allowUpdates = Boolean(opts.updateExisting);
+  const isReturn = isReturnFlagActive_(sale.retour);
 
   const month = sale.dateVente.getMonth();
   const year = sale.dateVente.getFullYear();
@@ -259,8 +263,8 @@ function copySaleToMonthlySheet_(ss, sale, options) {
         existingRowNumber = matchIndex + 2;
       }
     }
-    if (existingRowNumber && !allowUpdates) {
-      return { inserted: false, updated: false };
+    if (existingRowNumber && !allowUpdates && !isReturn) {
+      return { inserted: false, updated: false, removed: false };
     }
   }
 
@@ -278,11 +282,25 @@ function copySaleToMonthlySheet_(ss, sale, options) {
   const labelIdx = labels.findIndex(v => v.toUpperCase().startsWith(labelPrefix));
   const totalIdx = labels.findIndex((v, idx) => idx > labelIdx && v.toUpperCase().startsWith(totalPrefix));
   if (labelIdx === -1 || totalIdx === -1) {
-    return { inserted: false, updated: false };
+    return { inserted: false, updated: false, removed: false };
   }
 
   const totalRowNumber = totalIdx + 1;
   let saleRowNumber = totalRowNumber;
+  if (isReturn) {
+    if (!allowUpdates || !dedupeKey || !existingRowNumber) {
+      return { inserted: false, updated: false, removed: false };
+    }
+
+    sheet.deleteRow(existingRowNumber);
+    updateWeeklyTotals_(sheet, weekIndex + 1, headersLen);
+    updateMonthlyTotals_(sheet, headersLen);
+    updateLedgerResultRow_(sheet, headersLen);
+    applySkuPaletteFormatting_(sheet, MONTHLY_LEDGER_INDEX.SKU + 1, MONTHLY_LEDGER_INDEX.LIBELLE + 1);
+    ensureLedgerWeekHighlight_(sheet, headersLen);
+    return { inserted: false, updated: false, removed: true };
+  }
+
   let insertedRow = false;
   let updatedRow = false;
   if (!existingRowNumber) {
@@ -361,7 +379,7 @@ function copySaleToMonthlySheet_(ss, sale, options) {
   applySkuPaletteFormatting_(sheet, MONTHLY_LEDGER_INDEX.SKU + 1, MONTHLY_LEDGER_INDEX.LIBELLE + 1);
   ensureLedgerWeekHighlight_(sheet, headersLen);
 
-  return { inserted: insertedRow, updated: updatedRow };
+  return { inserted: insertedRow, updated: updatedRow, removed: false };
 }
 
 function ensureMonthlyLedgerSheet_(sheet, monthStart) {
