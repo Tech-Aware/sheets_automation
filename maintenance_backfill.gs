@@ -201,6 +201,12 @@ function registerSalesActionsMenu_(ui, ss) {
   salesMenu.addToUi();
 }
 
+function registerAccountingActionsMenu_(ui) {
+  ui.createMenu('Actions compta')
+    .addItem('Calculer les frais (feuille active)', 'recalculateActiveLedgerFees')
+    .addToUi();
+}
+
 // === MENU ===
 
 function onOpen(e) {
@@ -213,6 +219,21 @@ function onOpen(e) {
   maintenance.addToUi();
   registerSalesActionsMenu_(ui, ss);
   registerStockActionsMenu_(ui);
+  registerAccountingActionsMenu_(ui);
+}
+
+function recalculateActiveLedgerFees() {
+  const ss = SpreadsheetApp.getActive();
+  const sheet = ss.getActiveSheet();
+  if (!sheet || !isMonthlyLedgerSheet_(sheet)) {
+    ss.toast('La feuille active n\'est pas un grand livre mensuel.', 'Calcul des frais', 5);
+    return;
+  }
+
+  const headersLen = MONTHLY_LEDGER_HEADERS.length;
+  updateMonthlyTotals_(sheet, headersLen);
+  updateLedgerResultRow_(sheet, headersLen);
+  ss.toast('Les frais et totaux ont été recalculés.', 'Calcul des frais', 5);
 }
 
 function noopBackfillMonthlyLedgerMenu() {

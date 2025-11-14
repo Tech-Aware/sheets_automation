@@ -380,10 +380,27 @@ function ensureMonthlyLedgerSheet_(sheet, monthStart) {
   }
 
   synchronizeMonthlyLedgerHeaders_(sheet);
+  ensureLedgerFeesTable_(sheet);
   applyMonthlySheetFormats_(sheet);
+  applyLedgerFeesGuidance_(sheet);
+  applyLedgerFeesValidation_(sheet);
   applySkuPaletteFormatting_(sheet, MONTHLY_LEDGER_INDEX.SKU + 1, MONTHLY_LEDGER_INDEX.LIBELLE + 1);
   ensureLedgerWeekHighlight_(sheet, headersLen);
   updateLedgerResultRow_(sheet, headersLen);
+}
+
+function isMonthlyLedgerSheet_(sheet) {
+  if (!sheet) return false;
+  const headersLen = MONTHLY_LEDGER_HEADERS.length;
+  const lastColumn = sheet.getLastColumn();
+  if (lastColumn < headersLen) return false;
+  const headers = sheet.getRange(1, 1, 1, headersLen).getValues()[0];
+  for (let i = 0; i < headersLen; i++) {
+    if (headers[i] !== MONTHLY_LEDGER_HEADERS[i]) {
+      return false;
+    }
+  }
+  return true;
 }
 
 function initializeMonthlyLedgerSheet_(sheet, monthStart) {
@@ -391,6 +408,7 @@ function initializeMonthlyLedgerSheet_(sheet, monthStart) {
 
   const headersLen = MONTHLY_LEDGER_HEADERS.length;
   sheet.getRange(1, 1, 1, headersLen).setValues([MONTHLY_LEDGER_HEADERS]);
+  ensureLedgerFeesTable_(sheet);
   sheet.setFrozenRows(1);
 
   const weekRanges = computeMonthlyWeekRanges_(monthStart);
@@ -417,6 +435,8 @@ function initializeMonthlyLedgerSheet_(sheet, monthStart) {
     .setValues([monthTotalRow]);
 
   applyMonthlySheetFormats_(sheet);
+  applyLedgerFeesGuidance_(sheet);
+  applyLedgerFeesValidation_(sheet);
   applySkuPaletteFormatting_(sheet, MONTHLY_LEDGER_INDEX.SKU + 1, MONTHLY_LEDGER_INDEX.LIBELLE + 1);
   ensureLedgerWeekHighlight_(sheet, headersLen);
   updateLedgerResultRow_(sheet, headersLen);
@@ -442,6 +462,36 @@ function applyMonthlySheetFormats_(sheet) {
   if (MONTHLY_LEDGER_INDEX.NB_PIECES >= 0) {
     sheet.getRange(1, MONTHLY_LEDGER_INDEX.NB_PIECES + 1, maxRows, 1).setNumberFormat('0');
   }
+  if (LEDGER_FEES_COLUMNS.MONTANT > 0) {
+    sheet.getRange(1, LEDGER_FEES_COLUMNS.MONTANT, maxRows, 1).setNumberFormat('#,##0.00');
+  }
+}
+
+function applyLedgerFeesGuidance_(sheet) {
+  if (LEDGER_FEES_COLUMNS.LIBELLE > 0) {
+    sheet.getRange(1, LEDGER_FEES_COLUMNS.LIBELLE)
+      .setNote('Renseignez ici le libellé précis du frais du mois (ex : location stand, commissions, etc.).');
+  }
+  if (LEDGER_FEES_COLUMNS.TYPE > 0) {
+    sheet.getRange(1, LEDGER_FEES_COLUMNS.TYPE)
+      .setNote('Sélectionnez le type de frais correspondant depuis la liste déroulante.');
+  }
+  if (LEDGER_FEES_COLUMNS.MONTANT > 0) {
+    sheet.getRange(1, LEDGER_FEES_COLUMNS.MONTANT)
+      .setNote('Saisissez le montant TTC du frais. La somme alimente automatiquement le coût de revient.');
+  }
+}
+
+function applyLedgerFeesValidation_(sheet) {
+  if (!LEDGER_FEES_COLUMNS.TYPE) return;
+  const maxRows = sheet.getMaxRows();
+  if (maxRows < 2) return;
+  const rule = SpreadsheetApp.newDataValidation()
+    .requireValueInList(LEDGER_FEE_TYPES, true)
+    .setAllowInvalid(false)
+    .build();
+  const rows = Math.max(maxRows - 1, 1);
+  sheet.getRange(2, LEDGER_FEES_COLUMNS.TYPE, rows, 1).setDataValidation(rule);
 }
 
 function sortWeekRowsByDate_(sheet, weekNumber, headersLen) {
@@ -594,7 +644,6 @@ function updateMonthlyTotals_(sheet, headersLen) {
   if (MONTHLY_LEDGER_INDEX.NB_PIECES >= 0) {
     totals[MONTHLY_LEDGER_INDEX.NB_PIECES] = summary.sumPieces;
   }
-
   sheet.getRange(summary.monthRowNumber, 1, 1, headersLen).setValues([totals]);
   sheet.getRange(summary.monthRowNumber, 1).setNote('');
 }
@@ -608,18 +657,29 @@ function updateLedgerResultRow_(sheet, headersLen) {
   const resultRowNumber = ensureLedgerResultRow_(sheet, headersLen, summary.monthRowNumber);
   if (!resultRowNumber) return;
 
+  const totalFees = summary.sumFrais || 0;
+  const totalCost = summary.sumPrixAchat + totalFees;
+  const net = summary.sumPrixVente - totalCost;
+
   if (MONTHLY_LEDGER_INDEX.PRIX_VENTE >= 0) {
-    sheet.getRange(resultRowNumber, MONTHLY_LEDGER_INDEX.PRIX_VENTE + 1)
-      .setValue(`Chiffre d'affaire : ${formatLedgerCurrencyLabel_(summary.sumPrixVente)}`);
+    const revenueCell = sheet.getRange(resultRowNumber, MONTHLY_LEDGER_INDEX.PRIX_VENTE + 1);
+    revenueCell.setValue(`Chiffre d'affaire : ${formatLedgerCurrencyLabel_(summary.sumPrixVente)}`);
+    revenueCell.setNote('Somme des prix de vente du mois.');
   }
   if (MONTHLY_LEDGER_INDEX.PRIX_ACHAT >= 0) {
-    sheet.getRange(resultRowNumber, MONTHLY_LEDGER_INDEX.PRIX_ACHAT + 1)
-      .setValue(`Coût de revient : ${formatLedgerCurrencyLabel_(summary.sumPrixAchat)}`);
+    const costCell = sheet.getRange(resultRowNumber, MONTHLY_LEDGER_INDEX.PRIX_ACHAT + 1);
+    costCell.setValue(`Coût de revient : ${formatLedgerCurrencyLabel_(totalCost)}`);
+    costCell.setNote('Coût de revient = somme des prix d\'achat + total des frais saisis (colonnes K à M).');
   }
   if (MONTHLY_LEDGER_INDEX.MARGE_BRUTE >= 0) {
-    const net = summary.sumPrixVente - summary.sumPrixAchat;
-    sheet.getRange(resultRowNumber, MONTHLY_LEDGER_INDEX.MARGE_BRUTE + 1)
-      .setValue(`Bénéfice net : ${formatLedgerCurrencyLabel_(net)}`);
+    const profitCell = sheet.getRange(resultRowNumber, MONTHLY_LEDGER_INDEX.MARGE_BRUTE + 1);
+    profitCell.setValue(`Bénéfice net : ${formatLedgerCurrencyLabel_(net)}`);
+    profitCell.setNote('Bénéfice net = Chiffre d\'affaire - Coût de revient (frais inclus).');
+  }
+  if (LEDGER_FEES_COLUMNS.MONTANT > 0) {
+    const feeCell = sheet.getRange(resultRowNumber, LEDGER_FEES_COLUMNS.MONTANT);
+    feeCell.setValue(`Frais : ${formatLedgerCurrencyLabel_(totalFees)}`);
+    feeCell.setNote('Total cumulé des montants de frais saisis dans le tableau des colonnes K à M.');
   }
 }
 
@@ -661,7 +721,8 @@ function summarizeMonthlyLedgerData_(sheet, headersLen) {
     sumMarge: 0,
     sumCoeff: 0,
     countCoeff: 0,
-    sumPieces: 0
+    sumPieces: 0,
+    sumFrais: 0
   };
 
   if (dataHeight <= 0) {
@@ -729,6 +790,7 @@ function summarizeMonthlyLedgerData_(sheet, headersLen) {
     }
   }
 
+  summary.sumFrais = computeLedgerFeesTotal_(sheet);
   return summary;
 }
 
@@ -761,6 +823,34 @@ function synchronizeMonthlyLedgerHeaders_(sheet) {
   }
 
   sheet.getRange(1, 1, 1, headersLen).setValues([MONTHLY_LEDGER_HEADERS]);
+}
+
+function ensureLedgerFeesTable_(sheet) {
+  if (!LEDGER_FEES_TABLE || !LEDGER_FEES_TABLE.HEADERS || LEDGER_FEES_TABLE.HEADERS.length === 0) return;
+  if (!Number.isFinite(LEDGER_FEES_TABLE.START_COLUMN) || LEDGER_FEES_TABLE.START_COLUMN <= 0) return;
+  const requiredColumns = LEDGER_FEES_TABLE.START_COLUMN + LEDGER_FEES_TABLE.HEADERS.length - 1;
+  const currentColumns = sheet.getMaxColumns();
+  if (currentColumns < requiredColumns) {
+    sheet.insertColumnsAfter(currentColumns, requiredColumns - currentColumns);
+  }
+  sheet.getRange(1, LEDGER_FEES_TABLE.START_COLUMN, 1, LEDGER_FEES_TABLE.HEADERS.length)
+    .setValues([LEDGER_FEES_TABLE.HEADERS]);
+}
+
+function computeLedgerFeesTotal_(sheet) {
+  if (!LEDGER_FEES_COLUMNS.MONTANT) return 0;
+  const maxRows = sheet.getMaxRows();
+  if (maxRows < 2) return 0;
+  const rows = Math.max(maxRows - 1, 1);
+  const values = sheet.getRange(2, LEDGER_FEES_COLUMNS.MONTANT, rows, 1).getValues();
+  let total = 0;
+  for (let i = 0; i < values.length; i++) {
+    const raw = values[i][0];
+    if (raw === '' || raw === null || raw === undefined) continue;
+    const value = valueToNumber_(raw);
+    if (Number.isFinite(value)) total += value;
+  }
+  return total;
 }
 
 function valueToNumber_(value) {

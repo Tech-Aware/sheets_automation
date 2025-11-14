@@ -111,6 +111,31 @@ const MONTHLY_LEDGER_INDEX = Object.freeze({
   NB_PIECES: MONTHLY_LEDGER_HEADERS.indexOf('NBR PCS VENDU')
 });
 
+const LEDGER_FEES_TABLE = Object.freeze({
+  START_COLUMN: 11, // Colonne K
+  HEADERS: Object.freeze([
+    'LIBELLÉS FRAIS',
+    'TYPE DE FRAIS',
+    'MONTANT FRAIS'
+  ])
+});
+
+const LEDGER_FEES_COLUMNS = Object.freeze({
+  LIBELLE: LEDGER_FEES_TABLE.START_COLUMN,
+  TYPE: LEDGER_FEES_TABLE.START_COLUMN + 1,
+  MONTANT: LEDGER_FEES_TABLE.START_COLUMN + 2
+});
+
+const LEDGER_FEE_TYPES = Object.freeze([
+  'Gestion',
+  'Matériel',
+  'Logistique',
+  'Amortissement',
+  'Publicité',
+  'Communication',
+  'Autres'
+]);
+
 const SKU_COLOR_PALETTE = Object.freeze([
   Object.freeze({ background: '#FDEBD0', text: '#BA4A00' }),
   Object.freeze({ background: '#FADBD8', text: '#943126' }),
