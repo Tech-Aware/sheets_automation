@@ -618,6 +618,78 @@ function ensureLedgerWeekHighlight_() {
   // Mise en forme supprimée : fonction volontairement vide.
 }
 
+function ensureLegacyFormattingCleared_(ss) {
+  if (!ss || typeof PropertiesService === 'undefined') {
+    return;
+  }
+
+  const props = PropertiesService.getDocumentProperties();
+  if (!props) {
+    return;
+  }
+
+  const cleanupKey = typeof LEGACY_FORMATTING_CLEANUP_KEY === 'string'
+    ? LEGACY_FORMATTING_CLEANUP_KEY
+    : 'LEGACY_FORMATTING_CLEARED_V1';
+
+  if (props.getProperty(cleanupKey)) {
+    return;
+  }
+
+  try {
+    const sheets = ss.getSheets();
+    if (Array.isArray(sheets)) {
+      for (let i = 0; i < sheets.length; i++) {
+        scrubLegacyConditionalFormatting_(sheets[i]);
+      }
+    }
+    props.setProperty(cleanupKey, new Date().toISOString());
+  } catch (err) {
+    if (typeof console !== 'undefined' && console.warn) {
+      console.warn('ensureLegacyFormattingCleared_ failed', err);
+    }
+  }
+}
+
+function scrubLegacyConditionalFormatting_(sheet) {
+  if (!sheet || typeof sheet.getConditionalFormatRules !== 'function') {
+    return;
+  }
+
+  const rules = sheet.getConditionalFormatRules();
+  if (!rules || !rules.length) {
+    return;
+  }
+
+  const filtered = rules.filter(rule => !shouldRemoveLegacyRule_(rule));
+  if (filtered.length !== rules.length) {
+    sheet.setConditionalFormatRules(filtered);
+  }
+}
+
+function shouldRemoveLegacyRule_(rule) {
+  if (!rule || typeof rule.getDescription !== 'function') {
+    return false;
+  }
+
+  const description = String(rule.getDescription() || '').trim();
+  if (!description) {
+    return false;
+  }
+
+  if (typeof LEDGER_WEEK_RULE_DESCRIPTION === 'string'
+    && description === LEDGER_WEEK_RULE_DESCRIPTION) {
+    return true;
+  }
+
+  if (typeof LEDGER_MONTH_TOTAL_RULE_DESCRIPTION === 'string'
+    && description === LEDGER_MONTH_TOTAL_RULE_DESCRIPTION) {
+    return true;
+  }
+
+  return false;
+}
+
 function buildBaseToStockDate_(ss) {
   const stock = ss && ss.getSheetByName('Stock');
   const achats = ss && ss.getSheetByName('Achats');
