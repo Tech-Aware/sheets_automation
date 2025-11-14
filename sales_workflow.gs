@@ -221,10 +221,13 @@ function getAchatsRecordByIdOrSku_(ss, idVal, sku) {
   return null;
 }
 
-function copySaleToMonthlySheet_(ss, sale) {
+function copySaleToMonthlySheet_(ss, sale, options) {
   if (!sale || !(sale.dateVente instanceof Date) || isNaN(sale.dateVente)) {
-    return false;
+    return { inserted: false, updated: false };
   }
+
+  const opts = options || {};
+  const allowUpdates = Boolean(opts.updateExisting);
 
   const month = sale.dateVente.getMonth();
   const year = sale.dateVente.getFullYear();
@@ -246,14 +249,18 @@ function copySaleToMonthlySheet_(ss, sale) {
   const idKey = rawId ? `ID:${rawId}` : '';
   const dedupeKey = skuKey || idKey;
 
+  let existingRowNumber = 0;
   if (dedupeKey) {
     const last = sheet.getLastRow();
     if (last > 1) {
       const notes = sheet.getRange(2, 1, last - 1, 1).getNotes();
-      const alreadyPresent = notes.some(row => row[0] === dedupeKey);
-      if (alreadyPresent) {
-        return false;
+      const matchIndex = notes.findIndex(row => row[0] === dedupeKey);
+      if (matchIndex >= 0) {
+        existingRowNumber = matchIndex + 2;
       }
+    }
+    if (existingRowNumber && !allowUpdates) {
+      return { inserted: false, updated: false };
     }
   }
 
@@ -271,12 +278,20 @@ function copySaleToMonthlySheet_(ss, sale) {
   const labelIdx = labels.findIndex(v => v.toUpperCase().startsWith(labelPrefix));
   const totalIdx = labels.findIndex((v, idx) => idx > labelIdx && v.toUpperCase().startsWith(totalPrefix));
   if (labelIdx === -1 || totalIdx === -1) {
-    return false;
+    return { inserted: false, updated: false };
   }
 
   const totalRowNumber = totalIdx + 1;
-  sheet.insertRows(totalRowNumber, 1);
-  const saleRowNumber = totalRowNumber;
+  let saleRowNumber = totalRowNumber;
+  let insertedRow = false;
+  let updatedRow = false;
+  if (!existingRowNumber) {
+    sheet.insertRows(totalRowNumber, 1);
+    insertedRow = true;
+  } else {
+    saleRowNumber = existingRowNumber;
+    updatedRow = true;
+  }
 
   const saleRow = Array(headersLen).fill('');
   if (MONTHLY_LEDGER_INDEX.ID >= 0) {
@@ -345,7 +360,8 @@ function copySaleToMonthlySheet_(ss, sale) {
   updateLedgerResultRow_(sheet, headersLen);
   applySkuPaletteFormatting_(sheet, MONTHLY_LEDGER_INDEX.SKU + 1, MONTHLY_LEDGER_INDEX.LIBELLE + 1);
   ensureLedgerWeekHighlight_(sheet, headersLen);
-  return true;
+
+  return { inserted: insertedRow, updated: updatedRow };
 }
 
 function ensureMonthlyLedgerSheet_(sheet, monthStart) {

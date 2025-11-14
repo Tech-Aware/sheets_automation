@@ -134,6 +134,9 @@ function shouldResumeBackfill_(filter, progress, totalRows) {
   if (Number(progress.copied)) {
     details.push(`${progress.copied} vente(s) copiée(s)`);
   }
+  if (Number(progress.updated)) {
+    details.push(`${progress.updated} mise(s) à jour`);
+  }
   if (Number(progress.duplicates)) {
     details.push(`${progress.duplicates} doublon(s)`);
   }
@@ -563,6 +566,7 @@ function runBackfillMonthlyLedgers_(filter) {
 
   let startIndex = 0;
   let copied = 0;
+  let updated = 0;
   let duplicates = 0;
   let missingDate = 0;
   let skippedByFilter = 0;
@@ -570,6 +574,7 @@ function runBackfillMonthlyLedgers_(filter) {
   if (progress && resumeProgress) {
     startIndex = Math.max(0, Math.min(Number(progress.nextIndex) || 0, totalRows));
     copied = Number(progress.copied) || 0;
+    updated = Number(progress.updated) || 0;
     duplicates = Number(progress.duplicates) || 0;
     missingDate = Number(progress.missingDate) || 0;
     skippedByFilter = Number(progress.skippedByFilter) || 0;
@@ -632,7 +637,7 @@ function runBackfillMonthlyLedgers_(filter) {
       coeff = prixVente / prixAchat;
     }
 
-    const inserted = copySaleToMonthlySheet_(ss, {
+    const result = copySaleToMonthlySheet_(ss, {
       id: idVal,
       libelle,
       dateVente: dateCell,
@@ -642,10 +647,12 @@ function runBackfillMonthlyLedgers_(filter) {
       coeffMarge: coeff,
       nbPieces: 1,
       sku
-    });
+    }, { updateExisting: true });
 
-    if (inserted) {
+    if (result && result.inserted) {
       copied++;
+    } else if (result && result.updated) {
+      updated++;
     } else {
       duplicates++;
     }
@@ -657,13 +664,16 @@ function runBackfillMonthlyLedgers_(filter) {
   }
 
   const messageParts = [`${copied} vente(s) copiée(s).`];
+  if (updated) {
+    messageParts.push(`${updated} vente(s) mise(s) à jour.`);
+  }
   if (duplicates) {
     messageParts.push(`${duplicates} vente(s) déjà présentes ou ignorées.`);
   }
   if (missingDate) {
     messageParts.push(`${missingDate} vente(s) sans date de vente.`);
   }
-  if (filter && skippedByFilter && copied === 0) {
+  if (filter && skippedByFilter && copied === 0 && updated === 0) {
     messageParts.push(`${skippedByFilter} ligne(s) ignorée(s) car hors du mois sélectionné.`);
   }
 
@@ -675,6 +685,7 @@ function runBackfillMonthlyLedgers_(filter) {
     saveBackfillProgress_(filterKey, {
       nextIndex,
       copied,
+      updated,
       duplicates,
       missingDate,
       skippedByFilter,
