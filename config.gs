@@ -127,11 +127,12 @@ const LEDGER_FEES_COLUMNS = Object.freeze({
 });
 
 const LEDGER_FEE_TYPES = Object.freeze([
-  'Gestion matériel',
+  'Gestion',
+  'Matériel',
   'Logistique',
   'Amortissement',
   'Publicité',
-  'Marketing',
+  'Communication',
   'Autres'
 ]);
 

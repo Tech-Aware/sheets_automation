@@ -389,6 +389,20 @@ function ensureMonthlyLedgerSheet_(sheet, monthStart) {
   updateLedgerResultRow_(sheet, headersLen);
 }
 
+function isMonthlyLedgerSheet_(sheet) {
+  if (!sheet) return false;
+  const headersLen = MONTHLY_LEDGER_HEADERS.length;
+  const lastColumn = sheet.getLastColumn();
+  if (lastColumn < headersLen) return false;
+  const headers = sheet.getRange(1, 1, 1, headersLen).getValues()[0];
+  for (let i = 0; i < headersLen; i++) {
+    if (headers[i] !== MONTHLY_LEDGER_HEADERS[i]) {
+      return false;
+    }
+  }
+  return true;
+}
+
 function initializeMonthlyLedgerSheet_(sheet, monthStart) {
   sheet.clear();
 
