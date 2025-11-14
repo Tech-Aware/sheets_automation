@@ -184,6 +184,315 @@ function exportVente_(e, row, C_ID, C_LABEL, C_SKU, C_PRIX, C_DVENTE, C_STAMPV, 
   sh.deleteRow(row);
 }
 
+function handleVentesReturn(e) {
+  const ss = e && e.source;
+  const sh = ss && ss.getActiveSheet();
+  if (!ss || !sh || sh.getName() !== 'Ventes') {
+    return;
+  }
+
+  const range = e.range;
+  if (!range || range.getRow() <= 1) {
+    return;
+  }
+
+  const lastColumn = sh.getLastColumn();
+  if (!lastColumn) {
+    return;
+  }
+
+  const headers = sh.getRange(1, 1, 1, lastColumn).getValues()[0];
+  if (!headers.length) {
+    return;
+  }
+
+  const resolver = makeHeaderResolver_(headers);
+  const colExact = resolver.colExact.bind(resolver);
+  const colWhere = resolver.colWhere.bind(resolver);
+  const colRetour = colExact(HEADERS.VENTES.RETOUR) || colWhere(h => h.includes('retour'));
+  if (!colRetour || range.getColumn() !== colRetour) {
+    return;
+  }
+
+  const newValue = sh.getRange(range.getRow(), colRetour).getValue();
+  if (!isReturnFlagActive_(newValue)) {
+    return;
+  }
+
+  try {
+    const rowValues = sh.getRange(range.getRow(), 1, 1, lastColumn).getValues()[0];
+    const saleRecord = buildSaleRecordFromVentesRow_(rowValues, resolver);
+    if (!saleRecord.ok) {
+      revertVentesReturnCell_(sh, range.getRow(), colRetour, e.oldValue);
+      ss.toast(saleRecord.message || 'Impossible de lire la ligne de vente.', 'Ventes', 7);
+      return;
+    }
+
+    const stockPlan = prepareStockReturnPlan_(ss, saleRecord);
+    if (!stockPlan.ok) {
+      revertVentesReturnCell_(sh, range.getRow(), colRetour, e.oldValue);
+      ss.toast(stockPlan.message || 'Impossible de préparer la remise en stock.', 'Ventes', 7);
+      return;
+    }
+
+    const ledgerResult = copySaleToMonthlySheet_(ss, Object.assign({}, saleRecord.sale, { retour: true }), { updateExisting: true });
+    if (!ledgerResult || !ledgerResult.removed) {
+      revertVentesReturnCell_(sh, range.getRow(), colRetour, e.oldValue);
+      ss.toast('Impossible de retirer la vente de la comptabilité mensuelle.', 'Ventes', 7);
+      return;
+    }
+
+    const stockResult = applyStockReturnPlan_(stockPlan);
+    if (!stockResult.ok) {
+      copySaleToMonthlySheet_(ss, saleRecord.sale, { updateExisting: true });
+      revertVentesReturnCell_(sh, range.getRow(), colRetour, e.oldValue);
+      ss.toast(stockResult.message || 'Retour en stock impossible : la ligne comptable a été rétablie.', 'Ventes', 7);
+      return;
+    }
+
+    sh.deleteRow(range.getRow());
+    const label = saleRecord.sale.sku || saleRecord.sale.libelle || 'vente';
+    ss.toast(`Retour traité pour ${label}.`, 'Ventes', 5);
+  } catch (err) {
+    console.error(err);
+    revertVentesReturnCell_(sh, range.getRow(), colRetour, e.oldValue);
+    ss.toast('Erreur lors du traitement du retour.', 'Ventes', 7);
+  }
+}
+
+function buildSaleRecordFromVentesRow_(rowValues, resolver) {
+  if (!rowValues || !resolver) {
+    return { ok: false, message: 'Ligne ou en-têtes "Ventes" introuvables.' };
+  }
+
+  const colExact = resolver.colExact.bind(resolver);
+  const colWhere = resolver.colWhere.bind(resolver);
+
+  const colId = colExact(HEADERS.VENTES.ID);
+  const colDate = colExact(HEADERS.VENTES.DATE_VENTE)
+    || colWhere(h => h.includes('date') && h.includes('vente'));
+  const colArticle = colExact(HEADERS.VENTES.ARTICLE)
+    || colExact(HEADERS.VENTES.ARTICLE_ALT)
+    || colWhere(h => h.includes('article'))
+    || colWhere(h => h.includes('libell'));
+  const colSku = colExact(HEADERS.VENTES.SKU);
+  const colPrix = colExact(HEADERS.VENTES.PRIX_VENTE)
+    || colExact(HEADERS.VENTES.PRIX_VENTE_ALT)
+    || colWhere(h => h.includes('prix') && h.includes('vente'));
+  const colTaille = colExact(HEADERS.VENTES.TAILLE_COLIS)
+    || colExact(HEADERS.VENTES.TAILLE)
+    || colWhere(isShippingSizeHeader_);
+  const colLot = colExact(HEADERS.VENTES.LOT) || colWhere(h => h.includes('lot'));
+  const colFrais = colExact(HEADERS.VENTES.FRAIS_COLISSAGE) || colWhere(h => h.includes('frais'));
+
+  const rawId = colId ? rowValues[colId - 1] : '';
+  const rawSku = colSku ? rowValues[colSku - 1] : '';
+  const rawLibelle = colArticle ? rowValues[colArticle - 1] : '';
+  const rawPrix = colPrix ? rowValues[colPrix - 1] : '';
+  const rawDate = colDate ? rowValues[colDate - 1] : null;
+
+  const saleDate = getDateOrNull_(rawDate);
+  if (!(saleDate instanceof Date) || isNaN(saleDate)) {
+    return { ok: false, message: 'Date de vente manquante ou invalide.' };
+  }
+
+  const normalizedId = rawId !== undefined && rawId !== null ? String(rawId).trim() : '';
+  const normalizedSku = rawSku !== undefined && rawSku !== null ? String(rawSku).trim() : '';
+  if (!normalizedId && !normalizedSku) {
+    return { ok: false, message: 'ID ou SKU requis pour traiter le retour.' };
+  }
+
+  const prixValue = valueToNumber_(rawPrix);
+  const sale = {
+    id: normalizedId || '',
+    sku: normalizedSku || '',
+    libelle: rawLibelle !== undefined && rawLibelle !== null ? String(rawLibelle) : '',
+    dateVente: saleDate,
+    prixVente: Number.isFinite(prixValue) ? prixValue : rawPrix,
+    nbPieces: 1
+  };
+
+  const restockHints = {
+    idValue: rawId,
+    skuValue: rawSku,
+    libelleValue: rawLibelle,
+    prixVenteRaw: rawPrix,
+    taille: colTaille ? rowValues[colTaille - 1] : '',
+    lot: colLot ? rowValues[colLot - 1] : '',
+    frais: colFrais ? rowValues[colFrais - 1] : ''
+  };
+
+  return { ok: true, sale, restockHints };
+}
+
+function prepareStockReturnPlan_(ss, saleRecord) {
+  if (!saleRecord || !saleRecord.sale) {
+    return { ok: false, message: 'Informations de vente indisponibles.' };
+  }
+
+  const stock = ss.getSheetByName('Stock');
+  if (!stock) {
+    return { ok: false, message: 'La feuille "Stock" est introuvable.' };
+  }
+
+  const lastColumn = stock.getLastColumn();
+  if (!lastColumn) {
+    return { ok: false, message: 'La feuille "Stock" ne contient aucun en-tête.' };
+  }
+
+  const headers = stock.getRange(1, 1, 1, lastColumn).getValues()[0];
+  if (!headers.length) {
+    return { ok: false, message: 'Impossible de lire les en-têtes "Stock".' };
+  }
+
+  const resolver = makeHeaderResolver_(headers);
+  const rowValues = Array(headers.length).fill('');
+  const hints = saleRecord.restockHints || {};
+  const now = new Date();
+
+  const colId = resolver.colExact(HEADERS.STOCK.ID);
+  if (colId) {
+    rowValues[colId - 1] = hints.idValue !== undefined ? hints.idValue : saleRecord.sale.id;
+  }
+
+  const colLibelle = resolver.colExact(HEADERS.STOCK.LIBELLE)
+    || resolver.colExact(HEADERS.STOCK.LIBELLE_ALT)
+    || resolver.colExact(HEADERS.STOCK.ARTICLE)
+    || resolver.colExact(HEADERS.STOCK.ARTICLE_ALT)
+    || resolver.colWhere(h => h.includes('libell'));
+  if (colLibelle) {
+    const libelleValue = hints.libelleValue !== undefined && hints.libelleValue !== null
+      ? hints.libelleValue
+      : saleRecord.sale.libelle;
+    rowValues[colLibelle - 1] = libelleValue || saleRecord.sale.sku || saleRecord.sale.id || '';
+  }
+
+  const colSku = resolver.colExact(HEADERS.STOCK.SKU)
+    || resolver.colExact(HEADERS.STOCK.REFERENCE);
+  if (colSku) {
+    rowValues[colSku - 1] = hints.skuValue !== undefined ? hints.skuValue : saleRecord.sale.sku;
+  }
+
+  const colPrix = resolver.colExact(HEADERS.STOCK.PRIX_VENTE)
+    || resolver.colWhere(h => h.includes('prix') && h.includes('vente'));
+  if (colPrix) {
+    const prixValue = saleRecord.sale.prixVente;
+    if (Number.isFinite(prixValue)) {
+      rowValues[colPrix - 1] = prixValue;
+    } else if (hints.prixVenteRaw !== undefined) {
+      rowValues[colPrix - 1] = hints.prixVenteRaw;
+    }
+  }
+
+  const colTaille = resolver.colExact(HEADERS.STOCK.TAILLE_COLIS)
+    || resolver.colExact(HEADERS.STOCK.TAILLE_COLIS_ALT)
+    || resolver.colExact(HEADERS.STOCK.TAILLE)
+    || resolver.colWhere(isShippingSizeHeader_);
+  if (colTaille && hints.taille !== undefined) {
+    rowValues[colTaille - 1] = hints.taille;
+  }
+
+  const colLot = resolver.colExact(HEADERS.STOCK.LOT) || resolver.colWhere(h => h.includes('lot'));
+  if (colLot && hints.lot !== undefined) {
+    rowValues[colLot - 1] = hints.lot;
+  }
+
+  const colStamp = resolver.colExact(HEADERS.STOCK.VENTE_EXPORTEE_LE);
+  if (colStamp) {
+    rowValues[colStamp - 1] = '';
+  }
+
+  const statusContext = getStockStatusColumnContext_(stock);
+  const dateColumnsToFormat = [];
+
+  function resetStatusColumns_(checkboxCol, dateCol, isCombined) {
+    if (checkboxCol) {
+      rowValues[checkboxCol - 1] = isCombined ? '' : false;
+    }
+    if (dateCol && (!isCombined || checkboxCol !== dateCol)) {
+      rowValues[dateCol - 1] = '';
+      dateColumnsToFormat.push(dateCol);
+    }
+  }
+
+  if (statusContext && statusContext.columns) {
+    if (statusContext.columns.dms) {
+      rowValues[statusContext.columns.dms - 1] = now;
+      dateColumnsToFormat.push(statusContext.columns.dms);
+    }
+    resetStatusColumns_(statusContext.columns.mis, statusContext.columns.dmis, statusContext.combinedFlags.dmis);
+    resetStatusColumns_(statusContext.columns.pub, statusContext.columns.dpub, statusContext.combinedFlags.dpub);
+    resetStatusColumns_(statusContext.columns.vendu, statusContext.columns.dvente, statusContext.combinedFlags.dvente);
+  } else {
+    const colDms = resolver.colExact(HEADERS.STOCK.DATE_MISE_EN_STOCK);
+    if (colDms) {
+      rowValues[colDms - 1] = now;
+      dateColumnsToFormat.push(colDms);
+    }
+  }
+
+  return {
+    ok: true,
+    sheet: stock,
+    rowValues,
+    dateColumns: Array.from(new Set(dateColumnsToFormat)),
+    skuColumn: colSku,
+    labelColumn: colLibelle
+  };
+}
+
+function applyStockReturnPlan_(plan) {
+  if (!plan || !plan.sheet || !plan.rowValues) {
+    return { ok: false, message: 'Plan de remise en stock invalide.' };
+  }
+
+  const sheet = plan.sheet;
+  const lastRow = sheet.getLastRow();
+  let targetRow;
+  if (!lastRow) {
+    sheet.insertRows(1, 1);
+    targetRow = 1;
+  } else {
+    sheet.insertRowsAfter(lastRow, 1);
+    targetRow = lastRow + 1;
+  }
+
+  sheet.getRange(targetRow, 1, 1, plan.rowValues.length).setValues([plan.rowValues]);
+  if (plan.dateColumns && plan.dateColumns.length) {
+    plan.dateColumns.forEach(col => {
+      if (col > 0) {
+        sheet.getRange(targetRow, col).setNumberFormat('dd/MM/yyyy');
+      }
+    });
+  }
+
+  if (plan.skuColumn || plan.labelColumn) {
+    applySkuPaletteFormatting_(sheet, plan.skuColumn, plan.labelColumn);
+  }
+
+  return { ok: true };
+}
+
+function revertVentesReturnCell_(sheet, row, column, oldValue) {
+  if (!sheet || !row || !column) {
+    return;
+  }
+  const cell = sheet.getRange(row, column);
+  if (oldValue === undefined || oldValue === null || oldValue === '') {
+    cell.setValue(false);
+    return;
+  }
+  if (oldValue === 'TRUE') {
+    cell.setValue(true);
+    return;
+  }
+  if (oldValue === 'FALSE') {
+    cell.setValue(false);
+    return;
+  }
+  cell.setValue(oldValue);
+}
+
 function getAchatsRecordByIdOrSku_(ss, idVal, sku) {
   const achats = ss.getSheetByName('Achats');
   if (!achats) return null;
