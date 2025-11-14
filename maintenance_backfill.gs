@@ -146,6 +146,9 @@ function shouldResumeBackfill_(filter, progress, totalRows) {
   if (Number(progress.skippedByFilter)) {
     details.push(`${progress.skippedByFilter} hors période`);
   }
+  if (Number(progress.returnsRemoved)) {
+    details.push(`${progress.returnsRemoved} retour(s) retiré(s)`);
+  }
   const detailsSuffix = details.length ? `\n\nProgression enregistrée : ${details.join(', ')}.` : '';
   const message = remaining > 0
     ? `Une recopie précédente pour ${label} s'est arrêtée avant la fin (${processed}/${totalRows}). Veux-tu reprendre où elle s'est arrêtée ?${detailsSuffix}`
@@ -563,6 +566,8 @@ function runBackfillMonthlyLedgers_(filter) {
   const colDate = resolver.colExact(HEADERS.VENTES.DATE_VENTE);
   const colPrix = resolver.colExact(HEADERS.VENTES.PRIX_VENTE)
     || resolver.colExact(HEADERS.VENTES.PRIX_VENTE_ALT);
+  const colRetour = resolver.colExact(HEADERS.VENTES.RETOUR)
+    || resolver.colWhere(h => h.includes('retour'));
 
   if (!colDate) {
     ss.toast(`Colonne ${HEADERS.VENTES.DATE_VENTE} introuvable dans "Ventes".`, 'Recopie comptable', 8);
@@ -591,6 +596,7 @@ function runBackfillMonthlyLedgers_(filter) {
   let duplicates = 0;
   let missingDate = 0;
   let skippedByFilter = 0;
+  let returnsRemoved = 0;
 
   if (progress && resumeProgress) {
     startIndex = Math.max(0, Math.min(Number(progress.nextIndex) || 0, totalRows));
@@ -599,6 +605,7 @@ function runBackfillMonthlyLedgers_(filter) {
     duplicates = Number(progress.duplicates) || 0;
     missingDate = Number(progress.missingDate) || 0;
     skippedByFilter = Number(progress.skippedByFilter) || 0;
+    returnsRemoved = Number(progress.returnsRemoved) || 0;
   }
 
   const startTime = Date.now();
@@ -636,6 +643,7 @@ function runBackfillMonthlyLedgers_(filter) {
     const idVal = colId ? row[colId - 1] : '';
     const libelle = colLibelle ? row[colLibelle - 1] : '';
     const sku = colSku ? row[colSku - 1] : '';
+    const retourValue = colRetour ? row[colRetour - 1] : '';
 
     let prixVente = NaN;
     if (colPrix) {
@@ -667,10 +675,13 @@ function runBackfillMonthlyLedgers_(filter) {
       margeBrute: marge,
       coeffMarge: coeff,
       nbPieces: 1,
-      sku
+      sku,
+      retour: retourValue
     }, { updateExisting: true });
 
-    if (result && result.inserted) {
+    if (result && result.removed) {
+      returnsRemoved++;
+    } else if (result && result.inserted) {
       copied++;
     } else if (result && result.updated) {
       updated++;
@@ -694,6 +705,9 @@ function runBackfillMonthlyLedgers_(filter) {
   if (missingDate) {
     messageParts.push(`${missingDate} vente(s) sans date de vente.`);
   }
+  if (returnsRemoved) {
+    messageParts.push(`${returnsRemoved} retour(s) retiré(s) de la compta.`);
+  }
   if (filter && skippedByFilter && copied === 0 && updated === 0) {
     messageParts.push(`${skippedByFilter} ligne(s) ignorée(s) car hors du mois sélectionné.`);
   }
@@ -710,6 +724,7 @@ function runBackfillMonthlyLedgers_(filter) {
       duplicates,
       missingDate,
       skippedByFilter,
+      returnsRemoved,
       totalRows,
       lastUpdated: new Date().toISOString()
     });

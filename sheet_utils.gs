@@ -253,6 +253,38 @@ function isStatusActiveValue_(value) {
   return !!date;
 }
 
+function isReturnFlagActive_(value) {
+  if (value === null || value === undefined || value === false) {
+    return false;
+  }
+
+  if (value === true) {
+    return true;
+  }
+
+  const date = getDateOrNull_(value);
+  if (date) {
+    return true;
+  }
+
+  if (typeof value === 'number') {
+    return Number(value) === 1;
+  }
+
+  if (typeof value === 'string') {
+    const normalized = normText_(value);
+    if (!normalized) {
+      return false;
+    }
+    return normalized === 'retour'
+      || normalized === 'return'
+      || normalized === 'oui'
+      || normalized === 'yes';
+  }
+
+  return false;
+}
+
 function toNumber_(value) {
   if (typeof value === 'number') {
     return Number.isFinite(value) ? value : NaN;
