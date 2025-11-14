@@ -7,4 +7,8 @@ function onEdit(e) {
   const name = sh.getName();
   if (name === "Achats") return handleAchats(e);
   if (name === "Stock")  return handleStock(e);
+  if (isMonthlyLedgerSheetName_(name)) {
+    handleLedgerEdit_(e);
+    return;
+  }
 }

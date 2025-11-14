@@ -156,6 +156,8 @@ function exportVente_(e, row, C_ID, C_LABEL, C_SKU, C_PRIX, C_DVENTE, C_STAMPV, 
     id: idVal,
     libelle: label,
     dateVente: dateV,
+    prixVente: Number.isFinite(prix) ? prix : '',
+    prixAchat: Number.isFinite(prixAchat) ? prixAchat : '',
     margeBrute: Number.isFinite(margeBrute) ? margeBrute : '',
     coeffMarge: Number.isFinite(coeffMarge) ? coeffMarge : '',
     nbPieces: nbPiecesVendu,
@@ -219,10 +221,13 @@ function getAchatsRecordByIdOrSku_(ss, idVal, sku) {
   return null;
 }
 
-function copySaleToMonthlySheet_(ss, sale) {
+function copySaleToMonthlySheet_(ss, sale, options) {
   if (!sale || !(sale.dateVente instanceof Date) || isNaN(sale.dateVente)) {
-    return false;
+    return { inserted: false, updated: false };
   }
+
+  const opts = options || {};
+  const allowUpdates = Boolean(opts.updateExisting);
 
   const month = sale.dateVente.getMonth();
   const year = sale.dateVente.getFullYear();
@@ -244,14 +249,18 @@ function copySaleToMonthlySheet_(ss, sale) {
   const idKey = rawId ? `ID:${rawId}` : '';
   const dedupeKey = skuKey || idKey;
 
+  let existingRowNumber = 0;
   if (dedupeKey) {
     const last = sheet.getLastRow();
     if (last > 1) {
       const notes = sheet.getRange(2, 1, last - 1, 1).getNotes();
-      const alreadyPresent = notes.some(row => row[0] === dedupeKey);
-      if (alreadyPresent) {
-        return false;
+      const matchIndex = notes.findIndex(row => row[0] === dedupeKey);
+      if (matchIndex >= 0) {
+        existingRowNumber = matchIndex + 2;
       }
+    }
+    if (existingRowNumber && !allowUpdates) {
+      return { inserted: false, updated: false };
     }
   }
 
@@ -269,12 +278,20 @@ function copySaleToMonthlySheet_(ss, sale) {
   const labelIdx = labels.findIndex(v => v.toUpperCase().startsWith(labelPrefix));
   const totalIdx = labels.findIndex((v, idx) => idx > labelIdx && v.toUpperCase().startsWith(totalPrefix));
   if (labelIdx === -1 || totalIdx === -1) {
-    return false;
+    return { inserted: false, updated: false };
   }
 
   const totalRowNumber = totalIdx + 1;
-  sheet.insertRows(totalRowNumber, 1);
-  const saleRowNumber = totalRowNumber;
+  let saleRowNumber = totalRowNumber;
+  let insertedRow = false;
+  let updatedRow = false;
+  if (!existingRowNumber) {
+    sheet.insertRows(totalRowNumber, 1);
+    insertedRow = true;
+  } else {
+    saleRowNumber = existingRowNumber;
+    updatedRow = true;
+  }
 
   const saleRow = Array(headersLen).fill('');
   if (MONTHLY_LEDGER_INDEX.ID >= 0) {
@@ -288,6 +305,20 @@ function copySaleToMonthlySheet_(ss, sale) {
   }
   if (MONTHLY_LEDGER_INDEX.DATE_VENTE >= 0) {
     saleRow[MONTHLY_LEDGER_INDEX.DATE_VENTE] = sale.dateVente;
+  }
+
+  const prixVenteValue = (sale.prixVente === '' || sale.prixVente === null || sale.prixVente === undefined)
+    ? NaN
+    : (typeof sale.prixVente === 'number' ? sale.prixVente : valueToNumber_(sale.prixVente));
+  if (MONTHLY_LEDGER_INDEX.PRIX_VENTE >= 0 && Number.isFinite(prixVenteValue)) {
+    saleRow[MONTHLY_LEDGER_INDEX.PRIX_VENTE] = roundCurrency_(prixVenteValue);
+  }
+
+  const prixAchatValue = (sale.prixAchat === '' || sale.prixAchat === null || sale.prixAchat === undefined)
+    ? NaN
+    : (typeof sale.prixAchat === 'number' ? sale.prixAchat : valueToNumber_(sale.prixAchat));
+  if (MONTHLY_LEDGER_INDEX.PRIX_ACHAT >= 0 && Number.isFinite(prixAchatValue)) {
+    saleRow[MONTHLY_LEDGER_INDEX.PRIX_ACHAT] = roundCurrency_(prixAchatValue);
   }
 
   const margeSource = sale.margeBrute;
@@ -326,9 +357,11 @@ function copySaleToMonthlySheet_(ss, sale) {
   sortWeekRowsByDate_(sheet, weekIndex + 1, headersLen);
   updateWeeklyTotals_(sheet, weekIndex + 1, headersLen);
   updateMonthlyTotals_(sheet, headersLen);
+  updateLedgerResultRow_(sheet, headersLen);
   applySkuPaletteFormatting_(sheet, MONTHLY_LEDGER_INDEX.SKU + 1, MONTHLY_LEDGER_INDEX.LIBELLE + 1);
   ensureLedgerWeekHighlight_(sheet, headersLen);
-  return true;
+
+  return { inserted: insertedRow, updated: updatedRow };
 }
 
 function ensureMonthlyLedgerSheet_(sheet, monthStart) {
@@ -339,15 +372,19 @@ function ensureMonthlyLedgerSheet_(sheet, monthStart) {
     return;
   }
 
-  const headerValues = sheet.getRange(1, 1, 1, headersLen).getValues()[0];
-  if (headerValues[0] !== MONTHLY_LEDGER_HEADERS[0]) {
+  const headerWidth = sheet.getLastColumn();
+  const headerValues = headerWidth > 0 ? sheet.getRange(1, 1, 1, headerWidth).getValues()[0] : [];
+  if (!headerValues.length || headerValues[0] !== MONTHLY_LEDGER_HEADERS[0]) {
     // La feuille contient d'autres données : ne pas écraser.
     return;
   }
 
+  synchronizeMonthlyLedgerHeaders_(sheet);
   applyMonthlySheetFormats_(sheet);
+  applyLedgerFeeValidation_(sheet);
   applySkuPaletteFormatting_(sheet, MONTHLY_LEDGER_INDEX.SKU + 1, MONTHLY_LEDGER_INDEX.LIBELLE + 1);
   ensureLedgerWeekHighlight_(sheet, headersLen);
+  updateLedgerResultRow_(sheet, headersLen);
 }
 
 function initializeMonthlyLedgerSheet_(sheet, monthStart) {
@@ -381,14 +418,22 @@ function initializeMonthlyLedgerSheet_(sheet, monthStart) {
     .setValues([monthTotalRow]);
 
   applyMonthlySheetFormats_(sheet);
+  applyLedgerFeeValidation_(sheet);
   applySkuPaletteFormatting_(sheet, MONTHLY_LEDGER_INDEX.SKU + 1, MONTHLY_LEDGER_INDEX.LIBELLE + 1);
   ensureLedgerWeekHighlight_(sheet, headersLen);
+  updateLedgerResultRow_(sheet, headersLen);
 }
 
 function applyMonthlySheetFormats_(sheet) {
   const maxRows = sheet.getMaxRows();
   if (MONTHLY_LEDGER_INDEX.DATE_VENTE >= 0) {
     sheet.getRange(1, MONTHLY_LEDGER_INDEX.DATE_VENTE + 1, maxRows, 1).setNumberFormat('dd/MM/yyyy');
+  }
+  if (MONTHLY_LEDGER_INDEX.PRIX_VENTE >= 0) {
+    sheet.getRange(1, MONTHLY_LEDGER_INDEX.PRIX_VENTE + 1, maxRows, 1).setNumberFormat('#,##0.00');
+  }
+  if (MONTHLY_LEDGER_INDEX.PRIX_ACHAT >= 0) {
+    sheet.getRange(1, MONTHLY_LEDGER_INDEX.PRIX_ACHAT + 1, maxRows, 1).setNumberFormat('#,##0.00');
   }
   if (MONTHLY_LEDGER_INDEX.MARGE_BRUTE >= 0) {
     sheet.getRange(1, MONTHLY_LEDGER_INDEX.MARGE_BRUTE + 1, maxRows, 1).setNumberFormat('#,##0.00');
@@ -399,6 +444,25 @@ function applyMonthlySheetFormats_(sheet) {
   if (MONTHLY_LEDGER_INDEX.NB_PIECES >= 0) {
     sheet.getRange(1, MONTHLY_LEDGER_INDEX.NB_PIECES + 1, maxRows, 1).setNumberFormat('0');
   }
+  if (MONTHLY_LEDGER_INDEX.FRAIS_MONTANT >= 0) {
+    sheet.getRange(1, MONTHLY_LEDGER_INDEX.FRAIS_MONTANT + 1, maxRows, 1).setNumberFormat('#,##0.00');
+  }
+}
+
+function applyLedgerFeeValidation_(sheet) {
+  if (!LEDGER_FEE_TYPE_OPTIONS || LEDGER_FEE_TYPE_OPTIONS.length === 0) return;
+  if (MONTHLY_LEDGER_INDEX.FRAIS_TYPE < 0) return;
+  const feeTypeCol = MONTHLY_LEDGER_INDEX.FRAIS_TYPE + 1;
+
+  const maxRows = sheet.getMaxRows();
+  if (maxRows < 2) return;
+
+  const validationRange = sheet.getRange(2, feeTypeCol, maxRows - 1, 1);
+  const rule = SpreadsheetApp.newDataValidation()
+    .requireValueInList(LEDGER_FEE_TYPE_OPTIONS, true)
+    .setAllowInvalid(true)
+    .build();
+  validationRange.setDataValidation(rule);
 }
 
 function sortWeekRowsByDate_(sheet, weekNumber, headersLen) {
@@ -434,6 +498,8 @@ function updateWeeklyTotals_(sheet, weekNumber, headersLen) {
     const dataRange = sheet.getRange(labelIdx + 2, 1, dataCount, headersLen);
     const rows = dataRange.getValues();
 
+    let sumPrixVente = 0;
+    let sumPrixAchat = 0;
     let sumMarge = 0;
     let sumCoeff = 0;
     let sumPieces = 0;
@@ -449,6 +515,22 @@ function updateWeeklyTotals_(sheet, weekNumber, headersLen) {
         continue;
       }
       rowCount++;
+
+      if (MONTHLY_LEDGER_INDEX.PRIX_VENTE >= 0) {
+        const prixCell = row[MONTHLY_LEDGER_INDEX.PRIX_VENTE];
+        if (prixCell !== '' && prixCell !== null && prixCell !== undefined) {
+          const prix = valueToNumber_(prixCell);
+          if (Number.isFinite(prix)) sumPrixVente += prix;
+        }
+      }
+
+      if (MONTHLY_LEDGER_INDEX.PRIX_ACHAT >= 0) {
+        const prixCell = row[MONTHLY_LEDGER_INDEX.PRIX_ACHAT];
+        if (prixCell !== '' && prixCell !== null && prixCell !== undefined) {
+          const prix = valueToNumber_(prixCell);
+          if (Number.isFinite(prix)) sumPrixAchat += prix;
+        }
+      }
 
       let marge = NaN;
       if (MONTHLY_LEDGER_INDEX.MARGE_BRUTE >= 0) {
@@ -483,6 +565,12 @@ function updateWeeklyTotals_(sheet, weekNumber, headersLen) {
 
     if (rowCount > 0) {
       totals[0] = `TOTAL VENTE SEMAINE ${weekNumber} : ${rowCount}`;
+      if (MONTHLY_LEDGER_INDEX.PRIX_VENTE >= 0) {
+        totals[MONTHLY_LEDGER_INDEX.PRIX_VENTE] = roundCurrency_(sumPrixVente);
+      }
+      if (MONTHLY_LEDGER_INDEX.PRIX_ACHAT >= 0) {
+        totals[MONTHLY_LEDGER_INDEX.PRIX_ACHAT] = roundCurrency_(sumPrixAchat);
+      }
       if (MONTHLY_LEDGER_INDEX.MARGE_BRUTE >= 0) {
         totals[MONTHLY_LEDGER_INDEX.MARGE_BRUTE] = roundCurrency_(sumMarge);
       }
@@ -502,88 +590,225 @@ function updateWeeklyTotals_(sheet, weekNumber, headersLen) {
 }
 
 function updateMonthlyTotals_(sheet, headersLen) {
+  const summary = summarizeMonthlyLedgerData_(sheet, headersLen);
+  if (!summary) return;
+
+  const totals = Array(headersLen).fill('');
+  totals[0] = summary.rowCount > 0
+    ? `TOTAL VENTE MOIS : ${summary.rowCount}`
+    : 'TOTAL VENTE MOIS';
+
+  if (MONTHLY_LEDGER_INDEX.PRIX_VENTE >= 0) {
+    totals[MONTHLY_LEDGER_INDEX.PRIX_VENTE] = roundCurrency_(summary.sumPrixVente);
+  }
+  if (MONTHLY_LEDGER_INDEX.PRIX_ACHAT >= 0) {
+    totals[MONTHLY_LEDGER_INDEX.PRIX_ACHAT] = roundCurrency_(summary.sumPrixAchat);
+  }
+  if (MONTHLY_LEDGER_INDEX.MARGE_BRUTE >= 0) {
+    totals[MONTHLY_LEDGER_INDEX.MARGE_BRUTE] = roundCurrency_(summary.sumMarge);
+  }
+  if (MONTHLY_LEDGER_INDEX.COEFF_MARGE >= 0) {
+    totals[MONTHLY_LEDGER_INDEX.COEFF_MARGE] = summary.countCoeff
+      ? Math.round((summary.sumCoeff / summary.countCoeff) * 100) / 100
+      : '';
+  }
+  if (MONTHLY_LEDGER_INDEX.NB_PIECES >= 0) {
+    totals[MONTHLY_LEDGER_INDEX.NB_PIECES] = summary.sumPieces;
+  }
+
+  sheet.getRange(summary.monthRowNumber, 1, 1, headersLen).setValues([totals]);
+  sheet.getRange(summary.monthRowNumber, 1).setNote('');
+}
+
+const LEDGER_RESULT_LABEL = 'RESULTAT';
+
+function updateLedgerResultRow_(sheet, headersLen) {
+  const summary = summarizeMonthlyLedgerData_(sheet, headersLen);
+  if (!summary) return;
+
+  const totalFees = sumLedgerFeeAmounts_(sheet);
+  const totalCost = summary.sumPrixAchat + totalFees;
+
+  const resultRowNumber = ensureLedgerResultRow_(sheet, headersLen, summary.monthRowNumber);
+  if (!resultRowNumber) return;
+
+  if (MONTHLY_LEDGER_INDEX.PRIX_VENTE >= 0) {
+    sheet.getRange(resultRowNumber, MONTHLY_LEDGER_INDEX.PRIX_VENTE + 1)
+      .setValue(`Chiffre d'affaire : ${formatLedgerCurrencyLabel_(summary.sumPrixVente)}`);
+  }
+  if (MONTHLY_LEDGER_INDEX.PRIX_ACHAT >= 0) {
+    sheet.getRange(resultRowNumber, MONTHLY_LEDGER_INDEX.PRIX_ACHAT + 1)
+      .setValue(`Coût de revient (achats + frais) : ${formatLedgerCurrencyLabel_(totalCost)}`);
+  }
+  if (MONTHLY_LEDGER_INDEX.MARGE_BRUTE >= 0) {
+    const net = summary.sumPrixVente - totalCost;
+    sheet.getRange(resultRowNumber, MONTHLY_LEDGER_INDEX.MARGE_BRUTE + 1)
+      .setValue(`Bénéfice net : ${formatLedgerCurrencyLabel_(net)}`);
+  }
+}
+
+function ensureLedgerResultRow_(sheet, headersLen, monthRowNumber) {
+  if (!Number.isFinite(monthRowNumber)) return null;
+
   const labels = sheet.getRange(1, 1, sheet.getLastRow(), 1).getValues().map(row => String(row[0] || ''));
+  let resultIdx = labels.findIndex((value, idx) => idx > (monthRowNumber - 1)
+    && value.toUpperCase().startsWith(LEDGER_RESULT_LABEL));
+
+  if (resultIdx === -1) {
+    sheet.insertRowsAfter(monthRowNumber, 1);
+    resultIdx = monthRowNumber;
+  }
+
+  const resultRowNumber = resultIdx + 1;
+  const rowValues = Array(headersLen).fill('');
+  rowValues[0] = LEDGER_RESULT_LABEL;
+  sheet.getRange(resultRowNumber, 1, 1, headersLen).setValues([rowValues]);
+  sheet.getRange(resultRowNumber, 1).setNote('');
+  return resultRowNumber;
+}
+
+function summarizeMonthlyLedgerData_(sheet, headersLen) {
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) return null;
+
+  const labels = sheet.getRange(1, 1, lastRow, 1).getValues().map(row => String(row[0] || ''));
   const totalMonthIdx = labels.findIndex(v => v.toUpperCase().startsWith('TOTAL VENTE MOIS'));
-  if (totalMonthIdx === -1) return;
+  if (totalMonthIdx === -1) return null;
 
   const monthRowNumber = totalMonthIdx + 1;
   const dataHeight = monthRowNumber - 2;
-  const totals = Array(headersLen).fill('');
-  totals[0] = 'TOTAL VENTE MOIS';
+  const summary = {
+    monthRowNumber,
+    rowCount: 0,
+    sumPrixVente: 0,
+    sumPrixAchat: 0,
+    sumMarge: 0,
+    sumCoeff: 0,
+    countCoeff: 0,
+    sumPieces: 0
+  };
 
-  if (dataHeight > 0) {
-    const values = sheet.getRange(2, 1, dataHeight, headersLen).getValues();
-    let countRows = 0;
-    let sumMarge = 0;
-    let sumCoeff = 0;
-    let sumPieces = 0;
-    let countCoeff = 0;
+  if (dataHeight <= 0) {
+    return summary;
+  }
 
-    for (let i = 0; i < values.length; i++) {
-      const row = values[i];
-      const labelText = String(row[0] || '').toUpperCase();
-      if (labelText.startsWith('SEMAINE') || labelText.startsWith('TOTAL VENTE')) {
-        continue;
-      }
-
-      const hasKeyInfo = [MONTHLY_LEDGER_INDEX.ID, MONTHLY_LEDGER_INDEX.SKU, MONTHLY_LEDGER_INDEX.LIBELLE]
-        .filter(idx => idx >= 0)
-        .some(idx => String(row[idx] || '').trim() !== '');
-      if (!hasKeyInfo) {
-        continue;
-      }
-
-      countRows++;
-
-      let marge = NaN;
-      if (MONTHLY_LEDGER_INDEX.MARGE_BRUTE >= 0) {
-        const margeCell = row[MONTHLY_LEDGER_INDEX.MARGE_BRUTE];
-        if (margeCell !== '' && margeCell !== null && margeCell !== undefined) {
-          marge = valueToNumber_(margeCell);
-        }
-      }
-      if (Number.isFinite(marge)) sumMarge += marge;
-
-      let coeff = NaN;
-      if (MONTHLY_LEDGER_INDEX.COEFF_MARGE >= 0) {
-        const coeffCell = row[MONTHLY_LEDGER_INDEX.COEFF_MARGE];
-        if (coeffCell !== '' && coeffCell !== null && coeffCell !== undefined) {
-          coeff = valueToNumber_(coeffCell);
-        }
-      }
-      if (Number.isFinite(coeff)) {
-        sumCoeff += coeff;
-        countCoeff++;
-      }
-
-      let pieces = NaN;
-      if (MONTHLY_LEDGER_INDEX.NB_PIECES >= 0) {
-        const piecesCell = row[MONTHLY_LEDGER_INDEX.NB_PIECES];
-        if (piecesCell !== '' && piecesCell !== null && piecesCell !== undefined) {
-          pieces = valueToNumber_(piecesCell);
-        }
-      }
-      if (Number.isFinite(pieces)) sumPieces += pieces;
+  const values = sheet.getRange(2, 1, dataHeight, headersLen).getValues();
+  for (let i = 0; i < values.length; i++) {
+    const row = values[i];
+    const labelText = String(row[0] || '').toUpperCase();
+    if (labelText.startsWith('SEMAINE') || labelText.startsWith('TOTAL VENTE')) {
+      continue;
     }
 
-    if (countRows > 0) {
-      totals[0] = `TOTAL VENTE MOIS : ${countRows}`;
-      if (MONTHLY_LEDGER_INDEX.MARGE_BRUTE >= 0) {
-        totals[MONTHLY_LEDGER_INDEX.MARGE_BRUTE] = roundCurrency_(sumMarge);
+    const hasKeyInfo = [MONTHLY_LEDGER_INDEX.ID, MONTHLY_LEDGER_INDEX.SKU, MONTHLY_LEDGER_INDEX.LIBELLE]
+      .filter(idx => idx >= 0)
+      .some(idx => String(row[idx] || '').trim() !== '');
+    if (!hasKeyInfo) {
+      continue;
+    }
+
+    summary.rowCount++;
+
+    if (MONTHLY_LEDGER_INDEX.PRIX_VENTE >= 0) {
+      const prixCell = row[MONTHLY_LEDGER_INDEX.PRIX_VENTE];
+      if (prixCell !== '' && prixCell !== null && prixCell !== undefined) {
+        const prix = valueToNumber_(prixCell);
+        if (Number.isFinite(prix)) summary.sumPrixVente += prix;
       }
-      if (MONTHLY_LEDGER_INDEX.COEFF_MARGE >= 0) {
-        totals[MONTHLY_LEDGER_INDEX.COEFF_MARGE] = countCoeff
-          ? Math.round((sumCoeff / countCoeff) * 100) / 100
-          : '';
+    }
+
+    if (MONTHLY_LEDGER_INDEX.PRIX_ACHAT >= 0) {
+      const prixCell = row[MONTHLY_LEDGER_INDEX.PRIX_ACHAT];
+      if (prixCell !== '' && prixCell !== null && prixCell !== undefined) {
+        const prix = valueToNumber_(prixCell);
+        if (Number.isFinite(prix)) summary.sumPrixAchat += prix;
       }
-      if (MONTHLY_LEDGER_INDEX.NB_PIECES >= 0) {
-        totals[MONTHLY_LEDGER_INDEX.NB_PIECES] = sumPieces;
+    }
+
+    if (MONTHLY_LEDGER_INDEX.MARGE_BRUTE >= 0) {
+      const margeCell = row[MONTHLY_LEDGER_INDEX.MARGE_BRUTE];
+      if (margeCell !== '' && margeCell !== null && margeCell !== undefined) {
+        const marge = valueToNumber_(margeCell);
+        if (Number.isFinite(marge)) summary.sumMarge += marge;
+      }
+    }
+
+    if (MONTHLY_LEDGER_INDEX.COEFF_MARGE >= 0) {
+      const coeffCell = row[MONTHLY_LEDGER_INDEX.COEFF_MARGE];
+      if (coeffCell !== '' && coeffCell !== null && coeffCell !== undefined) {
+        const coeff = valueToNumber_(coeffCell);
+        if (Number.isFinite(coeff)) {
+          summary.sumCoeff += coeff;
+          summary.countCoeff++;
+        }
+      }
+    }
+
+    if (MONTHLY_LEDGER_INDEX.NB_PIECES >= 0) {
+      const piecesCell = row[MONTHLY_LEDGER_INDEX.NB_PIECES];
+      if (piecesCell !== '' && piecesCell !== null && piecesCell !== undefined) {
+        const pieces = valueToNumber_(piecesCell);
+        if (Number.isFinite(pieces)) summary.sumPieces += pieces;
       }
     }
   }
 
-  sheet.getRange(monthRowNumber, 1, 1, headersLen).setValues([totals]);
-  sheet.getRange(monthRowNumber, 1).setNote('');
+  return summary;
+}
+
+function sumLedgerFeeAmounts_(sheet) {
+  if (MONTHLY_LEDGER_INDEX.FRAIS_MONTANT < 0) return 0;
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) return 0;
+
+  const feeColumn = MONTHLY_LEDGER_INDEX.FRAIS_MONTANT + 1;
+  const height = lastRow - 1;
+  if (height <= 0) return 0;
+
+  const values = sheet.getRange(2, feeColumn, height, 1).getValues();
+  let sum = 0;
+  for (let i = 0; i < values.length; i++) {
+    const cell = values[i][0];
+    if (cell === '' || cell === null || cell === undefined) {
+      continue;
+    }
+    const value = valueToNumber_(cell);
+    if (Number.isFinite(value)) {
+      sum += value;
+    }
+  }
+  return sum;
+}
+
+function formatLedgerCurrencyLabel_(value) {
+  if (!Number.isFinite(value)) return '0,00';
+  const rounded = Math.round(value * 100) / 100;
+  if (typeof rounded.toLocaleString === 'function') {
+    return rounded.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
+  return rounded.toFixed(2);
+}
+
+function synchronizeMonthlyLedgerHeaders_(sheet) {
+  const headersLen = MONTHLY_LEDGER_HEADERS.length;
+  const headerValues = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  const dateIdx = headerValues.indexOf('DATE DE VENTE');
+  const prixVentePosition = MONTHLY_LEDGER_INDEX.PRIX_VENTE;
+  const prixAchatPosition = MONTHLY_LEDGER_INDEX.PRIX_ACHAT;
+  const prixColumnsAligned = prixVentePosition >= 0 && prixAchatPosition >= 0
+    && headerValues[prixVentePosition] === MONTHLY_LEDGER_HEADERS[prixVentePosition]
+    && headerValues[prixAchatPosition] === MONTHLY_LEDGER_HEADERS[prixAchatPosition];
+
+  if (dateIdx >= 0 && !prixColumnsAligned) {
+    sheet.insertColumnsAfter(dateIdx + 1, 2);
+  }
+
+  const lastColumn = sheet.getLastColumn();
+  if (lastColumn < headersLen) {
+    sheet.insertColumnsAfter(lastColumn, headersLen - lastColumn);
+  }
+
+  sheet.getRange(1, 1, 1, headersLen).setValues([MONTHLY_LEDGER_HEADERS]);
 }
 
 function valueToNumber_(value) {
@@ -645,4 +870,51 @@ function formatDateString_(date) {
 function formatMonthLabel_(year, monthIndex) {
   const safeMonth = Math.min(Math.max(monthIndex, 0), 11);
   return `${MONTH_NAMES_FR[safeMonth]} ${year}`;
+}
+
+function handleLedgerEdit_(e) {
+  if (!e || !e.range) return;
+  const sheet = e.range.getSheet();
+  if (!sheet) return;
+
+  const headersLen = Array.isArray(MONTHLY_LEDGER_HEADERS)
+    ? MONTHLY_LEDGER_HEADERS.length
+    : 0;
+  if (!headersLen) return;
+
+  refreshLedgerSummaries_(sheet, headersLen);
+}
+
+function isMonthlyLedgerSheetName_(name) {
+  if (!name) return false;
+  const normalized = String(name).trim().toUpperCase();
+  return normalized.startsWith('COMPTA ');
+}
+
+function refreshLedgerSummaries_(sheet, headersLen) {
+  if (!sheet || !headersLen) return;
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) return;
+
+  const labels = sheet.getRange(1, 1, lastRow, 1).getValues()
+    .map(row => String(row[0] || ''));
+  const weekPattern = /^SEMAINE\s+(\d+)/i;
+  let maxWeek = 0;
+  for (let i = 0; i < labels.length; i++) {
+    const match = labels[i].match(weekPattern);
+    if (!match) continue;
+    const weekNumber = parseInt(match[1], 10);
+    if (Number.isFinite(weekNumber)) {
+      maxWeek = Math.max(maxWeek, weekNumber);
+    }
+  }
+
+  if (maxWeek > 0) {
+    for (let week = 1; week <= maxWeek; week++) {
+      updateWeeklyTotals_(sheet, week, headersLen);
+    }
+  }
+
+  updateMonthlyTotals_(sheet, headersLen);
+  updateLedgerResultRow_(sheet, headersLen);
 }
