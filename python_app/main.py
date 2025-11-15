@@ -78,6 +78,32 @@ def _ensure_purchase_ready_dates(table: TableData | None) -> None:
             row.setdefault(ready_header, "")
 
 
+def _normalize_stock_ids(table: TableData | None) -> None:
+    """Convert float-like stock IDs to integers for cleaner display."""
+
+    if table is None:
+        return
+    id_header = HEADERS["STOCK"].ID
+    for row in table.rows:
+        value = row.get(id_header)
+        if value in (None, ""):
+            continue
+        normalized: str | None = None
+        if isinstance(value, (int, float)):
+            if isinstance(value, float) and not value.is_integer():
+                continue
+            normalized = str(int(value))
+        elif isinstance(value, str):
+            try:
+                number = float(value)
+            except ValueError:
+                continue
+            if number.is_integer():
+                normalized = str(int(number))
+        if normalized is not None:
+            row[id_header] = normalized
+
+
 class VintageErpApp(ctk.CTk):
     """Simple multipage CustomTkinter application."""
 
@@ -100,6 +126,7 @@ class VintageErpApp(ctk.CTk):
             self.tables["Achats"] = achats_table
         else:
             _ensure_purchase_ready_dates(self.tables["Achats"])
+        _normalize_stock_ids(self.tables.get("Stock"))
         self.workflow = WorkflowCoordinator(
             self.tables["Achats"],
             self.tables["Stock"],
@@ -236,7 +263,7 @@ class PurchasesView(ctk.CTkFrame):
             height=18,
             column_width=135,
             column_widths={
-                HEADERS["ACHATS"].ID: 100,
+                HEADERS["ACHATS"].ID: 50,
                 HEADERS["ACHATS"].TOTAL_TTC: 110,
             },
             enable_inline_edit=False,
@@ -638,6 +665,7 @@ class TableView(ctk.CTkFrame):
             height=20,
             on_cell_edited=self._on_cell_edit,
             column_width=160,
+            column_widths={"ID": 80},
         )
         self.table_widget.pack(fill="both", expand=True, padx=12, pady=12)
         self._build_extra_controls(self.content)
