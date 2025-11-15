@@ -126,7 +126,8 @@ class WorkflowCoordinator:
         purchase = self._find_row(self.achats.rows, HEADERS["ACHATS"].ID, data.purchase_id)
         if purchase is None:
             raise ValueError(f"Achat {data.purchase_id} introuvable")
-        stock_id = str(self._next_numeric_id(self.stock.rows, HEADERS["STOCK"].ID))
+        stock_id_value = self._get_purchase_value(purchase, HEADERS["ACHATS"].ID) or data.purchase_id
+        stock_id = str(stock_id_value)
         date_stock = self._today()
         libelle = self._get_purchase_value(purchase, HEADERS["ACHATS"].ARTICLE) or self._get_purchase_value(
             purchase, HEADERS["ACHATS"].ARTICLE_ALT
@@ -219,11 +220,11 @@ class WorkflowCoordinator:
             purchase, HEADERS["ACHATS"].GENRE_LEGACY)
         libelle = " ".join(part for part in (article, marque, genre) if part).strip()
         next_suffix = self._next_sku_suffix(base)
-        next_stock_id = self._next_numeric_id(self.stock.rows, HEADERS["STOCK"].ID)
+        purchase_id_value = self._get_purchase_value(purchase, HEADERS["ACHATS"].ID) or purchase_id
+        stock_id = str(purchase_id_value)
         created: list[dict] = []
         for idx in range(qty):
             stock_row: dict = {}
-            stock_id = str(next_stock_id + idx)
             suffix = next_suffix + idx + 1
             sku = f"{base}-{suffix}"
             self._set_stock_value(stock_row, HEADERS["STOCK"].ID, stock_id)
