@@ -119,11 +119,10 @@ class DashboardView(ctk.CTkFrame):
 
 class PurchasesView(ctk.CTkFrame):
     SUMMARY_HEADERS = (
-        HEADERS["ACHATS"].ID,
         HEADERS["ACHATS"].ARTICLE,
-        HEADERS["ACHATS"].MARQUE,
-        HEADERS["ACHATS"].FOURNISSEUR,
         HEADERS["ACHATS"].DATE_ACHAT,
+        HEADERS["ACHATS"].DATE_MISE_EN_STOCK,
+        HEADERS["ACHATS"].TOTAL_TTC,
     )
 
     def __init__(self, master, table, workflow: WorkflowCoordinator, refresh_callback):
@@ -191,7 +190,14 @@ class PurchasesView(ctk.CTkFrame):
     def _build_summary_rows(self):
         summary_rows = []
         for row in self.table.rows:
-            summary_rows.append({header: row.get(header, "") for header in self.SUMMARY_HEADERS})
+            summary: dict[str, str] = {}
+            for header in self.SUMMARY_HEADERS:
+                value = row.get(header, "")
+                if header == HEADERS["ACHATS"].TOTAL_TTC and isinstance(value, (int, float)):
+                    summary[header] = f"{value:.2f}"
+                else:
+                    summary[header] = value if value is not None else ""
+            summary_rows.append(summary)
         return summary_rows
 
     def _open_add_dialog(self):
