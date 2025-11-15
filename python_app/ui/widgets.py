@@ -10,6 +10,7 @@ import customtkinter as ctk
 import tkinter as tk
 
 from ..config import MONTH_NAMES_FR
+from ..utils.datefmt import format_display_date, parse_date_value
 
 
 class CalendarPopup(ctk.CTkToplevel):
@@ -146,10 +147,7 @@ class DatePickerEntry(ctk.CTkFrame):
         current_value = self.get().strip()
         initial = None
         if current_value:
-            try:
-                initial = date.fromisoformat(current_value)
-            except ValueError:
-                initial = None
+            initial = parse_date_value(current_value)
         popup = CalendarPopup(self, self._on_date_selected, initial)
         popup.position_near(self.entry)
         popup.bind("<Destroy>", lambda _event: setattr(self, "_popup", None))
@@ -157,7 +155,7 @@ class DatePickerEntry(ctk.CTkFrame):
 
     def _on_date_selected(self, chosen: date):
         self.delete(0, tk.END)
-        self.insert(0, chosen.isoformat())
+        self.insert(0, format_display_date(chosen))
         self._close_popup()
 
 

@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass as _dataclass
-from datetime import date, datetime, timedelta
+from datetime import date
 import re
 import unicodedata
 from sys import version_info
@@ -10,6 +10,7 @@ from typing import Optional
 
 from ..config import HEADERS, MONTH_NAMES_FR
 from ..datasources.workbook import TableData
+from ..utils.datefmt import format_display_date, parse_date_value
 
 
 # ``slots`` support for :func:`dataclasses.dataclass` only arrived in Python 3.10.
@@ -147,7 +148,8 @@ class WorkflowCoordinator:
         stock_row = self._find_row(self.stock.rows, HEADERS["STOCK"].SKU, data.sku)
         if stock_row is None:
             raise ValueError(f"Article {data.sku} introuvable dans le stock")
-        sale_date = data.date_vente or self._today()
+        sale_date_value = self._parse_date_string(data.date_vente) or self._today_date()
+        sale_date = self._format_date(sale_date_value)
         stock_row[self._stock_column(HEADERS["STOCK"].VENDU_ALT)] = sale_date
         stock_row[self._stock_column(HEADERS["STOCK"].DATE_VENTE_ALT)] = sale_date
         stock_row[self._stock_column(HEADERS["STOCK"].PRIX_VENTE)] = round(data.prix_vente, 2)
@@ -206,7 +208,8 @@ class WorkflowCoordinator:
         if not base:
             base = self._generate_reference(article, marque, genre)
             self._set_purchase_value(purchase, HEADERS["ACHATS"].REFERENCE, base)
-        ready_stamp = ready_date or self._today()
+        ready_value = self._parse_date_string(ready_date)
+        ready_stamp = self._format_date(ready_value or self._today_date())
         self._set_purchase_value(purchase, HEADERS["ACHATS"].PRET_STOCK_COMBINED, ready_stamp)
         self._set_purchase_value(purchase, HEADERS["ACHATS"].DATE_MISE_EN_STOCK, ready_stamp)
         livraison_raw = self._get_purchase_value(purchase, HEADERS["ACHATS"].DATE_LIVRAISON)
@@ -260,7 +263,7 @@ class WorkflowCoordinator:
         return None
 
     def _today(self) -> str:
-        return self._today_date().isoformat()
+        return self._format_date(self._today_date())
 
     @staticmethod
     def _today_date() -> date:
@@ -308,29 +311,11 @@ class WorkflowCoordinator:
             return 0
 
     def _parse_date_string(self, value) -> date | None:
-        if value is None or value == "":
-            return None
-        if isinstance(value, date):
-            return value
-        if isinstance(value, (int, float)):
-            return date(1899, 12, 30) + timedelta(days=int(value))
-        text = str(value).strip()
-        if not text:
-            return None
-        for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y", "%d.%m.%Y"):
-            try:
-                return datetime.strptime(text, fmt).date()
-            except ValueError:
-                continue
-        try:
-            serial = float(text)
-        except ValueError:
-            return None
-        return date(1899, 12, 30) + timedelta(days=int(serial))
+        return parse_date_value(value)
 
     @staticmethod
     def _format_date(value: date | None) -> str:
-        return value.isoformat() if isinstance(value, date) else ""
+        return format_display_date(value)
 
     def _month_info(self, value: date | None) -> tuple[str, str]:
         if not value:

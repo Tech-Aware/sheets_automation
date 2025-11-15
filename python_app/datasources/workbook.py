@@ -7,6 +7,8 @@ from pathlib import Path
 from typing import Iterable, List, Sequence
 import sys
 
+from ..utils.datefmt import format_display_date
+
 try:  # pragma: no cover - optional dependency detection
     from openpyxl import load_workbook
 except Exception:  # pragma: no cover - fallback when optional dep missing
@@ -76,10 +78,8 @@ class WorkbookRepository:
     def _normalize_value(value):
         """Convert Excel date/time values to user-friendly strings."""
 
-        if isinstance(value, datetime):
-            return value.date().isoformat()
-        if isinstance(value, date):
-            return value.isoformat()
+        if isinstance(value, (datetime, date)):
+            return format_display_date(value)
         return value
 
 
