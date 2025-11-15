@@ -35,5 +35,6 @@ Ce socle permet d'itérer vers une reproduction complète des workflows Apps Scr
 
 ## Base Achats SQLite
 - Les données fournies dans la feuille Achats ont été converties en fixtures `python_app/data/purchases_seed.py` (texte).
+- La feuille Stock dispose désormais d'un jeu d'essai minimal (`python_app/data/stock_seed.py`) reprenant les entrées fournies dans l'exemple (VPHB-3 → VTH-13). Lorsque vous exécutez `python -m python_app.seed_purchases_db`, la base SQLite est automatiquement peuplée avec ces 29 SKU.
 - Générez localement `python_app/data/achats.db` via `python -m python_app.seed_purchases_db` : le fichier n'est pas versionné pour éviter d'inclure un binaire lourd dans Git.
 - L'application charge automatiquement `python_app/data/achats.db` s'il existe et enregistre toutes les modifications Achats dans ce fichier lorsqu'on ferme l'application (le fichier est créé au besoin). Vous pouvez passer un autre chemin via `--achats-db` si vous souhaitez stocker l'état ailleurs.

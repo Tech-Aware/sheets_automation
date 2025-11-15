@@ -6,13 +6,15 @@ import sys
 
 try:  # pragma: no cover - entrypoint convenience
     from .data.purchases_seed import SEED_PURCHASES
-    from .datasources.sqlite_purchases import PurchaseDatabase, PurchaseRecord
+    from .data.stock_seed import SEED_STOCK
+    from .datasources.sqlite_purchases import PurchaseDatabase, PurchaseRecord, StockRecord
 except ImportError:  # pragma: no cover - executed when run as a script
     package_root = Path(__file__).resolve().parent.parent
     if str(package_root) not in sys.path:
         sys.path.append(str(package_root))
     from python_app.data.purchases_seed import SEED_PURCHASES
-    from python_app.datasources.sqlite_purchases import PurchaseDatabase, PurchaseRecord
+    from python_app.data.stock_seed import SEED_STOCK
+    from python_app.datasources.sqlite_purchases import PurchaseDatabase, PurchaseRecord, StockRecord
 
 DEFAULT_DB = Path(__file__).resolve().parent / "data" / "achats.db"
 
@@ -21,7 +23,8 @@ def main(db_path: Path | None = None) -> Path:
     target = db_path or DEFAULT_DB
     db = PurchaseDatabase(target)
     records = [PurchaseRecord.from_mapping(entry) for entry in SEED_PURCHASES]
-    db.replace_all(records)
+    stock_records = [StockRecord.from_mapping(entry) for entry in SEED_STOCK]
+    db.replace_all(records, stock_records)
     return target
 
 
