@@ -186,12 +186,17 @@ class PurchasesView(ctk.CTkFrame):
         self.table_widget: ScrollableTable | None = None
         self.add_dialog: AddPurchaseDialog | None = None
         self.detail_dialog: PurchaseDetailDialog | None = None
-        self._build_table()
-        self._build_ready_section()
+        self.layout = ctk.CTkFrame(self)
+        self.layout.pack(fill="both", expand=True, padx=16, pady=16)
+        self.layout.grid_rowconfigure(0, weight=1)
+        self.layout.grid_columnconfigure(0, weight=3)
+        self.layout.grid_columnconfigure(1, weight=2)
+        self._build_table(self.layout)
+        self._build_ready_section(self.layout)
 
-    def _build_table(self):
-        frame = ctk.CTkFrame(self)
-        frame.pack(fill="both", expand=True, padx=16, pady=(16, 8))
+    def _build_table(self, parent):
+        frame = ctk.CTkFrame(parent)
+        frame.grid(row=0, column=0, sticky="nsew", padx=(0, 12))
         helper = ctk.CTkFrame(frame)
         helper.pack(fill="x", padx=12, pady=(12, 0))
         ctk.CTkButton(helper, text="Ajouter une commande", command=self._open_add_dialog).pack(side="left")
@@ -201,15 +206,15 @@ class PurchasesView(ctk.CTkFrame):
             self.SUMMARY_HEADERS,
             self._build_summary_rows(),
             height=18,
-            column_width=150,
+            column_width=135,
             enable_inline_edit=False,
             on_row_activated=self._open_detail_dialog,
         )
         self.table_widget.pack(fill="both", expand=True, padx=12, pady=12)
 
-    def _build_ready_section(self):
-        frame = ctk.CTkFrame(self)
-        frame.pack(fill="x", padx=16, pady=(0, 16))
+    def _build_ready_section(self, parent):
+        frame = ctk.CTkFrame(parent)
+        frame.grid(row=0, column=1, sticky="nsew")
         ctk.CTkLabel(frame, text="Valider la mise en stock", font=ctk.CTkFont(size=18, weight="bold"), anchor="w").pack(
             fill="x", padx=12, pady=(12, 4)
         )
