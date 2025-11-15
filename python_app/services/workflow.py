@@ -188,6 +188,11 @@ class WorkflowCoordinator:
         purchase = self._find_row(self.achats.rows, HEADERS["ACHATS"].ID, purchase_id)
         if purchase is None:
             raise ValueError(f"Achat {purchase_id} introuvable")
+        already_ready = self._get_purchase_value(purchase, HEADERS["ACHATS"].PRET_STOCK_COMBINED)
+        if isinstance(already_ready, str):
+            already_ready = already_ready.strip()
+        if already_ready:
+            raise ValueError("Cette commande a déjà été validée pour la mise en stock")
         qty = self._safe_int(
             self._get_purchase_value(purchase, HEADERS["ACHATS"].QUANTITE_RECUE)
             or self._get_purchase_value(purchase, HEADERS["ACHATS"].QUANTITE_RECUE_ALT)
