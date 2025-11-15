@@ -117,6 +117,7 @@ class WorkflowCoordinator:
         self._set_purchase_value(row, HEADERS["ACHATS"].PRIX_UNITAIRE_TTC, prix_unitaire_ttc)
         self._set_purchase_value(row, HEADERS["ACHATS"].TRACKING, data.tracking)
         self._set_purchase_value(row, HEADERS["ACHATS"].PRET_STOCK_COMBINED, "")
+        self._set_purchase_value(row, HEADERS["ACHATS"].DATE_MISE_EN_STOCK, "")
         self.achats.rows.append(row)
         return row
 
@@ -207,6 +208,7 @@ class WorkflowCoordinator:
             self._set_purchase_value(purchase, HEADERS["ACHATS"].REFERENCE, base)
         ready_stamp = ready_date or self._today()
         self._set_purchase_value(purchase, HEADERS["ACHATS"].PRET_STOCK_COMBINED, ready_stamp)
+        self._set_purchase_value(purchase, HEADERS["ACHATS"].DATE_MISE_EN_STOCK, ready_stamp)
         livraison_raw = self._get_purchase_value(purchase, HEADERS["ACHATS"].DATE_LIVRAISON)
         livraison_date = self._parse_date_string(livraison_raw) or self._today_date()
         livraison_str = self._format_date(livraison_date)

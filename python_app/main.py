@@ -35,6 +35,46 @@ except ImportError:  # pragma: no cover - executed when run as a script
     from python_app.ui.widgets import DatePickerEntry
 
 
+def _has_ready_date(value) -> bool:
+    """Return ``True`` when ``value`` looks like a real ready-date stamp."""
+
+    if value in (None, ""):
+        return False
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str) and value.strip().upper() == "FALSE":
+        return False
+    return True
+
+
+def _ensure_purchase_ready_dates(table: TableData | None) -> None:
+    """Populate ``MIS EN STOCK LE`` from the "Prêt" columns when missing."""
+
+    if table is None:
+        return
+    ready_header = HEADERS["ACHATS"].DATE_MISE_EN_STOCK
+    fallback_headers = (
+        HEADERS["ACHATS"].PRET_STOCK_COMBINED,
+        HEADERS["ACHATS"].PRET_STOCK,
+        HEADERS["ACHATS"].PRET_STOCK_ALT,
+    )
+    headers = list(table.headers)
+    if ready_header not in headers:
+        headers.append(ready_header)
+        table.headers = tuple(headers) if isinstance(table.headers, tuple) else headers
+    for row in table.rows:
+        current = row.get(ready_header)
+        if _has_ready_date(current):
+            continue
+        for fallback in fallback_headers:
+            candidate = row.get(fallback)
+            if _has_ready_date(candidate):
+                row[ready_header] = candidate
+                break
+        else:
+            row.setdefault(ready_header, "")
+
+
 class VintageErpApp(ctk.CTk):
     """Simple multipage CustomTkinter application."""
 
@@ -46,7 +86,10 @@ class VintageErpApp(ctk.CTk):
         self.repository = repository
         self.tables = self.repository.load_many("Achats", "Stock", "Ventes", "Compta 09-2025")
         if achats_table is not None:
+            _ensure_purchase_ready_dates(achats_table)
             self.tables["Achats"] = achats_table
+        else:
+            _ensure_purchase_ready_dates(self.tables["Achats"])
         self.workflow = WorkflowCoordinator(
             self.tables["Achats"],
             self.tables["Stock"],
