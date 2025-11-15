@@ -7,6 +7,7 @@ import sys
 import tkinter as tk
 from pathlib import Path
 from tkinter import messagebox
+from typing import Sequence
 
 import customtkinter as ctk
 
@@ -120,9 +121,11 @@ class VintageErpApp(ctk.CTk):
             if sheet == "Achats":
                 view = PurchasesView(tab, self.tables[sheet], self.workflow, self.refresh_views)
                 self.purchase_view = view
+            elif sheet == "Stock":
+                view = StockTableView(tab, self.tables[sheet])
             else:
                 view = TableView(tab, self.tables[sheet])
-                self.table_views[sheet] = view
+            self.table_views[sheet] = view
 
         months_tab = self.tabview.add("Calendrier")
         CalendarView(months_tab)
@@ -591,6 +594,7 @@ class TableView(ctk.CTkFrame):
         self.table = table
         helper = ctk.CTkFrame(self)
         helper.pack(fill="x", padx=12, pady=(12, 0))
+        self.helper_frame = helper
         self.status_var = tk.StringVar(value="Double-cliquez sur une cellule pour la modifier.")
         ctk.CTkLabel(helper, textvariable=self.status_var, anchor="w").pack(side="left")
         self.table_widget = ScrollableTable(
@@ -602,6 +606,7 @@ class TableView(ctk.CTkFrame):
             column_width=160,
         )
         self.table_widget.pack(fill="both", expand=True, padx=12, pady=12)
+        self._build_extra_controls()
 
     def _on_cell_edit(self, row_index: int, column: str, new_value: str):
         try:
@@ -612,6 +617,93 @@ class TableView(ctk.CTkFrame):
 
     def refresh(self):
         self.table_widget.refresh(self.table.rows)
+
+    def _build_extra_controls(self):
+        """Hook for subclasses to add contextual actions."""
+
+    def _delete_rows_by_indices(self, indices: Sequence[int]) -> int:
+        removed = 0
+        if not indices:
+            return removed
+        valid_indices = sorted(set(idx for idx in indices if 0 <= idx < len(self.table.rows)), reverse=True)
+        for idx in valid_indices:
+            try:
+                del self.table.rows[idx]
+                removed += 1
+            except IndexError:
+                continue
+        if removed:
+            self.refresh()
+        return removed
+
+
+class StockTableView(TableView):
+    def __init__(self, master, table):
+        self.delete_id_var = tk.StringVar(value="")
+        super().__init__(master, table)
+
+    def _build_extra_controls(self):
+        panel = ctk.CTkFrame(self)
+        panel.pack(fill="x", padx=12, pady=(0, 12))
+        ctk.CTkLabel(panel, text="Supprimer des articles du stock", font=ctk.CTkFont(size=16, weight="bold"), anchor="w").pack(
+            fill="x", padx=12, pady=(4, 0)
+        )
+        id_row = ctk.CTkFrame(panel)
+        id_row.pack(fill="x", padx=12, pady=(8, 4))
+        ctk.CTkLabel(id_row, text="ID achat", width=120, anchor="w").pack(side="left")
+        entry = ctk.CTkEntry(id_row, textvariable=self.delete_id_var)
+        entry.pack(side="left", fill="x", expand=True, padx=(8, 0))
+        buttons = ctk.CTkFrame(panel)
+        buttons.pack(fill="x", padx=12, pady=(4, 8))
+        ctk.CTkButton(buttons, text="Supprimer cet ID", command=self._delete_by_id).pack(side="left")
+        ctk.CTkButton(buttons, text="Supprimer la sélection", command=self._delete_selected_rows).pack(
+            side="left", padx=(8, 0)
+        )
+        ctk.CTkLabel(
+            panel,
+            text="Choisissez des lignes dans la table ou saisissez un ID pour supprimer toutes ses références.",
+            anchor="w",
+        ).pack(fill="x", padx=12, pady=(0, 8))
+
+    def _delete_selected_rows(self):
+        indices = self.table_widget.get_selected_indices()
+        if not indices:
+            self.status_var.set("Sélectionnez au moins une ligne avant de supprimer.")
+            return
+        count = len(indices)
+        if not messagebox.askyesno("Confirmer la suppression", f"Supprimer {count} article(s) sélectionné(s) du stock ?"):
+            return
+        removed = self._delete_rows_by_indices(indices)
+        if removed:
+            self.status_var.set(f"{removed} article(s) supprimé(s) du stock.")
+        else:
+            self.status_var.set("Aucune ligne supprimée.")
+
+    def _delete_by_id(self):
+        target = self.delete_id_var.get().strip()
+        if not target:
+            self.status_var.set("Saisissez l'ID achat à supprimer.")
+            return
+        indices = [
+            idx
+            for idx, row in enumerate(self.table.rows)
+            if str(row.get(HEADERS["STOCK"].ID, "")).strip() == target
+        ]
+        if not indices:
+            self.status_var.set(f"Aucun article trouvé pour l'ID {target}.")
+            return
+        count = len(indices)
+        if not messagebox.askyesno(
+            "Confirmer la suppression",
+            f"Supprimer les {count} article(s) rattachés à l'ID {target} ?",
+        ):
+            return
+        removed = self._delete_rows_by_indices(indices)
+        if removed:
+            self.status_var.set(f"{removed} article(s) de l'ID {target} supprimé(s).")
+            self.delete_id_var.set("")
+        else:
+            self.status_var.set("Aucune ligne supprimée.")
 
 
 class WorkflowView(ctk.CTkFrame):

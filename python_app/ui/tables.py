@@ -54,6 +54,7 @@ class ScrollableTable(ttk.Frame):
             show="headings",
             height=height,
             style="Scrollable.Treeview",
+            selectmode="extended",
         )
         for header in self._headers:
             self.tree.heading(header, text=header)
@@ -75,6 +76,14 @@ class ScrollableTable(ttk.Frame):
             self.tree.delete(child)
         self._item_to_row_index.clear()
         self._insert_rows(rows)
+
+    def get_selected_indices(self) -> list[int]:
+        indices: list[int] = []
+        for item in self.tree.selection():
+            row_index = self._item_to_row_index.get(item)
+            if row_index is not None:
+                indices.append(row_index)
+        return indices
 
     # ------------------------------------------------------------------
     # Inline editing helpers
