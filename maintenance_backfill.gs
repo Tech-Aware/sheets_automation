@@ -395,7 +395,7 @@ function purgeStockFromVentes() {
   let ventesIgnorées = 0;
 
   function buildKey(idValue, skuValue) {
-    const id = idValue === null || idValue === undefined ? '' : String(idValue).trim();
+    const id = buildIdKey_(idValue);
     const sku = skuValue === null || skuValue === undefined ? '' : String(skuValue).trim().toLowerCase();
     if (!id || !sku) return '';
     return id + '|' + sku;
@@ -588,7 +588,8 @@ function runBackfillMonthlyLedgers_(filter) {
       }
     }
 
-    const idVal = colId ? row[colId - 1] : '';
+    const idRaw = colId ? row[colId - 1] : '';
+    const idVal = normalizeIntegerIdValue_(idRaw);
     const libelle = colLibelle ? row[colLibelle - 1] : '';
     const sku = colSku ? row[colSku - 1] : '';
 
@@ -705,7 +706,9 @@ function validateAllSales() {
     || colExact(HEADERS.STOCK.TAILLE)
     || colWhere(isShippingSizeHeader_);
   const tailleHeaderLabel = getHeaderLabel_(resolver, C_TAILLE, HEADERS.STOCK.TAILLE);
-  const C_LOT      = colExact(HEADERS.STOCK.LOT) || colWhere(h => h.includes('lot'));
+  const C_LOT      = colExact(HEADERS.STOCK.LOT)
+    || colExact(HEADERS.STOCK.LOT_ALT)
+    || colWhere(h => h.includes('lot'));
   const combinedVenduValidation = resolveCombinedVenduColumn_(resolver);
   const legacyVenduValidation = combinedVenduValidation ? { checkboxCol: 0, dateCol: 0 } : resolveLegacyVenduColumns_(resolver);
   let   C_VENDU    = combinedVenduValidation || legacyVenduValidation.checkboxCol;
@@ -856,7 +859,8 @@ function validateAllSales() {
       continue;
     }
 
-    const idValue = C_ID ? row[C_ID - 1] : '';
+    const idRaw = C_ID ? row[C_ID - 1] : '';
+    const idValue = normalizeIntegerIdValue_(idRaw);
     const label = row[C_LABEL - 1];
     const sku   = C_SKU ? row[C_SKU - 1] : "";
 
@@ -902,7 +906,7 @@ function validateAllSales() {
     const dVente   = daysDiff(dateVente, datePub);
 
     const newRow = Array(widthVentes).fill('');
-    if (COL_ID_VENTE) newRow[COL_ID_VENTE - 1] = idValue;
+    if (COL_ID_VENTE) newRow[COL_ID_VENTE - 1] = (idValue === '' ? '' : idValue);
     if (COL_DATE_VENTE) newRow[COL_DATE_VENTE - 1] = dateVente;
     if (COL_ARTICLE) newRow[COL_ARTICLE - 1] = label;
     if (COL_SKU_VENTE) newRow[COL_SKU_VENTE - 1] = sku;

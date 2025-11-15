@@ -60,7 +60,8 @@ function exportVente_(e, row, C_ID, C_LABEL, C_SKU, C_PRIX, C_DVENTE, C_STAMPV, 
   const dateV = dateCell.getValue();
   if (!(dateV instanceof Date) || isNaN(dateV)) return;
 
-  const idVal = C_ID ? sh.getRange(row, C_ID).getValue() : "";
+  const idRaw = C_ID ? sh.getRange(row, C_ID).getValue() : "";
+  const idVal = normalizeIntegerIdValue_(idRaw);
   const label = C_LABEL ? sh.getRange(row, C_LABEL).getDisplayValue() : "";
   const sku   = C_SKU  ? sh.getRange(row, C_SKU).getDisplayValue() : "";
   const prix  = C_PRIX ? sh.getRange(row, C_PRIX).getValue() : "";
@@ -131,7 +132,7 @@ function exportVente_(e, row, C_ID, C_LABEL, C_SKU, C_PRIX, C_DVENTE, C_STAMPV, 
 
   const start = Math.max(2, ventes.getLastRow() + 1);
   const newRow = Array(widthVentes).fill("");
-  if (COL_ID_VENTE) newRow[COL_ID_VENTE - 1] = idVal;
+  if (COL_ID_VENTE) newRow[COL_ID_VENTE - 1] = (idVal === '' ? '' : idVal);
   if (COL_DATE_VENTE) newRow[COL_DATE_VENTE - 1] = dateV;
   if (COL_ARTICLE) newRow[COL_ARTICLE - 1] = label;
   if (COL_SKU_VENTE) newRow[COL_SKU_VENTE - 1] = sku;
@@ -194,8 +195,9 @@ function getAchatsRecordByIdOrSku_(ss, idVal, sku) {
   const colPrix = resolver.colExact(HEADERS.ACHATS.PRIX_UNITAIRE_TTC);
   const colDate = resolver.colExact(HEADERS.ACHATS.DATE_LIVRAISON);
 
-  const keyId = idVal !== undefined && idVal !== null && String(idVal).trim() !== ''
-    ? normText_(idVal)
+  const normalizedIdVal = normalizeIntegerIdValue_(idVal);
+  const keyId = normalizedIdVal !== ''
+    ? normText_(normalizedIdVal)
     : '';
   const keyRef = sku ? normText_(sku) : '';
 
@@ -204,7 +206,8 @@ function getAchatsRecordByIdOrSku_(ss, idVal, sku) {
   const data = achats.getRange(2, 1, lastRow - 1, achats.getLastColumn()).getValues();
   for (let i = 0; i < data.length; i++) {
     const row = data[i];
-    const idMatch = keyId && colId ? normText_(row[colId - 1]) === keyId : false;
+    const rowId = colId ? buildIdKey_(row[colId - 1]) : '';
+    const idMatch = keyId && colId ? normText_(rowId) === keyId : false;
     const refMatch = keyRef && colRef ? normText_(row[colRef - 1]) === keyRef : false;
     if (!idMatch && !refMatch) continue;
 
@@ -240,7 +243,10 @@ function copySaleToMonthlySheet_(ss, sale) {
   const headersLen = MONTHLY_LEDGER_HEADERS.length;
   const rawSku = sale.sku !== undefined && sale.sku !== null ? String(sale.sku).trim() : '';
   const skuKey = rawSku ? `SKU:${normText_(rawSku)}` : '';
-  const rawId = sale.id !== undefined && sale.id !== null ? String(sale.id).trim() : '';
+  const normalizedSaleId = normalizeIntegerIdValue_(sale.id);
+  const rawId = normalizedSaleId === '' || normalizedSaleId === null || normalizedSaleId === undefined
+    ? ''
+    : String(normalizedSaleId).trim();
   const idKey = rawId ? `ID:${rawId}` : '';
   const dedupeKey = skuKey || idKey;
 
@@ -278,7 +284,7 @@ function copySaleToMonthlySheet_(ss, sale) {
 
   const saleRow = Array(headersLen).fill('');
   if (MONTHLY_LEDGER_INDEX.ID >= 0) {
-    saleRow[MONTHLY_LEDGER_INDEX.ID] = rawId || '';
+    saleRow[MONTHLY_LEDGER_INDEX.ID] = rawId ? normalizedSaleId : '';
   }
   if (MONTHLY_LEDGER_INDEX.SKU >= 0) {
     saleRow[MONTHLY_LEDGER_INDEX.SKU] = rawSku || '';

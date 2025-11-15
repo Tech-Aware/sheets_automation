@@ -26,7 +26,9 @@ function handleStock(e) {
     || colExact(HEADERS.STOCK.TAILLE)
     || colWhere(isShippingSizeHeader_);
   const tailleHeaderLabel = getHeaderLabel_(resolver, C_TAILLE, HEADERS.STOCK.TAILLE);
-  const C_LOT     = colExact(HEADERS.STOCK.LOT) || colWhere(h => h.includes('lot'));
+  const C_LOT     = colExact(HEADERS.STOCK.LOT)
+    || colExact(HEADERS.STOCK.LOT_ALT)
+    || colWhere(h => h.includes('lot'));
   const C_DMS     = colExact(HEADERS.STOCK.DATE_MISE_EN_STOCK);
 
   const combinedMisCol = resolveCombinedMisEnLigneColumn_(resolver);
