@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+from datetime import date
 import sys
 import tkinter as tk
 from pathlib import Path
@@ -120,66 +121,23 @@ class PurchasesView(ctk.CTkFrame):
         self.table = table
         self.workflow = workflow
         self.refresh_callback = refresh_callback
-        self.entries: dict[str, ctk.CTkEntry] = {}
-        self.log_var = tk.StringVar(value="Saisissez une commande pour commencer.")
-        self.sku_preview_var = tk.StringVar(value="Préfixe SKU : --")
-        self._build_form()
-        self._build_ready_section()
+        self.log_var = tk.StringVar(value="Consultez les commandes ou ajoutez-en une nouvelle.")
+        self.status_var = tk.StringVar(value="Double-cliquez sur une cellule pour la modifier.")
+        self.ready_checkbox_var = tk.BooleanVar(value=False)
+        self.ready_id_entry: ctk.CTkEntry | None = None
+        self.ready_date_entry: ctk.CTkEntry | None = None
+        self.table_widget: ScrollableTable | None = None
+        self.add_dialog: AddPurchaseDialog | None = None
         self._build_table()
-
-    def _build_form(self):
-        frame = ctk.CTkFrame(self)
-        frame.pack(fill="x", padx=16, pady=(16, 8))
-        ctk.CTkLabel(frame, text="Nouvelle commande", font=ctk.CTkFont(size=18, weight="bold"), anchor="w").pack(
-            fill="x", padx=12, pady=(12, 4)
-        )
-        fields = [
-            ("Article", "article", ""),
-            ("Marque", "marque", ""),
-            ("Genre", "genre", ""),
-            ("Date d'achat (AAAA-MM-JJ)", "date_achat", ""),
-            ("Grade", "grade", ""),
-            ("Fournisseur / Code", "fournisseur", ""),
-            ("Quantité commandée", "quantite_commandee", "1"),
-            ("Quantité reçue", "quantite_recue", "1"),
-            ("Prix d'achat TTC", "prix_achat", "0"),
-            ("Frais de lavage", "frais_lavage", "0"),
-            ("Date de livraison (AAAA-MM-JJ)", "date_livraison", ""),
-            ("Tracking", "tracking", ""),
-        ]
-        article_entry = None
-        marque_entry = None
-        for label, key, default in fields:
-            entry = self._field(frame, label, key, default=default)
-            if key == "article":
-                article_entry = entry
-            elif key == "marque":
-                marque_entry = entry
-        if article_entry is not None:
-            article_entry.bind("<KeyRelease>", self._update_sku_preview)
-        if marque_entry is not None:
-            marque_entry.bind("<KeyRelease>", self._update_sku_preview)
-        ctk.CTkLabel(frame, textvariable=self.sku_preview_var, anchor="w").pack(fill="x", padx=12, pady=(4, 0))
-        ctk.CTkButton(frame, text="Ajouter la commande", command=self._handle_add).pack(padx=12, pady=(8, 4))
-        ctk.CTkLabel(frame, textvariable=self.log_var, anchor="w").pack(fill="x", padx=12, pady=(0, 12))
-
-    def _build_ready_section(self):
-        frame = ctk.CTkFrame(self)
-        frame.pack(fill="x", padx=16, pady=(0, 8))
-        ctk.CTkLabel(frame, text="Valider la mise en stock", font=ctk.CTkFont(size=18, weight="bold"), anchor="w").pack(
-            fill="x", padx=12, pady=(12, 4)
-        )
-        self._field(frame, "ID achat", "ready_id")
-        self._field(frame, "Date de mise en stock (AAAA-MM-JJ)", "ready_date")
-        ctk.CTkButton(frame, text="Créer les SKU", command=self._handle_ready).pack(padx=12, pady=(8, 12))
+        self._build_ready_section()
 
     def _build_table(self):
         frame = ctk.CTkFrame(self)
-        frame.pack(fill="both", expand=True, padx=16, pady=(0, 16))
+        frame.pack(fill="both", expand=True, padx=16, pady=(16, 8))
         helper = ctk.CTkFrame(frame)
         helper.pack(fill="x", padx=12, pady=(12, 0))
-        self.status_var = tk.StringVar(value="Double-cliquez sur une cellule pour la modifier.")
-        ctk.CTkLabel(helper, textvariable=self.status_var, anchor="w").pack(fill="x")
+        ctk.CTkLabel(helper, textvariable=self.status_var, anchor="w").pack(side="left", fill="x", expand=True)
+        ctk.CTkButton(helper, text="Ajouter une commande", command=self._open_add_dialog).pack(side="right", padx=(8, 0))
         self.table_widget = ScrollableTable(
             frame,
             self.table.headers,
@@ -190,40 +148,73 @@ class PurchasesView(ctk.CTkFrame):
         )
         self.table_widget.pack(fill="both", expand=True, padx=12, pady=12)
 
-    def _field(self, parent, label: str, key: str, *, default: str = ""):
+    def _build_ready_section(self):
+        frame = ctk.CTkFrame(self)
+        frame.pack(fill="x", padx=16, pady=(0, 16))
+        ctk.CTkLabel(frame, text="Valider la mise en stock", font=ctk.CTkFont(size=18, weight="bold"), anchor="w").pack(
+            fill="x", padx=12, pady=(12, 4)
+        )
+        self.ready_id_entry = self._entry_row(frame, "ID achat")
+        self.ready_date_entry = self._entry_row(frame, "Date de mise en stock (AAAA-MM-JJ)")
+        checkbox_row = ctk.CTkFrame(frame)
+        checkbox_row.pack(fill="x", padx=12, pady=(0, 4))
+        ctk.CTkCheckBox(
+            checkbox_row,
+            text="Cocher pour valider aujourd'hui",
+            variable=self.ready_checkbox_var,
+            command=self._handle_ready_checkbox,
+        ).pack(anchor="w")
+        ctk.CTkButton(frame, text="Créer les SKU", command=self._handle_ready).pack(padx=12, pady=(8, 4))
+        ctk.CTkLabel(frame, textvariable=self.log_var, anchor="w").pack(fill="x", padx=12, pady=(0, 12))
+
+    def _entry_row(self, parent, label: str) -> ctk.CTkEntry:
         row = ctk.CTkFrame(parent)
         row.pack(fill="x", padx=12, pady=2)
         ctk.CTkLabel(row, text=label, width=220, anchor="w").pack(side="left")
         entry = ctk.CTkEntry(row)
-        if default:
-            entry.insert(0, default)
         entry.pack(side="left", fill="x", expand=True, padx=(8, 0))
-        self.entries[key] = entry
         return entry
 
-    def _handle_add(self):
-        article = self._get_entry_value("article")
-        marque = self._get_entry_value("marque")
+    def _open_add_dialog(self):
+        if self.add_dialog is not None and self.add_dialog.winfo_exists():
+            self.add_dialog.focus()
+            return
+        self.add_dialog = AddPurchaseDialog(
+            self,
+            self._handle_add_submission,
+            self.workflow.build_sku_base,
+            self._on_dialog_closed,
+        )
+
+    def _on_dialog_closed(self):
+        self.add_dialog = None
+
+    def _handle_add_submission(self, form_data: dict[str, str]) -> tuple[bool, str]:
+        article = form_data.get("article", "").strip()
+        marque = form_data.get("marque", "").strip()
         if not article or not marque:
-            self._log("Article et marque sont obligatoires")
-            return
-        genre = self._get_entry_value("genre")
-        date_achat = self._get_entry_value("date_achat")
-        grade = self._get_entry_value("grade")
-        fournisseur = self._get_entry_value("fournisseur")
-        date_livraison = self._get_entry_value("date_livraison")
-        tracking = self._get_entry_value("tracking")
+            message = "Article et marque sont obligatoires"
+            self._log(message)
+            return False, message
+        genre = form_data.get("genre", "").strip()
+        date_achat = form_data.get("date_achat", "").strip()
+        grade = form_data.get("grade", "").strip()
+        fournisseur = form_data.get("fournisseur", "").strip()
+        date_livraison = form_data.get("date_livraison", "").strip()
+        tracking = form_data.get("tracking", "").strip()
         try:
-            qty_cmd = self._parse_int_field("quantite_commandee", "Quantité commandée")
-            qty_recue = self._parse_int_field("quantite_recue", "Quantité reçue") or qty_cmd
-            prix_total = self._parse_float_field("prix_achat", "Prix d'achat TTC")
-            frais_lavage = self._parse_float_field("frais_lavage", "Frais de lavage")
+            qty_cmd = self._parse_int(form_data.get("quantite_commandee", ""), "Quantité commandée")
+            qty_recue = self._parse_int(form_data.get("quantite_recue", ""), "Quantité reçue") or qty_cmd
+            prix_total = self._parse_float(form_data.get("prix_achat", ""), "Prix d'achat TTC")
+            frais_lavage = self._parse_float(form_data.get("frais_lavage", ""), "Frais de lavage")
         except ValueError as exc:
-            self._log(str(exc))
-            return
+            message = str(exc)
+            self._log(message)
+            return False, message
         if qty_recue <= 0:
-            self._log("La quantité reçue doit être supérieure à 0")
-            return
+            message = "La quantité reçue doit être supérieure à 0"
+            self._log(message)
+            return False, message
         unit_price = prix_total / qty_recue if qty_recue else 0.0
         data = PurchaseInput(
             article=article,
@@ -242,26 +233,13 @@ class PurchasesView(ctk.CTkFrame):
             tracking=tracking,
         )
         row = self.workflow.create_purchase(data)
-        self._log(f"Commande {row.get(HEADERS['ACHATS'].ID)} ajoutée")
-        self._clear_form()
+        message = f"Commande {row.get(HEADERS['ACHATS'].ID)} ajoutée"
+        self._log(message)
         self.refresh_callback()
+        return True, message
 
-    def _handle_ready(self):
-        purchase_id = self._get_entry_value("ready_id")
-        if not purchase_id:
-            self._log("Veuillez saisir l'ID de la commande à mettre en stock")
-            return
-        ready_date = self._get_entry_value("ready_date") or None
-        try:
-            created = self.workflow.prepare_stock_from_purchase(purchase_id, ready_date)
-        except ValueError as exc:
-            self._log(str(exc))
-            return
-        self._log(f"{len(created)} SKU créés pour l'achat {purchase_id}")
-        self.refresh_callback()
-
-    def _parse_int_field(self, key: str, label: str) -> int:
-        value = self._get_entry_value(key)
+    @staticmethod
+    def _parse_int(value: str, label: str) -> int:
         if not value:
             return 0
         try:
@@ -269,8 +247,8 @@ class PurchasesView(ctk.CTkFrame):
         except ValueError as exc:
             raise ValueError(f"{label} doit être un nombre entier") from exc
 
-    def _parse_float_field(self, key: str, label: str) -> float:
-        value = self._get_entry_value(key)
+    @staticmethod
+    def _parse_float(value: str, label: str) -> float:
         if not value:
             return 0.0
         try:
@@ -278,30 +256,36 @@ class PurchasesView(ctk.CTkFrame):
         except ValueError as exc:
             raise ValueError(f"{label} doit être un nombre") from exc
 
-    def _get_entry_value(self, key: str) -> str:
-        entry = self.entries.get(key)
-        return entry.get().strip() if entry else ""
-
-    def _update_sku_preview(self, _event=None):
-        article = self._get_entry_value("article")
-        marque = self._get_entry_value("marque")
-        if not article and not marque:
-            self.sku_preview_var.set("Préfixe SKU : --")
+    def _handle_ready_checkbox(self):
+        if self.ready_date_entry is None:
             return
-        base = self.workflow.build_sku_base(article, marque)
-        self.sku_preview_var.set(f"Préfixe SKU : {base}")
+        if self.ready_checkbox_var.get():
+            self.ready_date_entry.delete(0, tk.END)
+            self.ready_date_entry.insert(0, date.today().isoformat())
+        else:
+            self.ready_date_entry.delete(0, tk.END)
 
-    def _clear_form(self):
-        for key in ("article", "marque", "genre", "date_achat", "grade", "fournisseur", "date_livraison", "tracking"):
-            entry = self.entries.get(key)
-            if entry:
-                entry.delete(0, tk.END)
-        for key, default in (("quantite_commandee", "1"), ("quantite_recue", "1"), ("prix_achat", "0"), ("frais_lavage", "0")):
-            entry = self.entries.get(key)
-            if entry:
-                entry.delete(0, tk.END)
-                entry.insert(0, default)
-        self._update_sku_preview()
+    def _handle_ready(self):
+        if self.ready_id_entry is None or self.ready_date_entry is None:
+            return
+        purchase_id = self.ready_id_entry.get().strip()
+        if not purchase_id:
+            self._log("Veuillez saisir l'ID de la commande à mettre en stock")
+            return
+        ready_date = self.ready_date_entry.get().strip()
+        if self.ready_checkbox_var.get() and not ready_date:
+            ready_date = date.today().isoformat()
+        ready_stamp = ready_date or None
+        try:
+            created = self.workflow.prepare_stock_from_purchase(purchase_id, ready_stamp)
+        except ValueError as exc:
+            self._log(str(exc))
+            return
+        self._log(f"{len(created)} SKU créés pour l'achat {purchase_id}")
+        self.ready_checkbox_var.set(False)
+        self.ready_id_entry.delete(0, tk.END)
+        self.ready_date_entry.delete(0, tk.END)
+        self.refresh_callback()
 
     def _on_cell_edit(self, row_index: int, column: str, new_value: str):
         try:
@@ -311,10 +295,128 @@ class PurchasesView(ctk.CTkFrame):
         self.status_var.set(f"Ligne {row_index + 1} – {column} mis à jour")
 
     def refresh(self):
-        self.table_widget.refresh(self.table.rows)
+        if self.table_widget is not None:
+            self.table_widget.refresh(self.table.rows)
 
     def _log(self, message: str):
         self.log_var.set(message)
+
+
+class AddPurchaseDialog(ctk.CTkToplevel):
+    def __init__(self, master, on_submit, sku_builder, on_close):
+        super().__init__(master)
+        self.on_submit = on_submit
+        self.on_close = on_close
+        self.sku_builder = sku_builder
+        self.entries: dict[str, ctk.CTkEntry] = {}
+        self.genre_var = tk.StringVar(value="Mixte")
+        self.sku_preview_var = tk.StringVar(value="Préfixe SKU : --")
+        self.log_var = tk.StringVar(value="")
+        self.title("Nouvelle commande")
+        self.geometry("520x700")
+        self.transient(master.winfo_toplevel())
+        self.grab_set()
+        self._build_form()
+        self.protocol("WM_DELETE_WINDOW", self._close)
+        self._update_sku_preview()
+
+    def _build_form(self):
+        frame = ctk.CTkFrame(self)
+        frame.pack(fill="both", expand=True, padx=16, pady=16)
+        ctk.CTkLabel(frame, text="Nouvelle commande", font=ctk.CTkFont(size=18, weight="bold"), anchor="w").pack(
+            fill="x", padx=12, pady=(8, 12)
+        )
+        fields = [
+            ("Article", "article", ""),
+            ("Marque", "marque", ""),
+            ("Date d'achat (AAAA-MM-JJ)", "date_achat", ""),
+            ("Grade", "grade", ""),
+            ("Fournisseur / Code", "fournisseur", ""),
+            ("Quantité commandée", "quantite_commandee", "1"),
+            ("Quantité reçue", "quantite_recue", "1"),
+            ("Prix d'achat TTC", "prix_achat", "0"),
+            ("Frais de lavage", "frais_lavage", "0"),
+            ("Date de livraison (AAAA-MM-JJ)", "date_livraison", ""),
+            ("Tracking", "tracking", ""),
+        ]
+        article_entry = None
+        marque_entry = None
+        for label, key, default in fields[:2]:
+            entry = self._field(frame, label, key, default)
+            if key == "article":
+                article_entry = entry
+            else:
+                marque_entry = entry
+        genre_row = ctk.CTkFrame(frame)
+        genre_row.pack(fill="x", padx=12, pady=2)
+        ctk.CTkLabel(genre_row, text="Genre", width=220, anchor="w").pack(side="left")
+        genre_menu = ctk.CTkOptionMenu(
+            genre_row,
+            values=["Homme", "Femme", "Mixte"],
+            variable=self.genre_var,
+            command=lambda _value: self._update_sku_preview(),
+        )
+        genre_menu.pack(side="left", fill="x", expand=True, padx=(8, 0))
+        for label, key, default in fields[2:]:
+            self._field(frame, label, key, default)
+        if article_entry is not None:
+            article_entry.bind("<KeyRelease>", lambda _event: self._update_sku_preview())
+        if marque_entry is not None:
+            marque_entry.bind("<KeyRelease>", lambda _event: self._update_sku_preview())
+        ctk.CTkLabel(frame, textvariable=self.sku_preview_var, anchor="w").pack(fill="x", padx=12, pady=(6, 0))
+        buttons = ctk.CTkFrame(frame)
+        buttons.pack(fill="x", padx=12, pady=(12, 4))
+        ctk.CTkButton(buttons, text="Annuler", command=self._close).pack(side="right", padx=(8, 0))
+        ctk.CTkButton(buttons, text="Ajouter la commande", command=self._submit).pack(side="right")
+        ctk.CTkLabel(frame, textvariable=self.log_var, anchor="w").pack(fill="x", padx=12, pady=(4, 0))
+
+    def _field(self, parent, label: str, key: str, default: str):
+        row = ctk.CTkFrame(parent)
+        row.pack(fill="x", padx=12, pady=2)
+        ctk.CTkLabel(row, text=label, width=220, anchor="w").pack(side="left")
+        entry = ctk.CTkEntry(row)
+        if default:
+            entry.insert(0, default)
+        entry.pack(side="left", fill="x", expand=True, padx=(8, 0))
+        self.entries[key] = entry
+        return entry
+
+    def _get_entry_value(self, key: str) -> str:
+        entry = self.entries.get(key)
+        return entry.get().strip() if entry else ""
+
+    def _collect_payload(self) -> dict[str, str]:
+        data = {key: self._get_entry_value(key) for key in self.entries}
+        data["genre"] = self.genre_var.get()
+        return data
+
+    def _submit(self):
+        self.log_var.set("")
+        payload = self._collect_payload()
+        success, message = self.on_submit(payload)
+        if success:
+            self._close()
+        else:
+            self.log_var.set(message)
+
+    def _update_sku_preview(self):
+        article = self._get_entry_value("article")
+        marque = self._get_entry_value("marque")
+        genre = self.genre_var.get()
+        if not article and not marque:
+            self.sku_preview_var.set("Préfixe SKU : --")
+            return
+        base = self.sku_builder(article, marque, genre)
+        self.sku_preview_var.set(f"Préfixe SKU : {base}")
+
+    def _close(self):
+        try:
+            self.grab_release()
+        except tk.TclError:
+            pass
+        if callable(self.on_close):
+            self.on_close()
+        self.destroy()
 
 
 class TableView(ctk.CTkFrame):
