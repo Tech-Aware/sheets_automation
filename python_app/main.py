@@ -22,6 +22,7 @@ try:  # pragma: no cover - defensive import path configuration
     from .services.workflow import PurchaseInput, SaleInput, StockInput, WorkflowCoordinator
     from .ui.tables import ScrollableTable
     from .ui.widgets import DatePickerEntry
+    from .utils.datefmt import format_display_date, parse_date_value
 except ImportError:  # pragma: no cover - executed when run as a script
     package_root = Path(__file__).resolve().parent.parent
     if str(package_root) not in sys.path:
@@ -33,6 +34,7 @@ except ImportError:  # pragma: no cover - executed when run as a script
     from python_app.services.workflow import PurchaseInput, SaleInput, StockInput, WorkflowCoordinator
     from python_app.ui.tables import ScrollableTable
     from python_app.ui.widgets import DatePickerEntry
+    from python_app.utils.datefmt import format_display_date, parse_date_value
 
 
 def _has_ready_date(value) -> bool:
@@ -219,7 +221,7 @@ class PurchasesView(ctk.CTkFrame):
             fill="x", padx=12, pady=(12, 4)
         )
         self.ready_id_entry = self._entry_row(frame, "ID achat")
-        self.ready_date_entry = self._entry_row(frame, "Date de mise en stock (AAAA-MM-JJ)", date_picker=True)
+        self.ready_date_entry = self._entry_row(frame, "Date de mise en stock (JJ/MM/AAAA)", date_picker=True)
         checkbox_row = ctk.CTkFrame(frame)
         checkbox_row.pack(fill="x", padx=12, pady=(0, 4))
         ctk.CTkCheckBox(
@@ -366,7 +368,7 @@ class PurchasesView(ctk.CTkFrame):
             return
         if self.ready_checkbox_var.get():
             self.ready_date_entry.delete(0, tk.END)
-            self.ready_date_entry.insert(0, date.today().isoformat())
+            self.ready_date_entry.insert(0, format_display_date(date.today()))
         else:
             self.ready_date_entry.delete(0, tk.END)
 
@@ -377,10 +379,11 @@ class PurchasesView(ctk.CTkFrame):
         if not purchase_id:
             self._log("Veuillez saisir l'ID de la commande à mettre en stock")
             return
-        ready_date = self.ready_date_entry.get().strip()
-        if self.ready_checkbox_var.get() and not ready_date:
-            ready_date = date.today().isoformat()
-        ready_stamp = ready_date or None
+        ready_date_raw = self.ready_date_entry.get().strip()
+        if self.ready_checkbox_var.get() and not ready_date_raw:
+            ready_date_raw = format_display_date(date.today())
+        ready_value = parse_date_value(ready_date_raw)
+        ready_stamp = format_display_date(ready_value) if ready_value else (ready_date_raw or None)
         try:
             created = self.workflow.prepare_stock_from_purchase(purchase_id, ready_stamp)
         except ValueError as exc:
@@ -428,14 +431,14 @@ class AddPurchaseDialog(ctk.CTkToplevel):
         fields = [
             ("Article", "article", "", False),
             ("Marque", "marque", "", False),
-            ("Date d'achat (AAAA-MM-JJ)", "date_achat", "", True),
+            ("Date d'achat (JJ/MM/AAAA)", "date_achat", "", True),
             ("Grade", "grade", "", False),
             ("Fournisseur / Code", "fournisseur", "", False),
             ("Quantité commandée", "quantite_commandee", "1", False),
             ("Quantité reçue", "quantite_recue", "1", False),
             ("Prix d'achat TTC", "prix_achat", "0", False),
             ("Frais de lavage", "frais_lavage", "0", False),
-            ("Date de livraison (AAAA-MM-JJ)", "date_livraison", "", True),
+            ("Date de livraison (JJ/MM/AAAA)", "date_livraison", "", True),
             ("Tracking", "tracking", "", False),
         ]
         article_entry = None
@@ -658,7 +661,7 @@ class WorkflowView(ctk.CTkFrame):
         self.sale_sku = self._field(frame, "SKU")
         self.sale_prix = self._field(frame, "Prix de vente", default="0")
         self.sale_frais = self._field(frame, "Frais colissage", default="0")
-        self.sale_date = self._field(frame, "Date de vente (AAAA-MM-JJ)", date_picker=True)
+        self.sale_date = self._field(frame, "Date de vente (JJ/MM/AAAA)", date_picker=True)
         self.sale_lot = self._field(frame, "Lot")
         self.sale_taille = self._field(frame, "Taille")
         ctk.CTkButton(frame, text="Enregistrer la vente", command=self._handle_sale).pack(pady=(8, 4))
