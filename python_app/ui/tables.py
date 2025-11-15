@@ -18,9 +18,13 @@ class ScrollableTable(ttk.Frame):
         height: int = 15,
         column_width: int = 140,
         on_cell_edited: Callable[[int, str, str], None] | None = None,
+        on_row_activated: Callable[[int], None] | None = None,
+        enable_inline_edit: bool = True,
     ):
         super().__init__(master)
         self.on_cell_edited = on_cell_edited
+        self.on_row_activated = on_row_activated
+        self.enable_inline_edit = enable_inline_edit
         self._editor: tk.Entry | None = None
         self._editing_item: str | None = None
         self._editing_column: str | None = None
@@ -64,7 +68,7 @@ class ScrollableTable(ttk.Frame):
         self.grid_rowconfigure(0, weight=1)
         self.grid_columnconfigure(0, weight=1)
         self._insert_rows(rows)
-        self.tree.bind("<Double-1>", self._begin_edit)
+        self.tree.bind("<Double-1>", self._handle_double_click)
 
     def refresh(self, rows: Iterable[dict]):
         for child in self.tree.get_children():
@@ -85,6 +89,20 @@ class ScrollableTable(ttk.Frame):
                 tags=("even" if idx % 2 == 0 else "odd",),
             )
             self._item_to_row_index[item] = idx
+
+    def _handle_double_click(self, event):
+        if self.enable_inline_edit:
+            self._begin_edit(event)
+            return
+        if self.on_row_activated is None:
+            return
+        item = self.tree.identify_row(event.y)
+        if not item:
+            return
+        row_index = self._item_to_row_index.get(item)
+        if row_index is None:
+            return
+        self.on_row_activated(row_index)
 
     def _begin_edit(self, event):
         if self._editor is not None:
