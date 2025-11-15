@@ -18,7 +18,6 @@ function handleStock(e) {
     || colWhere(h => h.includes('libell'))
     || colWhere(h => h.includes('article'))
     || 2;
-  const C_OLD_SKU = colExact(HEADERS.STOCK.OLD_SKU) || 2;
   const C_SKU     = colExact(HEADERS.STOCK.SKU) || colExact(HEADERS.STOCK.REFERENCE); // B/C
   const C_PRIX    = colExact(HEADERS.STOCK.PRIX_VENTE)
     || colWhere(h => h.includes("prix") && h.includes("vente"));
@@ -230,12 +229,6 @@ function handleStock(e) {
     }
     ss.toast(result.message || 'Ordre chronologique des dates invalide.', 'Stock', 6);
     return false;
-  }
-
-  // 0) Modification de SKU(ancienne nomenclature) → renumérotation (globale)
-  if (c === C_OLD_SKU) {
-    renumberStockByBrand_();
-    return;
   }
 
   // 0bis) Modification du PRIX DE VENTE
