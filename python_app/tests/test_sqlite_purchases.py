@@ -1,3 +1,4 @@
+import sqlite3
 import sys
 from pathlib import Path
 
@@ -80,3 +81,26 @@ def test_purchase_database_round_trip_preserves_achats_rows(tmp_path):
     assert len(loaded.rows) == 2
     assert loaded.rows[0][HEADERS["ACHATS"].ID] == 10
     assert loaded.rows[1][HEADERS["ACHATS"].ARTICLE] == "Veste"
+
+
+def test_ensure_schema_backfills_missing_stock_columns(tmp_path):
+    db_path = tmp_path / "achats.db"
+    db = PurchaseDatabase(db_path)
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """
+            CREATE TABLE stock (
+                row_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                id TEXT,
+                sku TEXT
+            )
+            """
+        )
+
+    db.ensure_schema()
+
+    with sqlite3.connect(db_path) as conn:
+        cursor = conn.execute("PRAGMA table_info(stock)")
+        column_names = {row[1] for row in cursor.fetchall()}
+
+    assert "marque" in column_names
