@@ -16,7 +16,7 @@ import customtkinter as ctk
 # ``python -m python_app.main`` and direct execution, fall back to absolute
 # imports after adding the repository root to ``sys.path``.
 try:  # pragma: no cover - defensive import path configuration
-    from .config import HEADERS, MONTH_NAMES_FR
+    from .config import DEFAULT_STOCK_HEADERS, HEADERS, MONTH_NAMES_FR
     from .datasources.workbook import TableData, WorkbookRepository
     from .datasources.sqlite_purchases import (
         PurchaseDatabase,
@@ -33,7 +33,7 @@ except ImportError:  # pragma: no cover - executed when run as a script
     package_root = Path(__file__).resolve().parent.parent
     if str(package_root) not in sys.path:
         sys.path.append(str(package_root))
-    from python_app.config import HEADERS, MONTH_NAMES_FR
+    from python_app.config import DEFAULT_STOCK_HEADERS, HEADERS, MONTH_NAMES_FR
     from python_app.datasources.workbook import TableData, WorkbookRepository
     from python_app.datasources.sqlite_purchases import (
         PurchaseDatabase,
@@ -703,7 +703,7 @@ class TableView(ctk.CTkFrame):
         ctk.CTkLabel(helper, textvariable=self.status_var, anchor="w").pack(side="left")
         self.table_widget = ScrollableTable(
             table_frame,
-            table.headers[:10],
+            self._visible_headers(),
             table.rows,
             height=20,
             on_cell_edited=self._on_cell_edit,
@@ -722,6 +722,9 @@ class TableView(ctk.CTkFrame):
 
     def refresh(self):
         self.table_widget.refresh(self.table.rows)
+
+    def _visible_headers(self) -> Sequence[str]:
+        return list(self.table.headers[:10])
 
     def _build_extra_controls(self, parent):
         """Hook for subclasses to add contextual actions."""
@@ -749,9 +752,24 @@ class TableView(ctk.CTkFrame):
 
 
 class StockTableView(TableView):
+    DISPLAY_HEADERS: Sequence[str] = DEFAULT_STOCK_HEADERS
+
+    _DISPLAY_FALLBACKS = {
+        HEADERS["STOCK"].LOT_ALT: HEADERS["STOCK"].LOT,
+        HEADERS["STOCK"].VALIDER_SAISIE_ALT: HEADERS["STOCK"].VALIDER_SAISIE,
+    }
+
     def __init__(self, master, table, on_table_changed=None):
         self.delete_id_var = tk.StringVar(value="")
         super().__init__(master, table, on_table_changed=on_table_changed)
+
+    def _visible_headers(self) -> Sequence[str]:
+        self._ensure_display_aliases()
+        return self.DISPLAY_HEADERS
+
+    def refresh(self):
+        self._ensure_display_aliases()
+        super().refresh()
 
     def _build_extra_controls(self, parent):
         parent.grid_columnconfigure(0, weight=5)
@@ -831,6 +849,16 @@ class StockTableView(TableView):
         else:
             self.status_var.set("Aucune ligne supprimée.")
 
+    def _on_cell_edit(self, row_index: int, column: str, new_value: str):
+        target_column = self._DISPLAY_FALLBACKS.get(column, column)
+        try:
+            self.table.rows[row_index][target_column] = new_value
+            if target_column != column:
+                self.table.rows[row_index][column] = new_value
+        except (IndexError, KeyError):
+            pass
+        self.status_var.set(f"Ligne {row_index + 1} – {column} mis à jour")
+
     def _handle_import_xlsx(self):
         path = filedialog.askopenfilename(
             title="Importer le stock",
@@ -867,6 +895,15 @@ class StockTableView(TableView):
             if name.lower() == "stock":
                 return name
         return sheet_names[0]
+
+    def _ensure_display_aliases(self):
+        for row in self.table.rows:
+            for header in self.DISPLAY_HEADERS:
+                row.setdefault(header, "")
+            for alias, source in self._DISPLAY_FALLBACKS.items():
+                if alias in row and row[alias] not in (None, ""):
+                    continue
+                row[alias] = row.get(source, "")
 
 
 class WorkflowView(ctk.CTkFrame):
