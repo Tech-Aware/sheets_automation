@@ -179,4 +179,16 @@ class PurchaseDatabase:
         return PurchaseRecord.from_mapping(record)
 
 
-__all__ = ["PurchaseDatabase", "PurchaseRecord", "ACHATS_TABLE_HEADERS"]
+def table_to_purchase_records(table: TableData) -> list[PurchaseRecord]:
+    """Convert a :class:`TableData` Achats table to structured records."""
+
+    records: list[PurchaseRecord] = []
+    for row in table.rows:
+        payload: dict[str, object] = {}
+        for column, header in _COLUMN_TO_HEADER:
+            payload[column] = row.get(header)
+        records.append(PurchaseRecord.from_mapping(payload))
+    return records
+
+
+__all__ = ["PurchaseDatabase", "PurchaseRecord", "ACHATS_TABLE_HEADERS", "table_to_purchase_records"]

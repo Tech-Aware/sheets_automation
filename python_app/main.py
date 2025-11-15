@@ -18,7 +18,7 @@ import customtkinter as ctk
 try:  # pragma: no cover - defensive import path configuration
     from .config import HEADERS, MONTH_NAMES_FR
     from .datasources.workbook import TableData, WorkbookRepository
-    from .datasources.sqlite_purchases import PurchaseDatabase
+    from .datasources.sqlite_purchases import PurchaseDatabase, table_to_purchase_records
     from .services.summaries import build_inventory_snapshot
     from .services.workflow import PurchaseInput, SaleInput, StockInput, WorkflowCoordinator
     from .ui.tables import ScrollableTable
@@ -30,7 +30,7 @@ except ImportError:  # pragma: no cover - executed when run as a script
         sys.path.append(str(package_root))
     from python_app.config import HEADERS, MONTH_NAMES_FR
     from python_app.datasources.workbook import TableData, WorkbookRepository
-    from python_app.datasources.sqlite_purchases import PurchaseDatabase
+    from python_app.datasources.sqlite_purchases import PurchaseDatabase, table_to_purchase_records
     from python_app.services.summaries import build_inventory_snapshot
     from python_app.services.workflow import PurchaseInput, SaleInput, StockInput, WorkflowCoordinator
     from python_app.ui.tables import ScrollableTable
@@ -81,12 +81,19 @@ def _ensure_purchase_ready_dates(table: TableData | None) -> None:
 class VintageErpApp(ctk.CTk):
     """Simple multipage CustomTkinter application."""
 
-    def __init__(self, repository: WorkbookRepository, achats_table: TableData | None = None):
+    def __init__(
+        self,
+        repository: WorkbookRepository,
+        achats_table: TableData | None = None,
+        *,
+        achats_db_path: Path | None = None,
+    ):
         super().__init__()
         self.title("Vintage ERP (Prerelease 1.2)")
         self.geometry("1200x800")
         self.minsize(1024, 720)
         self.repository = repository
+        self.achats_db_path = Path(achats_db_path) if achats_db_path is not None else None
         self.tables = self.repository.load_many("Achats", "Stock", "Ventes", "Compta 09-2025")
         if achats_table is not None:
             _ensure_purchase_ready_dates(achats_table)
@@ -104,6 +111,7 @@ class VintageErpApp(ctk.CTk):
         self.table_views: dict[str, TableView] = {}
         self.purchase_view: PurchasesView | None = None
         self._build_tabs()
+        self.protocol("WM_DELETE_WINDOW", self._handle_close)
 
     def _build_tabs(self):
         summary = build_inventory_snapshot(self.tables["Stock"].rows, self.tables["Ventes"].rows)
@@ -140,6 +148,20 @@ class VintageErpApp(ctk.CTk):
             self.purchase_view.refresh()
         for view in self.table_views.values():
             view.refresh()
+
+    def _handle_close(self):
+        try:
+            self._persist_achats_table()
+        except Exception as exc:  # pragma: no cover - UI safeguard
+            messagebox.showerror("Sauvegarde Achats", f"Échec de l'enregistrement des Achats : {exc}")
+            return
+        self.destroy()
+
+    def _persist_achats_table(self):
+        if self.achats_db_path is None:
+            return
+        records = table_to_purchase_records(self.tables["Achats"])
+        PurchaseDatabase(self.achats_db_path).replace_all(records)
 
 
 class DashboardView(ctk.CTkFrame):
@@ -891,6 +913,7 @@ class CalendarView(ctk.CTkFrame):
 
 
 DEFAULT_WORKBOOK = Path(__file__).resolve().parent.parent / "Prerelease 1.2.xlsx"
+DEFAULT_ACHATS_DB = Path(__file__).resolve().parent / "data" / "achats.db"
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -906,7 +929,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--achats-db",
         type=Path,
         default=None,
-        help="Optional SQLite database containing the Achats data (overrides the workbook sheet if provided).",
+        help=(
+            "Chemin vers la base SQLite utilisée pour l'onglet Achats. "
+            "Par défaut, python_app/data/achats.db est utilisé et créé si nécessaire."
+        ),
     )
     return parser.parse_args(argv)
 
@@ -919,15 +945,21 @@ def main(argv: list[str] | None = None) -> int:
     except FileNotFoundError:
         messagebox.showerror("Workbook introuvable", f"Impossible d'ouvrir {workbook_path!s}")
         return 1
+    custom_db_requested = args.achats_db is not None
+    achats_db_path = Path(args.achats_db) if custom_db_requested else DEFAULT_ACHATS_DB
     achats_table = None
-    if args.achats_db is not None:
-        db_path = Path(args.achats_db)
+    if achats_db_path.exists():
         try:
-            achats_table = PurchaseDatabase(db_path).load_table()
+            achats_table = PurchaseDatabase(achats_db_path).load_table()
+            if not achats_table.rows:
+                achats_table = None
         except FileNotFoundError:
-            messagebox.showerror("Base Achats introuvable", f"Impossible d'ouvrir {db_path!s}")
+            messagebox.showerror("Base Achats introuvable", f"Impossible d'ouvrir {achats_db_path!s}")
             return 1
-    app = VintageErpApp(repo, achats_table=achats_table)
+    elif custom_db_requested:
+        messagebox.showerror("Base Achats introuvable", f"Impossible d'ouvrir {achats_db_path!s}")
+        return 1
+    app = VintageErpApp(repo, achats_table=achats_table, achats_db_path=achats_db_path)
     app.mainloop()
     return 0
 
