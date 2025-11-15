@@ -267,6 +267,9 @@ class PurchasesView(ctk.CTkFrame):
         helper = ctk.CTkFrame(frame)
         helper.pack(fill="x", padx=12, pady=(12, 0))
         ctk.CTkButton(helper, text="Ajouter une commande", command=self._open_add_dialog).pack(side="left")
+        ctk.CTkButton(helper, text="Supprimer la sélection", command=self._delete_selected_rows).pack(
+            side="left", padx=(8, 0)
+        )
         ctk.CTkLabel(helper, textvariable=self.status_var, anchor="w").pack(side="right", fill="x", expand=True, padx=(12, 0))
         self.table_widget = ScrollableTable(
             frame,
@@ -470,6 +473,31 @@ class PurchasesView(ctk.CTkFrame):
 
     def _log(self, message: str):
         self.log_var.set(message)
+
+    def _delete_selected_rows(self):
+        if self.table_widget is None:
+            return
+        indices = self.table_widget.get_selected_indices()
+        if not indices:
+            self.status_var.set("Sélectionnez au moins une commande à supprimer.")
+            return
+        count = len(indices)
+        if not messagebox.askyesno(
+            "Confirmer la suppression",
+            f"Supprimer définitivement {count} commande(s) ?",
+        ):
+            return
+        removed, stock_removed = self.workflow.delete_purchases(indices)
+        if removed:
+            self.table_widget.refresh(self._build_summary_rows())
+            self.refresh_callback()
+            status = f"{removed} commande(s) supprimée(s)."
+            if stock_removed:
+                status += f" {stock_removed} article(s) lié(s) retiré(s) du stock."
+            self.status_var.set(status)
+            self._log(status)
+        else:
+            self.status_var.set("Aucune commande supprimée.")
 
 
 class AddPurchaseDialog(ctk.CTkToplevel):

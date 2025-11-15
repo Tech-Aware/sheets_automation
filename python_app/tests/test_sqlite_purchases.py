@@ -62,3 +62,21 @@ def test_purchase_database_persists_stock_rows(tmp_path):
     loaded_stock = db.load_stock_table()
     assert loaded_stock.rows[0][HEADERS["STOCK"].SKU] == "SKU-1"
     assert loaded_stock.rows[0][HEADERS["STOCK"].PRIX_VENTE] == 42.0
+
+
+def test_purchase_database_round_trip_preserves_achats_rows(tmp_path):
+    db_path = tmp_path / "achats.db"
+    db = PurchaseDatabase(db_path)
+    achats_headers = [HEADERS["ACHATS"].ID, HEADERS["ACHATS"].ARTICLE]
+    achats_rows = [
+        {HEADERS["ACHATS"].ID: "10", HEADERS["ACHATS"].ARTICLE: "Pantalon"},
+        {HEADERS["ACHATS"].ID: "11", HEADERS["ACHATS"].ARTICLE: "Veste"},
+    ]
+    achats_table = TableData(headers=achats_headers, rows=achats_rows)
+
+    db.replace_all(table_to_purchase_records(achats_table), [])
+
+    loaded = db.load_table()
+    assert len(loaded.rows) == 2
+    assert loaded.rows[0][HEADERS["ACHATS"].ID] == 10
+    assert loaded.rows[1][HEADERS["ACHATS"].ARTICLE] == "Veste"

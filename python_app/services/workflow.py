@@ -7,7 +7,7 @@ import math
 import re
 import unicodedata
 from sys import version_info
-from typing import Optional
+from typing import Optional, Sequence
 
 from ..config import HEADERS, MONTH_NAMES_FR
 from ..datasources.workbook import TableData
@@ -122,6 +122,24 @@ class WorkflowCoordinator:
         self._set_purchase_value(row, HEADERS["ACHATS"].DATE_MISE_EN_STOCK, "")
         self.achats.rows.append(row)
         return row
+
+    def delete_purchases(self, row_indices: Sequence[int]) -> tuple[int, int]:
+        """Remove Achats rows by index and drop matching stock entries."""
+
+        if not row_indices:
+            return 0, 0
+        removed_purchase_ids: list[str] = []
+        removed = 0
+        for idx in sorted(set(row_indices), reverse=True):
+            if idx < 0 or idx >= len(self.achats.rows):
+                continue
+            row = self.achats.rows.pop(idx)
+            removed += 1
+            purchase_id = self._get_purchase_value(row, HEADERS["ACHATS"].ID)
+            if purchase_id not in (None, ""):
+                removed_purchase_ids.append(str(purchase_id).strip())
+        stock_removed = self._remove_stock_rows(removed_purchase_ids)
+        return removed, stock_removed
 
     def transfer_to_stock(self, data: StockInput) -> dict:
         purchase = self._find_row(self.achats.rows, HEADERS["ACHATS"].ID, data.purchase_id)
@@ -370,6 +388,22 @@ class WorkflowCoordinator:
             if len(letters) >= limit:
                 break
         return "".join(letters)
+
+    def _remove_stock_rows(self, purchase_ids: Sequence[str]) -> int:
+        if not purchase_ids:
+            return 0
+        normalized = {pid.strip() for pid in purchase_ids if pid and pid.strip()}
+        if not normalized:
+            return 0
+        removed = 0
+        for idx in range(len(self.stock.rows) - 1, -1, -1):
+            value = self._get_stock_value(self.stock.rows[idx], HEADERS["STOCK"].ID)
+            if value is None:
+                continue
+            if str(value).strip() in normalized:
+                del self.stock.rows[idx]
+                removed += 1
+        return removed
 
     @staticmethod
     def _clean_letters(value: str) -> str:
