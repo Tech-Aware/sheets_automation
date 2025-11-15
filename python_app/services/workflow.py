@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass as _dataclass
 from datetime import date
+import math
 import re
 import unicodedata
 from sys import version_info
@@ -249,12 +250,34 @@ class WorkflowCoordinator:
     def _next_numeric_id(rows: list[dict], column: str) -> int:
         max_value = 0
         for row in rows:
-            try:
-                value = int(row.get(column) or 0)
-            except (TypeError, ValueError):
+            value = WorkflowCoordinator._coerce_numeric_id(row.get(column))
+            if value is None:
                 continue
             max_value = max(max_value, value)
         return max_value + 1
+
+    @staticmethod
+    def _coerce_numeric_id(value) -> int | None:
+        if value in (None, ""):
+            return None
+        if isinstance(value, bool):
+            return None
+        if isinstance(value, int):
+            return value
+        if isinstance(value, float):
+            if not math.isfinite(value):
+                return None
+            return int(value)
+        text = str(value).strip()
+        if not text:
+            return None
+        try:
+            return int(text)
+        except (TypeError, ValueError):
+            try:
+                return int(float(text))
+            except (TypeError, ValueError):
+                return None
 
     @staticmethod
     def _find_row(rows: list[dict], column: str, value) -> dict | None:
