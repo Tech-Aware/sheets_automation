@@ -26,7 +26,7 @@ SEED_PURCHASES = [
         "prix_unitaire_ttc": 47.56,
         "tracking": "",
         "pret_pour_stock_date": "30/08/2025",
-        "date_mise_en_stock": None,
+        "date_mise_en_stock": "30/08/2025",
     },
     {
         "id": 2,
@@ -52,7 +52,7 @@ SEED_PURCHASES = [
         "prix_unitaire_ttc": 5.55,
         "tracking": "",
         "pret_pour_stock_date": "30/08/2025",
-        "date_mise_en_stock": None,
+        "date_mise_en_stock": "30/08/2025",
     },
     {
         "id": 3,
@@ -78,7 +78,7 @@ SEED_PURCHASES = [
         "prix_unitaire_ttc": 0.0,
         "tracking": "",
         "pret_pour_stock_date": "01/09/2020",
-        "date_mise_en_stock": None,
+        "date_mise_en_stock": "01/09/2020",
     },
     {
         "id": 4,
@@ -104,7 +104,7 @@ SEED_PURCHASES = [
         "prix_unitaire_ttc": 7.07,
         "tracking": "",
         "pret_pour_stock_date": "05/09/2025",
-        "date_mise_en_stock": None,
+        "date_mise_en_stock": "05/09/2025",
     },
     {
         "id": 5,
@@ -130,7 +130,7 @@ SEED_PURCHASES = [
         "prix_unitaire_ttc": 1.42,
         "tracking": "",
         "pret_pour_stock_date": "07/09/2025",
-        "date_mise_en_stock": None,
+        "date_mise_en_stock": "07/09/2025",
     },
     {
         "id": 6,
@@ -156,7 +156,7 @@ SEED_PURCHASES = [
         "prix_unitaire_ttc": 1.42,
         "tracking": "",
         "pret_pour_stock_date": "07/09/2025",
-        "date_mise_en_stock": None,
+        "date_mise_en_stock": "07/09/2025",
     },
     {
         "id": 7,
@@ -182,7 +182,7 @@ SEED_PURCHASES = [
         "prix_unitaire_ttc": 4.75,
         "tracking": "",
         "pret_pour_stock_date": "23/09/2025",
-        "date_mise_en_stock": None,
+        "date_mise_en_stock": "23/09/2025",
     },
     {
         "id": 8,
@@ -208,7 +208,7 @@ SEED_PURCHASES = [
         "prix_unitaire_ttc": 9.97,
         "tracking": "3652902223 DHL",
         "pret_pour_stock_date": "23/10/2025",
-        "date_mise_en_stock": None,
+        "date_mise_en_stock": "23/10/2025",
     },
     {
         "id": 9,
@@ -234,7 +234,7 @@ SEED_PURCHASES = [
         "prix_unitaire_ttc": 7.27,
         "tracking": "3652902223 DHL",
         "pret_pour_stock_date": "23/10/2025",
-        "date_mise_en_stock": None,
+        "date_mise_en_stock": "23/10/2025",
     },
     {
         "id": 10,
@@ -260,7 +260,7 @@ SEED_PURCHASES = [
         "prix_unitaire_ttc": 7.09,
         "tracking": "",
         "pret_pour_stock_date": "08/10/2025",
-        "date_mise_en_stock": None,
+        "date_mise_en_stock": "08/10/2025",
     },
     {
         "id": 11,
@@ -286,7 +286,7 @@ SEED_PURCHASES = [
         "prix_unitaire_ttc": 11.37,
         "tracking": "",
         "pret_pour_stock_date": "08/10/2025",
-        "date_mise_en_stock": None,
+        "date_mise_en_stock": "08/10/2025",
     },
     {
         "id": 12,
@@ -312,7 +312,7 @@ SEED_PURCHASES = [
         "prix_unitaire_ttc": 7.08,
         "tracking": "",
         "pret_pour_stock_date": "08/10/2025",
-        "date_mise_en_stock": None,
+        "date_mise_en_stock": "08/10/2025",
     },
     {
         "id": None,
@@ -364,7 +364,7 @@ SEED_PURCHASES = [
         "prix_unitaire_ttc": 4.04,
         "tracking": "",
         "pret_pour_stock_date": "15/10/2025",
-        "date_mise_en_stock": None,
+        "date_mise_en_stock": "15/10/2025",
     },
     {
         "id": 15,
@@ -390,7 +390,7 @@ SEED_PURCHASES = [
         "prix_unitaire_ttc": 7.1,
         "tracking": "",
         "pret_pour_stock_date": "18/10/2025",
-        "date_mise_en_stock": None,
+        "date_mise_en_stock": "18/10/2025",
     },
     {
         "id": 16,
@@ -416,7 +416,7 @@ SEED_PURCHASES = [
         "prix_unitaire_ttc": 7.15,
         "tracking": "",
         "pret_pour_stock_date": "30/10/2025",
-        "date_mise_en_stock": None,
+        "date_mise_en_stock": "30/10/2025",
     },
     {
         "id": None,
