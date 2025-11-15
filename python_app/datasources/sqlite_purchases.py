@@ -10,7 +10,10 @@ from ..config import HEADERS
 from .workbook import TableData
 
 
-@dataclass(slots=True)
+# ``slots=True`` is only supported on Python 3.10+.  The UI is often executed
+# with Python 3.9 (e.g., on Windows 32-bit installations), so we stick to the
+# broadest compatible dataclass definition.
+@dataclass
 class PurchaseRecord:
     """Structured representation of a purchase row."""
 
