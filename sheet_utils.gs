@@ -14,6 +14,50 @@ function normText_(s) {
     .trim();
 }
 
+function normalizeIntegerIdValue_(value) {
+  if (value === null || value === undefined || value === '') {
+    return '';
+  }
+
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value)) {
+      return '';
+    }
+    return Math.trunc(value);
+  }
+
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (!trimmed) {
+      return '';
+    }
+    const normalized = trimmed.replace(/\s+/g, '');
+    const parsed = Number(normalized.replace(',', '.'));
+    if (Number.isFinite(parsed)) {
+      return Math.trunc(parsed);
+    }
+    return trimmed;
+  }
+
+  const asString = String(value).trim();
+  if (!asString) {
+    return '';
+  }
+  const parsed = Number(asString.replace(',', '.'));
+  if (Number.isFinite(parsed)) {
+    return Math.trunc(parsed);
+  }
+  return asString;
+}
+
+function buildIdKey_(value) {
+  const normalized = normalizeIntegerIdValue_(value);
+  if (normalized === '' || normalized === null || normalized === undefined) {
+    return '';
+  }
+  return String(normalized).trim();
+}
+
 function makeHeaderResolver_(headers) {
   const row = Array.isArray(headers[0]) && headers.length === 1 ? headers[0] : headers;
   const normalized = row.map(normText_);
@@ -385,6 +429,11 @@ function applyShippingFeeToAchats_(ss, achatId, fee) {
     return;
   }
 
+  const targetIdKey = buildIdKey_(achatId);
+  if (!targetIdKey) {
+    return;
+  }
+
   const achats = ss.getSheetByName('Achats');
   if (!achats) {
     return;
@@ -412,7 +461,8 @@ function applyShippingFeeToAchats_(ss, achatId, fee) {
 
   for (let i = 0; i < ids.length; i++) {
     const idValue = ids[i][0];
-    if (String(idValue) !== String(achatId)) {
+    const idKey = buildIdKey_(idValue);
+    if (!idKey || idKey !== targetIdKey) {
       continue;
     }
 
@@ -711,14 +761,13 @@ function buildIdToSkuBaseMap_(ss) {
 
   const map = Object.create(null);
   for (let i = 0; i < ids.length; i++) {
-    const idRaw = ids[i][0];
+    const idKey = buildIdKey_(ids[i][0]);
     const refRaw = refs[i][0];
-    if (idRaw === null || idRaw === undefined || idRaw === '') continue;
+    if (!idKey) continue;
 
-    const key = String(idRaw);
     const base = normalizeSkuBase_(refRaw);
     if (base) {
-      map[key] = base;
+      map[idKey] = base;
     }
   }
 

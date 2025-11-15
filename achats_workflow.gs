@@ -323,7 +323,8 @@ function handleAchats(e) {
   const stockStampDisplay = stpCell.getDisplayValue();
   const stockStampRaw = stpCell.getValue();
 
-  const achatId = COL_ID ? sh.getRange(row, COL_ID).getValue() : "";
+  const achatIdRaw = COL_ID ? sh.getRange(row, COL_ID).getValue() : "";
+  const achatId = normalizeIntegerIdValue_(achatIdRaw);
   const article = COL_ART ? String(sh.getRange(row, COL_ART).getDisplayValue() || "").trim() : "";
   const marque  = COL_MAR ? String(sh.getRange(row, COL_MAR).getDisplayValue() || "").trim() : "";
   const genrePrimary = COL_GEN_DATA
@@ -391,7 +392,7 @@ function handleAchats(e) {
     }
     const prefix = `${base}-`;
     const legacyPrefix = base;
-    const achatIdKey = (achatId === null || achatId === undefined || achatId === '') ? '' : String(achatId);
+    const achatIdKey = buildIdKey_(achatId);
     for (let i = 0; i < existingSkuValues.length; i++) {
       const rawSku = normalizeSkuBase_(existingSkuValues[i][0]);
       if (!rawSku || (rawSku.indexOf(prefix) !== 0 && rawSku.indexOf(legacyPrefix) !== 0)) continue;
@@ -400,7 +401,7 @@ function handleAchats(e) {
       let storedIdKey = '';
       if (COL_ID_STOCK && existingIdValues) {
         const storedRaw = existingIdValues[i] && existingIdValues[i][0];
-        storedIdKey = (storedRaw === null || storedRaw === undefined || storedRaw === '') ? '' : String(storedRaw);
+        storedIdKey = buildIdKey_(storedRaw);
         if (achatIdKey && storedIdKey) {
           idMatches = (storedIdKey === achatIdKey);
         }
@@ -515,7 +516,7 @@ function renumberStockByBrand_() {
 
     const curSku = String(row[COL_NEW - 1] || "").trim();   // SKU actuelle (base-0 ou autre)
     const idRaw = (COL_ID ? row[COL_ID - 1] : '');
-    const idKey = idRaw === null || idRaw === undefined || idRaw === '' ? '' : String(idRaw);
+    const idKey = buildIdKey_(idRaw);
 
     const idBase = (idKey && idToBase && idToBase[idKey]) ? idToBase[idKey] : '';
     const curBase = extractSkuBase_(curSku);
