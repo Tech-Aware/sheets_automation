@@ -364,7 +364,8 @@ function handleAchats(e) {
 
   const COL_ID_STOCK    = resolverStock.colExact(HEADERS.STOCK.ID);
   const COL_LABEL_STOCK = resolverStock.colWhere(h => h.includes('libell')) || resolverStock.colWhere(h => h.includes('article')) || 2;
-  const COL_OLD_STOCK   = resolverStock.colExact(HEADERS.STOCK.OLD_SKU);
+  const COL_BRAND_STOCK = resolverStock.colExact(HEADERS.STOCK.MARQUE)
+    || resolverStock.colWhere(h => h.includes('marque'));
   const COL_SKU_STOCK   = resolverStock.colExact(HEADERS.STOCK.SKU)
     || resolverStock.colExact(HEADERS.STOCK.REFERENCE)
     || resolverStock.colWhere(h => h.includes('sku'))
@@ -443,14 +444,21 @@ function handleAchats(e) {
     stpCell.setValue(miseStockDate);
   }
 
-  const width = Math.max(target.getLastColumn(), COL_LABEL_STOCK || 0, COL_SKU_STOCK || 0, COL_DATE_STOCK || 0, COL_ID_STOCK || 0, COL_OLD_STOCK || 0);
+  const width = Math.max(
+    target.getLastColumn(),
+    COL_LABEL_STOCK || 0,
+    COL_BRAND_STOCK || 0,
+    COL_SKU_STOCK || 0,
+    COL_DATE_STOCK || 0,
+    COL_ID_STOCK || 0
+  );
   const rows = Array.from({length: qty}, () => Array(Math.max(1, width)).fill(""));
 
   for (let i = 0; i < rows.length; i++) {
     const rowValues = rows[i];
     if (COL_ID_STOCK) rowValues[COL_ID_STOCK - 1] = achatId;
     if (COL_LABEL_STOCK) rowValues[COL_LABEL_STOCK - 1] = label;
-    if (COL_OLD_STOCK) rowValues[COL_OLD_STOCK - 1] = "";
+    if (COL_BRAND_STOCK) rowValues[COL_BRAND_STOCK - 1] = marque;
     if (COL_SKU_STOCK) rowValues[COL_SKU_STOCK - 1] = `${base}-0`;
     if (COL_DATE_STOCK) rowValues[COL_DATE_STOCK - 1] = dateLiv;
   }
@@ -472,15 +480,14 @@ function handleAchats(e) {
   renumberStockByBrand_();
 }
 
-// === RE-NUMÉROTATION GLOBALE PAR BASE DE SKU AVEC OVERRIDE PAR B ===
+// === RE-NUMÉROTATION GLOBALE PAR BASE DE SKU ===
 //
 // - Base = toutes les parties avant le dernier "-" du SKU actuel (col "SKU").
-// - Si B (SKU ancienne) contient un nombre en fin, on utilise ce nombre pour ce produit.
-// - Sinon, on numérote en continu pour cette base à partir de 1.
+// - On lit toutes les lignes pour chaque base et on conserve le suffixe le plus élevé déjà attribué.
+// - Les SKU se voient attribuer un suffixe séquentiel (> 0) lorsqu'ils sont encore à "-0".
 // - Pas de zéros en tête: suffixe = "1", "2", "3", ...
-// - Paramètre onlyOld = true → on ne renumérote QUE les lignes où B est rempli.
 
-function renumberStockByBrand_(onlyOld) {
+function renumberStockByBrand_() {
   const ss = SpreadsheetApp.getActive();
   const stock  = ss.getSheetByName('Stock');
   if (!stock) return;
@@ -488,18 +495,15 @@ function renumberStockByBrand_(onlyOld) {
   const last = stock.getLastRow();
   if (last < 2) return;
 
-  onlyOld = !!onlyOld;
-
   const stockHeaders = stock.getRange(1,1,1,stock.getLastColumn()).getValues()[0];
   const resolver = makeHeaderResolver_(stockHeaders);
   const COL_ID    = resolver.colExact('id');
-  const COL_OLD   = resolver.colExact(HEADERS.STOCK.OLD_SKU) || resolver.colWhere(h => h.includes('ancienne')) || 2; // B
   const COL_NEW   = resolver.colExact(HEADERS.STOCK.SKU)
     || resolver.colExact(HEADERS.STOCK.REFERENCE)
     || resolver.colWhere(h => h.includes('sku'))
     || 3; // C
 
-  const width = Math.max(COL_NEW, COL_OLD, COL_ID || 0, stock.getLastColumn());
+  const width = Math.max(COL_NEW, COL_ID || 0, stock.getLastColumn());
   const data = stock.getRange(2, 1, last - 1, width).getValues();
 
   const idToBase = COL_ID ? buildIdToSkuBaseMap_(ss) : null;
@@ -509,38 +513,27 @@ function renumberStockByBrand_(onlyOld) {
   for (let i = 0; i < data.length; i++) {
     const row = data[i];
 
-    const oldSku = String(row[COL_OLD - 1] || "").trim();  // SKU ancienne
     const curSku = String(row[COL_NEW - 1] || "").trim();   // SKU actuelle (base-0 ou autre)
     const idRaw = (COL_ID ? row[COL_ID - 1] : '');
     const idKey = idRaw === null || idRaw === undefined || idRaw === '' ? '' : String(idRaw);
 
     const idBase = (idKey && idToBase && idToBase[idKey]) ? idToBase[idKey] : '';
     const curBase = extractSkuBase_(curSku);
-    const oldBase = extractSkuBase_(oldSku);
 
-    let base = curBase || oldBase || idBase;
+    let base = curBase || idBase;
     if (base && idBase && base !== idBase) {
       const curAligned = !curBase || curBase === idBase;
-      const oldAligned = !oldBase || oldBase === idBase;
-      if (curAligned && oldAligned) {
+      if (curAligned) {
         base = idBase;
       }
     }
 
-    let overrideSuffix = null;
     let curSuffix = null;
 
     if (base) {
       const counterKey = base;
       if (!Object.prototype.hasOwnProperty.call(baseCounters, counterKey)) {
         baseCounters[counterKey] = 0;
-      }
-
-      if (oldSku && (!oldBase || oldBase === base)) {
-        overrideSuffix = extractSkuSuffix_(oldSku, base);
-        if (overrideSuffix != null) {
-          baseCounters[counterKey] = Math.max(baseCounters[counterKey], overrideSuffix);
-        }
       }
 
       if (curSku && (!curBase || curBase === base)) {
@@ -553,9 +546,7 @@ function renumberStockByBrand_(onlyOld) {
 
     rowInfos.push({
       base,
-      oldSku,
       curSku,
-      overrideSuffix,
       curSuffix
     });
   }
@@ -565,13 +556,7 @@ function renumberStockByBrand_(onlyOld) {
   for (let i = 0; i < rowInfos.length; i++) {
     const info = rowInfos[i];
     const base = info.base;
-    const oldSku = info.oldSku;
     const curSku = info.curSku;
-
-    if (onlyOld && !oldSku) {
-      newSkuColValues.push([curSku]);
-      continue;
-    }
 
     if (!base) {
       newSkuColValues.push([curSku]);
@@ -581,12 +566,6 @@ function renumberStockByBrand_(onlyOld) {
     const counterKey = base;
     if (!Object.prototype.hasOwnProperty.call(baseCounters, counterKey)) {
       baseCounters[counterKey] = 0;
-    }
-
-    if (info.overrideSuffix != null) {
-      baseCounters[counterKey] = Math.max(baseCounters[counterKey], info.overrideSuffix);
-      newSkuColValues.push([counterKey + '-' + info.overrideSuffix]);
-      continue;
     }
 
     if (info.curSuffix != null) {

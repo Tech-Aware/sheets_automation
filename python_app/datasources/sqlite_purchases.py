@@ -92,11 +92,11 @@ class StockRecord:
     """Structured representation of a stock row."""
 
     id: str = ""
-    old_sku: str = ""
     sku: str = ""
     reference: str = ""
     libelle: str = ""
     article: str = ""
+    marque: str = ""
     prix_vente: float | None = None
     taille_colis: str = ""
     taille: str = ""
@@ -128,11 +128,11 @@ class StockRecord:
 
 _STOCK_COLUMN_TO_HEADER: Sequence[tuple[str, str]] = (
     ("id", HEADERS["STOCK"].ID),
-    ("old_sku", HEADERS["STOCK"].OLD_SKU),
     ("sku", HEADERS["STOCK"].SKU),
     ("reference", HEADERS["STOCK"].REFERENCE),
     ("libelle", HEADERS["STOCK"].LIBELLE),
     ("article", HEADERS["STOCK"].ARTICLE),
+    ("marque", HEADERS["STOCK"].MARQUE),
     ("prix_vente", HEADERS["STOCK"].PRIX_VENTE),
     ("taille_colis", HEADERS["STOCK"].TAILLE_COLIS),
     ("taille", HEADERS["STOCK"].TAILLE),
@@ -200,11 +200,11 @@ class PurchaseDatabase:
                 CREATE TABLE IF NOT EXISTS stock (
                     row_id INTEGER PRIMARY KEY AUTOINCREMENT,
                     id TEXT,
-                    old_sku TEXT,
                     sku TEXT,
                     reference TEXT,
                     libelle TEXT,
                     article TEXT,
+                    marque TEXT,
                     prix_vente REAL,
                     taille_colis TEXT,
                     taille TEXT,
@@ -254,7 +254,7 @@ class PurchaseDatabase:
                 conn.executemany(
                     """
                     INSERT INTO stock (
-                        id, old_sku, sku, reference, libelle, article, prix_vente, taille_colis, taille,
+                        id, sku, reference, libelle, article, marque, prix_vente, taille_colis, taille,
                         lot, date_livraison, date_mise_en_stock, mis_en_ligne, date_mise_en_ligne, publie,
                         date_publication, vendu, date_vente, vente_exportee_le, valider_saisie
                     ) VALUES (
@@ -300,7 +300,7 @@ class PurchaseDatabase:
             conn.row_factory = sqlite3.Row
             cursor = conn.execute(
                 """
-                SELECT id, old_sku, sku, reference, libelle, article, prix_vente, taille_colis, taille,
+                SELECT id, sku, reference, libelle, article, marque, prix_vente, taille_colis, taille,
                        lot, date_livraison, date_mise_en_stock, mis_en_ligne, date_mise_en_ligne, publie,
                        date_publication, vendu, date_vente, vente_exportee_le, valider_saisie
                 FROM stock

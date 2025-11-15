@@ -59,13 +59,13 @@ HEADERS = {
     "STOCK": HeaderGroup(
         {
             "ID": "ID",
-            "OLD_SKU": "SKU(ancienne nomenclature)",
             "SKU": "SKU",
             "REFERENCE": "REFERENCE",
             "LIBELLE": "LIBELLÉ",
             "LIBELLE_ALT": "LIBELLE",
             "ARTICLE": "ARTICLES",
             "ARTICLE_ALT": "ARTICLE",
+            "MARQUE": "MARQUE",
             "PRIX_VENTE": "PRIX DE VENTE",
             "TAILLE_COLIS": "TAILLE DU COLIS",
             "TAILLE_COLIS_ALT": "TAILLE COLIS",

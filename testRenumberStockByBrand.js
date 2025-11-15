@@ -128,20 +128,27 @@ const sandbox = {
   }
 };
 
-const code = fs.readFileSync('onEdit_Main.gs', 'utf8');
-vm.runInNewContext(code, sandbox);
+[
+  'config.gs',
+  'sheet_utils.gs',
+  'achats_workflow.gs',
+  'stock_workflow.gs',
+  'onEdit_Main.gs'
+].forEach(path => {
+  const source = fs.readFileSync(path, 'utf8');
+  vm.runInNewContext(source, sandbox);
+});
 
 const HEADERS = vm.runInNewContext('HEADERS', sandbox);
 
 stockSheet = new MockSheet('Stock', [
   HEADERS.STOCK.ID,
-  HEADERS.STOCK.OLD_SKU,
   HEADERS.STOCK.SKU
 ], [
-  ['ID-1', 'PCF-1', 'PCF-1'],
-  ['ID-2', 'PCF-2', 'PCF-0'],
-  ['ID-3', 'PCF-5', 'PCF-0'],
-  ['ID-4', '',      'PCF-0']
+  ['ID-1', 'PCF-1'],
+  ['ID-2', 'PCF-0'],
+  ['ID-3', 'PCF-0'],
+  ['ID-4', 'PCF-0']
 ]);
 
 achatsSheet = new MockSheet('Achats', [
@@ -154,11 +161,11 @@ achatsSheet = new MockSheet('Achats', [
   ['ID-4', 'PCF']
 ]);
 
-console.log('Initial old SKUs:', stockSheet.rows.map(row => row[1]));
+console.log('Initial SKUs:', stockSheet.rows.map(row => row[1]));
 
 sandbox.renumberStockByBrand_();
 
-const newValues = stockSheet.rows.map(row => row[2]);
+const newValues = stockSheet.rows.map(row => row[1]);
 console.log('Renumbered SKUs:', newValues);
 
 const suffixes = newValues.filter(Boolean).map(v => parseInt(v.split('-').pop(), 10));
@@ -168,12 +175,11 @@ console.log('Strictly increasing:', isStrictlyIncreasing);
 // Test: existing numbered SKUs should remain untouched and new entries pick the next suffix.
 const stockSheetExisting = new MockSheet('Stock', [
   'ID',
-  'SKU(ancienne nomenclature)',
   'SKU'
 ], [
-  ['ID-10', '', 'JLF-54'],
-  ['ID-11', '', 'JLF-55'],
-  ['ID-12', '', 'JLF-0']
+  ['ID-10', 'JLF-54'],
+  ['ID-11', 'JLF-55'],
+  ['ID-12', 'JLF-0']
 ]);
 
 const achatsSheetExisting = new MockSheet('Achats', [
@@ -197,7 +203,7 @@ activeSpreadsheet = spreadsheetExisting;
 
 sandbox.renumberStockByBrand_();
 
-const preservedValues = stockSheetExisting.rows.map(row => row[2]);
+const preservedValues = stockSheetExisting.rows.map(row => row[1]);
 console.log('Existing numbered SKUs scenario:', preservedValues);
 assert.deepStrictEqual(preservedValues, ['JLF-54', 'JLF-55', 'JLF-56']);
 console.log('Existing SKUs preserved and new suffix assigned correctly.');
