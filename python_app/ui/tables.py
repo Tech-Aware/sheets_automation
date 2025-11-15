@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import tkinter as tk
 from tkinter import ttk
-from typing import Callable, Iterable, Sequence
+from typing import Callable, Iterable, Mapping, Sequence
 
 
 class ScrollableTable(ttk.Frame):
@@ -17,6 +17,7 @@ class ScrollableTable(ttk.Frame):
         *,
         height: int = 15,
         column_width: int = 140,
+        column_widths: Mapping[str, int] | None = None,
         on_cell_edited: Callable[[int, str, str], None] | None = None,
         on_row_activated: Callable[[int], None] | None = None,
         enable_inline_edit: bool = True,
@@ -30,6 +31,7 @@ class ScrollableTable(ttk.Frame):
         self._editing_column: str | None = None
         self._item_to_row_index: dict[str, int] = {}
         self._headers = list(headers)
+        self._column_widths = dict(column_widths or {})
         style = ttk.Style(self)
         try:  # ``clam`` provides better contrast for striped rows
             style.theme_use("clam")
@@ -58,7 +60,8 @@ class ScrollableTable(ttk.Frame):
         )
         for header in self._headers:
             self.tree.heading(header, text=header)
-            self.tree.column(header, width=column_width, anchor=tk.W)
+            width = self._column_widths.get(header, column_width)
+            self.tree.column(header, width=width, anchor=tk.W)
         self.tree.tag_configure("even", background="#f2f4f8")
         vsb = ttk.Scrollbar(self, orient="vertical", command=self.tree.yview)
         hsb = ttk.Scrollbar(self, orient="horizontal", command=self.tree.xview)

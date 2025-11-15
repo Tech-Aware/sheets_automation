@@ -193,6 +193,7 @@ class DashboardView(ctk.CTkFrame):
 
 class PurchasesView(ctk.CTkFrame):
     SUMMARY_HEADERS = (
+        HEADERS["ACHATS"].ID,
         HEADERS["ACHATS"].ARTICLE,
         HEADERS["ACHATS"].DATE_ACHAT,
         HEADERS["ACHATS"].DATE_MISE_EN_STOCK,
@@ -234,6 +235,10 @@ class PurchasesView(ctk.CTkFrame):
             self._build_summary_rows(),
             height=18,
             column_width=135,
+            column_widths={
+                HEADERS["ACHATS"].ID: 100,
+                HEADERS["ACHATS"].TOTAL_TTC: 110,
+            },
             enable_inline_edit=False,
             on_row_activated=self._open_detail_dialog,
         )
@@ -614,13 +619,20 @@ class TableView(ctk.CTkFrame):
         super().__init__(master)
         self.pack(fill="both", expand=True)
         self.table = table
-        helper = ctk.CTkFrame(self)
+        self.content = ctk.CTkFrame(self)
+        self.content.pack(fill="both", expand=True)
+        self.content.grid_rowconfigure(0, weight=1)
+        self.content.grid_columnconfigure(0, weight=1)
+
+        table_frame = ctk.CTkFrame(self.content)
+        table_frame.grid(row=0, column=0, sticky="nsew")
+        helper = ctk.CTkFrame(table_frame)
         helper.pack(fill="x", padx=12, pady=(12, 0))
         self.helper_frame = helper
         self.status_var = tk.StringVar(value="Double-cliquez sur une cellule pour la modifier.")
         ctk.CTkLabel(helper, textvariable=self.status_var, anchor="w").pack(side="left")
         self.table_widget = ScrollableTable(
-            self,
+            table_frame,
             table.headers[:10],
             table.rows,
             height=20,
@@ -628,7 +640,7 @@ class TableView(ctk.CTkFrame):
             column_width=160,
         )
         self.table_widget.pack(fill="both", expand=True, padx=12, pady=12)
-        self._build_extra_controls()
+        self._build_extra_controls(self.content)
 
     def _on_cell_edit(self, row_index: int, column: str, new_value: str):
         try:
@@ -640,7 +652,7 @@ class TableView(ctk.CTkFrame):
     def refresh(self):
         self.table_widget.refresh(self.table.rows)
 
-    def _build_extra_controls(self):
+    def _build_extra_controls(self, parent):
         """Hook for subclasses to add contextual actions."""
 
     def _delete_rows_by_indices(self, indices: Sequence[int]) -> int:
@@ -664,9 +676,11 @@ class StockTableView(TableView):
         self.delete_id_var = tk.StringVar(value="")
         super().__init__(master, table)
 
-    def _build_extra_controls(self):
-        panel = ctk.CTkFrame(self)
-        panel.pack(fill="x", padx=12, pady=(0, 12))
+    def _build_extra_controls(self, parent):
+        parent.grid_columnconfigure(0, weight=5)
+        parent.grid_columnconfigure(1, weight=0)
+        panel = ctk.CTkFrame(parent)
+        panel.grid(row=0, column=1, sticky="nsew", padx=(12, 0), pady=12)
         ctk.CTkLabel(panel, text="Supprimer des articles du stock", font=ctk.CTkFont(size=16, weight="bold"), anchor="w").pack(
             fill="x", padx=12, pady=(4, 0)
         )
