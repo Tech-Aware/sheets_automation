@@ -25,15 +25,15 @@ python -m python_app.main /chemin/vers/mon_fichier.xlsx --achats-db python_app/d
 ## Structure Python
 - `python_app/config.py` : transcription Python des constantes `config.gs` (HEADERS, noms de mois, etc.).
 - `python_app/datasources/workbook.py` : dépôt pour charger les feuilles Excel (`TableData`).
-- `python_app/datasources/sqlite_purchases.py` : mini dépôt SQLite pour l'onglet Achats (création du schéma et hydratation en `TableData`).
+- `python_app/datasources/sqlite_purchases.py` : mini dépôt SQLite pour l'onglet Achats (création du schéma, conversion bidirectionnelle en `TableData`).
 - `python_app/services/summaries.py` : calcul du snapshot inventaire (stock vs ventes, marges moyennes).
 - `python_app/services/workflow.py` : réplique le flux Achats > Stock > Ventes/Compta et expose une API manipulée par l'onglet Workflow.
 - `python_app/ui/tables.py` : composant table scrollable.
-- `python_app/main.py` : point d'entrée CustomTkinter (`VintageErpApp`).
+- `python_app/main.py` : point d'entrée CustomTkinter (`VintageErpApp`). Il persiste automatiquement l'onglet Achats dans `python_app/data/achats.db` lors de la fermeture, ce qui évite de perdre les modifications entre deux sessions.
 
 Ce socle permet d'itérer vers une reproduction complète des workflows Apps Script dans une application desktop Python.
 
 ## Base Achats SQLite
 - Les données fournies dans la feuille Achats ont été converties en fixtures `python_app/data/purchases_seed.py` (texte).
 - Générez localement `python_app/data/achats.db` via `python -m python_app.seed_purchases_db` : le fichier n'est pas versionné pour éviter d'inclure un binaire lourd dans Git.
-- L'application peut consommer cette base à la place de l'onglet Excel grâce au flag `--achats-db` (voir section *Démarrage*).
+- L'application charge automatiquement `python_app/data/achats.db` s'il existe et enregistre toutes les modifications Achats dans ce fichier lorsqu'on ferme l'application (le fichier est créé au besoin). Vous pouvez passer un autre chemin via `--achats-db` si vous souhaitez stocker l'état ailleurs.
