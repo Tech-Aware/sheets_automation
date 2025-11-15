@@ -947,13 +947,24 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     custom_db_requested = args.achats_db is not None
     achats_db_path = Path(args.achats_db) if custom_db_requested else DEFAULT_ACHATS_DB
-    achats_table = None
+    achats_table: TableData | None = None
     if achats_db_path.exists():
         try:
-            achats_table = PurchaseDatabase(achats_db_path).load_table()
+            loaded_table = PurchaseDatabase(achats_db_path).load_table()
         except FileNotFoundError:
             messagebox.showerror("Base Achats introuvable", f"Impossible d'ouvrir {achats_db_path!s}")
             return 1
+        if loaded_table.rows:
+            achats_table = loaded_table
+        else:
+            # L'application créait un fichier SQLite vide au premier lancement,
+            # puis se contentait de charger ce contenu vide au démarrage
+            # suivant.  Ignorez les bases sans lignes pour retomber sur les
+            # données du classeur Excel et repeupler la base à la fermeture.
+            print(
+                f"Base Achats vide détectée ({achats_db_path!s}). "
+                "Chargement des données depuis le classeur."
+            )
     elif custom_db_requested:
         messagebox.showerror("Base Achats introuvable", f"Impossible d'ouvrir {achats_db_path!s}")
         return 1
