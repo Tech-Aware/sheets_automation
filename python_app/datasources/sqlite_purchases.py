@@ -161,6 +161,7 @@ class PurchaseDatabase:
     def ensure_schema(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with sqlite3.connect(self.path) as conn:
+            conn.row_factory = sqlite3.Row
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS achats (
@@ -222,6 +223,7 @@ class PurchaseDatabase:
                 )
                 """
             )
+            self._ensure_column(conn, "stock", "marque", "TEXT")
 
     def replace_all(
         self,
@@ -328,6 +330,13 @@ class PurchaseDatabase:
         if isinstance(record, StockRecord):
             return record
         return StockRecord.from_mapping(record)
+
+    @staticmethod
+    def _ensure_column(conn: sqlite3.Connection, table: str, column: str, definition: str) -> None:
+        cursor = conn.execute(f"PRAGMA table_info({table})")
+        existing_columns = {row[1] for row in cursor.fetchall()}
+        if column not in existing_columns:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
 
 
 def _normalize_purchase_id(value) -> int | None:
