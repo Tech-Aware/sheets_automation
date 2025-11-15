@@ -16,7 +16,8 @@ import customtkinter as ctk
 # imports after adding the repository root to ``sys.path``.
 try:  # pragma: no cover - defensive import path configuration
     from .config import HEADERS, MONTH_NAMES_FR
-    from .datasources.workbook import WorkbookRepository
+    from .datasources.workbook import TableData, WorkbookRepository
+    from .datasources.sqlite_purchases import PurchaseDatabase
     from .services.summaries import build_inventory_snapshot
     from .services.workflow import PurchaseInput, SaleInput, StockInput, WorkflowCoordinator
     from .ui.tables import ScrollableTable
@@ -26,7 +27,8 @@ except ImportError:  # pragma: no cover - executed when run as a script
     if str(package_root) not in sys.path:
         sys.path.append(str(package_root))
     from python_app.config import HEADERS, MONTH_NAMES_FR
-    from python_app.datasources.workbook import WorkbookRepository
+    from python_app.datasources.workbook import TableData, WorkbookRepository
+    from python_app.datasources.sqlite_purchases import PurchaseDatabase
     from python_app.services.summaries import build_inventory_snapshot
     from python_app.services.workflow import PurchaseInput, SaleInput, StockInput, WorkflowCoordinator
     from python_app.ui.tables import ScrollableTable
@@ -36,13 +38,15 @@ except ImportError:  # pragma: no cover - executed when run as a script
 class VintageErpApp(ctk.CTk):
     """Simple multipage CustomTkinter application."""
 
-    def __init__(self, repository: WorkbookRepository):
+    def __init__(self, repository: WorkbookRepository, achats_table: TableData | None = None):
         super().__init__()
         self.title("Vintage ERP (Prerelease 1.2)")
         self.geometry("1200x800")
         self.minsize(1024, 720)
         self.repository = repository
         self.tables = self.repository.load_many("Achats", "Stock", "Ventes", "Compta 09-2025")
+        if achats_table is not None:
+            self.tables["Achats"] = achats_table
         self.workflow = WorkflowCoordinator(
             self.tables["Achats"],
             self.tables["Stock"],
@@ -755,6 +759,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         type=Path,
         help="Path to the Excel workbook (defaults to Prerelease 1.2.xlsx located at the repo root)",
     )
+    parser.add_argument(
+        "--achats-db",
+        type=Path,
+        default=None,
+        help="Optional SQLite database containing the Achats data (overrides the workbook sheet if provided).",
+    )
     return parser.parse_args(argv)
 
 
@@ -766,7 +776,15 @@ def main(argv: list[str] | None = None) -> int:
     except FileNotFoundError:
         messagebox.showerror("Workbook introuvable", f"Impossible d'ouvrir {workbook_path!s}")
         return 1
-    app = VintageErpApp(repo)
+    achats_table = None
+    if args.achats_db is not None:
+        db_path = Path(args.achats_db)
+        try:
+            achats_table = PurchaseDatabase(db_path).load_table()
+        except FileNotFoundError:
+            messagebox.showerror("Base Achats introuvable", f"Impossible d'ouvrir {db_path!s}")
+            return 1
+    app = VintageErpApp(repo, achats_table=achats_table)
     app.mainloop()
     return 0
 
