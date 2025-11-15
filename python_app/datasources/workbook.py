@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import date, datetime
 from pathlib import Path
 from typing import Iterable, List, Sequence
 import sys
@@ -64,12 +65,22 @@ class WorkbookRepository:
         for raw in raw_rows[1:]:
             if drop_empty and all(value in (None, "") for value in raw):
                 continue
-            row_dict = {headers[idx]: raw[idx] for idx in range(len(headers))}
+            row_dict = {headers[idx]: self._normalize_value(raw[idx]) for idx in range(len(headers))}
             rows.append(row_dict)
         return TableData(headers=headers, rows=rows)
 
     def load_many(self, *sheet_names: str) -> dict[str, TableData]:
         return {name: self.load_table(name) for name in sheet_names}
+
+    @staticmethod
+    def _normalize_value(value):
+        """Convert Excel date/time values to user-friendly strings."""
+
+        if isinstance(value, datetime):
+            return value.date().isoformat()
+        if isinstance(value, date):
+            return value.isoformat()
+        return value
 
 
 __all__ = ["WorkbookRepository", "TableData"]
