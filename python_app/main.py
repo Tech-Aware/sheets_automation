@@ -6,7 +6,7 @@ from datetime import date
 import sys
 import tkinter as tk
 from pathlib import Path
-from tkinter import messagebox
+from tkinter import filedialog, messagebox
 from typing import Sequence
 
 import customtkinter as ctk
@@ -23,6 +23,7 @@ try:  # pragma: no cover - defensive import path configuration
         table_to_purchase_records,
         table_to_stock_records,
     )
+    from .services.stock_import import merge_stock_table
     from .services.summaries import build_inventory_snapshot
     from .services.workflow import PurchaseInput, SaleInput, StockInput, WorkflowCoordinator
     from .ui.tables import ScrollableTable
@@ -39,6 +40,7 @@ except ImportError:  # pragma: no cover - executed when run as a script
         table_to_purchase_records,
         table_to_stock_records,
     )
+    from python_app.services.stock_import import merge_stock_table
     from python_app.services.summaries import build_inventory_snapshot
     from python_app.services.workflow import PurchaseInput, SaleInput, StockInput, WorkflowCoordinator
     from python_app.ui.tables import ScrollableTable
@@ -168,9 +170,9 @@ class VintageErpApp(ctk.CTk):
                 view = PurchasesView(tab, self.tables[sheet], self.workflow, self.refresh_views)
                 self.purchase_view = view
             elif sheet == "Stock":
-                view = StockTableView(tab, self.tables[sheet])
+                view = StockTableView(tab, self.tables[sheet], on_table_changed=self.refresh_views)
             else:
-                view = TableView(tab, self.tables[sheet])
+                view = TableView(tab, self.tables[sheet], on_table_changed=self.refresh_views)
             self.table_views[sheet] = view
 
         months_tab = self.tabview.add("Calendrier")
@@ -682,10 +684,11 @@ class PurchaseDetailDialog(ctk.CTkToplevel):
 
 
 class TableView(ctk.CTkFrame):
-    def __init__(self, master, table):
+    def __init__(self, master, table, on_table_changed=None):
         super().__init__(master)
         self.pack(fill="both", expand=True)
         self.table = table
+        self.on_table_changed = on_table_changed
         self.content = ctk.CTkFrame(self)
         self.content.pack(fill="both", expand=True)
         self.content.grid_rowconfigure(0, weight=1)
@@ -735,14 +738,20 @@ class TableView(ctk.CTkFrame):
             except IndexError:
                 continue
         if removed:
-            self.refresh()
+            self._notify_data_changed()
         return removed
+
+    def _notify_data_changed(self):
+        if self.on_table_changed is not None:
+            self.on_table_changed()
+        else:
+            self.refresh()
 
 
 class StockTableView(TableView):
-    def __init__(self, master, table):
+    def __init__(self, master, table, on_table_changed=None):
         self.delete_id_var = tk.StringVar(value="")
-        super().__init__(master, table)
+        super().__init__(master, table, on_table_changed=on_table_changed)
 
     def _build_extra_controls(self, parent):
         parent.grid_columnconfigure(0, weight=5)
@@ -767,6 +776,19 @@ class StockTableView(TableView):
             panel,
             text="Choisissez des lignes dans la table ou saisissez un ID pour supprimer toutes ses références.",
             anchor="w",
+        ).pack(fill="x", padx=12, pady=(0, 8))
+
+        import_frame = ctk.CTkFrame(panel)
+        import_frame.pack(fill="x", padx=12, pady=(0, 8))
+        ctk.CTkLabel(import_frame, text="Importer des articles", anchor="w", font=ctk.CTkFont(weight="bold")).pack(
+            fill="x", pady=(4, 4)
+        )
+        ctk.CTkButton(import_frame, text="Depuis un fichier XLSX", command=self._handle_import_xlsx).pack(fill="x")
+        ctk.CTkLabel(
+            panel,
+            text="Sélectionnez un export Excel pour ajouter les nouveaux articles (sans doublons).",
+            anchor="w",
+            wraplength=260,
         ).pack(fill="x", padx=12, pady=(0, 8))
 
     def _delete_selected_rows(self):
@@ -808,6 +830,43 @@ class StockTableView(TableView):
             self.delete_id_var.set("")
         else:
             self.status_var.set("Aucune ligne supprimée.")
+
+    def _handle_import_xlsx(self):
+        path = filedialog.askopenfilename(
+            title="Importer le stock",
+            filetypes=(
+                ("Excel", "*.xlsx *.xlsm"),
+                ("Tous les fichiers", "*.*"),
+            ),
+        )
+        if not path:
+            return
+        try:
+            repository = WorkbookRepository(path)
+            sheet_name = self._resolve_stock_sheet(repository)
+            if sheet_name is None:
+                raise ValueError("Ce classeur ne contient aucun onglet exploitable.")
+            source_table = repository.load_table(sheet_name)
+        except Exception as exc:  # pragma: no cover - UI guard
+            messagebox.showerror("Import du stock", f"Impossible de lire le fichier sélectionné : {exc}")
+            return
+        added = merge_stock_table(self.table, source_table)
+        filename = Path(path).name
+        if added:
+            self.status_var.set(f"{added} article(s) importé(s) depuis {filename}.")
+            self._notify_data_changed()
+        else:
+            self.status_var.set(f"Aucun nouvel article à importer depuis {filename}.")
+
+    @staticmethod
+    def _resolve_stock_sheet(repository: WorkbookRepository) -> str | None:
+        sheet_names = list(repository.available_tables())
+        if not sheet_names:
+            return None
+        for name in sheet_names:
+            if name.lower() == "stock":
+                return name
+        return sheet_names[0]
 
 
 class WorkflowView(ctk.CTkFrame):
