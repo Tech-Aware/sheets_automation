@@ -18,7 +18,11 @@ import customtkinter as ctk
 try:  # pragma: no cover - defensive import path configuration
     from .config import HEADERS, MONTH_NAMES_FR
     from .datasources.workbook import TableData, WorkbookRepository
-    from .datasources.sqlite_purchases import PurchaseDatabase, table_to_purchase_records
+    from .datasources.sqlite_purchases import (
+        PurchaseDatabase,
+        table_to_purchase_records,
+        table_to_stock_records,
+    )
     from .services.summaries import build_inventory_snapshot
     from .services.workflow import PurchaseInput, SaleInput, StockInput, WorkflowCoordinator
     from .ui.tables import ScrollableTable
@@ -30,7 +34,11 @@ except ImportError:  # pragma: no cover - executed when run as a script
         sys.path.append(str(package_root))
     from python_app.config import HEADERS, MONTH_NAMES_FR
     from python_app.datasources.workbook import TableData, WorkbookRepository
-    from python_app.datasources.sqlite_purchases import PurchaseDatabase, table_to_purchase_records
+    from python_app.datasources.sqlite_purchases import (
+        PurchaseDatabase,
+        table_to_purchase_records,
+        table_to_stock_records,
+    )
     from python_app.services.summaries import build_inventory_snapshot
     from python_app.services.workflow import PurchaseInput, SaleInput, StockInput, WorkflowCoordinator
     from python_app.ui.tables import ScrollableTable
@@ -111,6 +119,7 @@ class VintageErpApp(ctk.CTk):
         self,
         repository: WorkbookRepository,
         achats_table: TableData | None = None,
+        stock_table: TableData | None = None,
         *,
         achats_db_path: Path | None = None,
     ):
@@ -126,6 +135,8 @@ class VintageErpApp(ctk.CTk):
             self.tables["Achats"] = achats_table
         else:
             _ensure_purchase_ready_dates(self.tables["Achats"])
+        if stock_table is not None:
+            self.tables["Stock"] = stock_table
         _normalize_stock_ids(self.tables.get("Stock"))
         self.workflow = WorkflowCoordinator(
             self.tables["Achats"],
@@ -178,17 +189,18 @@ class VintageErpApp(ctk.CTk):
 
     def _handle_close(self):
         try:
-            self._persist_achats_table()
+            self._persist_tables()
         except Exception as exc:  # pragma: no cover - UI safeguard
-            messagebox.showerror("Sauvegarde Achats", f"Échec de l'enregistrement des Achats : {exc}")
+            messagebox.showerror("Sauvegarde des données", f"Échec de l'enregistrement des données : {exc}")
             return
         self.destroy()
 
-    def _persist_achats_table(self):
+    def _persist_tables(self):
         if self.achats_db_path is None:
             return
         records = table_to_purchase_records(self.tables["Achats"])
-        PurchaseDatabase(self.achats_db_path).replace_all(records)
+        stock_records = table_to_stock_records(self.tables.get("Stock"))
+        PurchaseDatabase(self.achats_db_path).replace_all(records, stock_records)
 
 
 class DashboardView(ctk.CTkFrame):
@@ -255,6 +267,9 @@ class PurchasesView(ctk.CTkFrame):
         helper = ctk.CTkFrame(frame)
         helper.pack(fill="x", padx=12, pady=(12, 0))
         ctk.CTkButton(helper, text="Ajouter une commande", command=self._open_add_dialog).pack(side="left")
+        ctk.CTkButton(helper, text="Supprimer la sélection", command=self._delete_selected_rows).pack(
+            side="left", padx=(8, 0)
+        )
         ctk.CTkLabel(helper, textvariable=self.status_var, anchor="w").pack(side="right", fill="x", expand=True, padx=(12, 0))
         self.table_widget = ScrollableTable(
             frame,
@@ -458,6 +473,31 @@ class PurchasesView(ctk.CTkFrame):
 
     def _log(self, message: str):
         self.log_var.set(message)
+
+    def _delete_selected_rows(self):
+        if self.table_widget is None:
+            return
+        indices = self.table_widget.get_selected_indices()
+        if not indices:
+            self.status_var.set("Sélectionnez au moins une commande à supprimer.")
+            return
+        count = len(indices)
+        if not messagebox.askyesno(
+            "Confirmer la suppression",
+            f"Supprimer définitivement {count} commande(s) ?",
+        ):
+            return
+        removed, stock_removed = self.workflow.delete_purchases(indices)
+        if removed:
+            self.table_widget.refresh(self._build_summary_rows())
+            self.refresh_callback()
+            status = f"{removed} commande(s) supprimée(s)."
+            if stock_removed:
+                status += f" {stock_removed} article(s) lié(s) retiré(s) du stock."
+            self.status_var.set(status)
+            self._log(status)
+        else:
+            self.status_var.set("Aucune commande supprimée.")
 
 
 class AddPurchaseDialog(ctk.CTkToplevel):
@@ -990,9 +1030,11 @@ def main(argv: list[str] | None = None) -> int:
     custom_db_requested = args.achats_db is not None
     achats_db_path = Path(args.achats_db) if custom_db_requested else DEFAULT_ACHATS_DB
     achats_table: TableData | None = None
+    stock_table: TableData | None = None
     if achats_db_path.exists():
+        db = PurchaseDatabase(achats_db_path)
         try:
-            loaded_table = PurchaseDatabase(achats_db_path).load_table()
+            loaded_table = db.load_table()
         except FileNotFoundError:
             messagebox.showerror("Base Achats introuvable", f"Impossible d'ouvrir {achats_db_path!s}")
             return 1
@@ -1007,10 +1049,22 @@ def main(argv: list[str] | None = None) -> int:
                 f"Base Achats vide détectée ({achats_db_path!s}). "
                 "Chargement des données depuis le classeur."
             )
+        try:
+            loaded_stock = db.load_stock_table()
+        except FileNotFoundError:
+            messagebox.showerror("Base Achats introuvable", f"Impossible d'ouvrir {achats_db_path!s}")
+            return 1
+        if loaded_stock.rows:
+            stock_table = loaded_stock
     elif custom_db_requested:
         messagebox.showerror("Base Achats introuvable", f"Impossible d'ouvrir {achats_db_path!s}")
         return 1
-    app = VintageErpApp(repo, achats_table=achats_table, achats_db_path=achats_db_path)
+    app = VintageErpApp(
+        repo,
+        achats_table=achats_table,
+        stock_table=stock_table,
+        achats_db_path=achats_db_path,
+    )
     app.mainloop()
     return 0
 

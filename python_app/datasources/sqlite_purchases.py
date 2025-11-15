@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import MISSING, dataclass, fields
+import math
 from pathlib import Path
 import sqlite3
 from typing import Iterable, Mapping, Sequence
@@ -86,6 +87,71 @@ _COLUMN_TO_HEADER: Sequence[tuple[str, str]] = (
 ACHATS_TABLE_HEADERS: Sequence[str] = tuple(header for _, header in _COLUMN_TO_HEADER)
 
 
+@dataclass
+class StockRecord:
+    """Structured representation of a stock row."""
+
+    id: str = ""
+    old_sku: str = ""
+    sku: str = ""
+    reference: str = ""
+    libelle: str = ""
+    article: str = ""
+    prix_vente: float | None = None
+    taille_colis: str = ""
+    taille: str = ""
+    lot: str = ""
+    date_livraison: str = ""
+    date_mise_en_stock: str = ""
+    mis_en_ligne: str = ""
+    date_mise_en_ligne: str = ""
+    publie: str = ""
+    date_publication: str = ""
+    vendu: str = ""
+    date_vente: str = ""
+    vente_exportee_le: str = ""
+    valider_saisie: str = ""
+
+    @classmethod
+    def from_mapping(cls, payload: Mapping[str, object]) -> "StockRecord":
+        values = {}
+        for field in fields(cls):
+            value = payload.get(field.name)
+            if value is None and field.default is not MISSING:
+                value = field.default
+            values[field.name] = value
+        return cls(**values)
+
+    def as_sql_params(self) -> tuple:
+        return tuple(getattr(self, column) for column, _ in _STOCK_COLUMN_TO_HEADER)
+
+
+_STOCK_COLUMN_TO_HEADER: Sequence[tuple[str, str]] = (
+    ("id", HEADERS["STOCK"].ID),
+    ("old_sku", HEADERS["STOCK"].OLD_SKU),
+    ("sku", HEADERS["STOCK"].SKU),
+    ("reference", HEADERS["STOCK"].REFERENCE),
+    ("libelle", HEADERS["STOCK"].LIBELLE),
+    ("article", HEADERS["STOCK"].ARTICLE),
+    ("prix_vente", HEADERS["STOCK"].PRIX_VENTE),
+    ("taille_colis", HEADERS["STOCK"].TAILLE_COLIS),
+    ("taille", HEADERS["STOCK"].TAILLE),
+    ("lot", HEADERS["STOCK"].LOT),
+    ("date_livraison", HEADERS["STOCK"].DATE_LIVRAISON),
+    ("date_mise_en_stock", HEADERS["STOCK"].DATE_MISE_EN_STOCK),
+    ("mis_en_ligne", HEADERS["STOCK"].MIS_EN_LIGNE),
+    ("date_mise_en_ligne", HEADERS["STOCK"].DATE_MISE_EN_LIGNE),
+    ("publie", HEADERS["STOCK"].PUBLIE),
+    ("date_publication", HEADERS["STOCK"].DATE_PUBLICATION),
+    ("vendu", HEADERS["STOCK"].VENDU),
+    ("date_vente", HEADERS["STOCK"].DATE_VENTE),
+    ("vente_exportee_le", HEADERS["STOCK"].VENTE_EXPORTEE_LE),
+    ("valider_saisie", HEADERS["STOCK"].VALIDER_SAISIE),
+)
+
+STOCK_TABLE_HEADERS: Sequence[str] = tuple(header for _, header in _STOCK_COLUMN_TO_HEADER)
+
+
 class PurchaseDatabase:
     """Simple helper around the SQLite file that stores Achats."""
 
@@ -129,10 +195,44 @@ class PurchaseDatabase:
             conn.execute(
                 "CREATE UNIQUE INDEX IF NOT EXISTS idx_achats_id ON achats(id) WHERE id IS NOT NULL"
             )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS stock (
+                    row_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    id TEXT,
+                    old_sku TEXT,
+                    sku TEXT,
+                    reference TEXT,
+                    libelle TEXT,
+                    article TEXT,
+                    prix_vente REAL,
+                    taille_colis TEXT,
+                    taille TEXT,
+                    lot TEXT,
+                    date_livraison TEXT,
+                    date_mise_en_stock TEXT,
+                    mis_en_ligne TEXT,
+                    date_mise_en_ligne TEXT,
+                    publie TEXT,
+                    date_publication TEXT,
+                    vendu TEXT,
+                    date_vente TEXT,
+                    vente_exportee_le TEXT,
+                    valider_saisie TEXT
+                )
+                """
+            )
 
-    def replace_all(self, records: Iterable[PurchaseRecord | Mapping[str, object]]) -> None:
+    def replace_all(
+        self,
+        records: Iterable[PurchaseRecord | Mapping[str, object]],
+        stock_records: Iterable[StockRecord | Mapping[str, object]] | None = None,
+    ) -> None:
         self.ensure_schema()
-        normalized = [self._ensure_record(record) for record in records]
+        normalized = [self._ensure_purchase_record(record) for record in records]
+        normalized_stock = []
+        if stock_records is not None:
+            normalized_stock = [self._ensure_stock_record(record) for record in stock_records]
         with sqlite3.connect(self.path) as conn:
             conn.execute("DELETE FROM achats")
             conn.executemany(
@@ -149,11 +249,26 @@ class PurchaseDatabase:
                 """,
                 [record.as_sql_params() for record in normalized],
             )
+            conn.execute("DELETE FROM stock")
+            if normalized_stock:
+                conn.executemany(
+                    """
+                    INSERT INTO stock (
+                        id, old_sku, sku, reference, libelle, article, prix_vente, taille_colis, taille,
+                        lot, date_livraison, date_mise_en_stock, mis_en_ligne, date_mise_en_ligne, publie,
+                        date_publication, vendu, date_vente, vente_exportee_le, valider_saisie
+                    ) VALUES (
+                        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+                    )
+                    """,
+                    [record.as_sql_params() for record in normalized_stock],
+                )
             conn.commit()
 
     def load_table(self) -> TableData:
         if not self.path.exists():  # pragma: no cover - defensive guard
             raise FileNotFoundError(self.path)
+        self.ensure_schema()
         with sqlite3.connect(self.path) as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.execute(
@@ -177,11 +292,70 @@ class PurchaseDatabase:
             table_rows.append(row_dict)
         return TableData(headers=ACHATS_TABLE_HEADERS, rows=table_rows)
 
+    def load_stock_table(self) -> TableData:
+        if not self.path.exists():  # pragma: no cover - defensive guard
+            raise FileNotFoundError(self.path)
+        self.ensure_schema()
+        with sqlite3.connect(self.path) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.execute(
+                """
+                SELECT id, old_sku, sku, reference, libelle, article, prix_vente, taille_colis, taille,
+                       lot, date_livraison, date_mise_en_stock, mis_en_ligne, date_mise_en_ligne, publie,
+                       date_publication, vendu, date_vente, vente_exportee_le, valider_saisie
+                FROM stock
+                ORDER BY row_id
+                """
+            )
+            rows = cursor.fetchall()
+        table_rows: list[dict[str, object]] = []
+        for db_row in rows:
+            row_dict: dict[str, object] = {}
+            for column, header in _STOCK_COLUMN_TO_HEADER:
+                value = db_row[column]
+                row_dict[header] = value if value is not None else ""
+            table_rows.append(row_dict)
+        return TableData(headers=STOCK_TABLE_HEADERS, rows=table_rows)
+
     @staticmethod
-    def _ensure_record(record: PurchaseRecord | Mapping[str, object]) -> PurchaseRecord:
+    def _ensure_purchase_record(record: PurchaseRecord | Mapping[str, object]) -> PurchaseRecord:
         if isinstance(record, PurchaseRecord):
             return record
         return PurchaseRecord.from_mapping(record)
+
+    @staticmethod
+    def _ensure_stock_record(record: StockRecord | Mapping[str, object]) -> StockRecord:
+        if isinstance(record, StockRecord):
+            return record
+        return StockRecord.from_mapping(record)
+
+
+def _normalize_purchase_id(value) -> int | None:
+    """Convert any spreadsheet value to a clean integer ID."""
+
+    if value in (None, ""):
+        return None
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        if not math.isfinite(value) or not value.is_integer():
+            return None
+        return int(value)
+    text = str(value).strip()
+    if not text:
+        return None
+    try:
+        return int(text)
+    except (TypeError, ValueError):
+        try:
+            number = float(text)
+        except (TypeError, ValueError):
+            return None
+        if not number.is_integer():
+            return None
+        return int(number)
 
 
 def table_to_purchase_records(table: TableData) -> list[PurchaseRecord]:
@@ -191,9 +365,34 @@ def table_to_purchase_records(table: TableData) -> list[PurchaseRecord]:
     for row in table.rows:
         payload: dict[str, object] = {}
         for column, header in _COLUMN_TO_HEADER:
-            payload[column] = row.get(header)
+            value = row.get(header)
+            if column == "id":
+                value = _normalize_purchase_id(value)
+            payload[column] = value
         records.append(PurchaseRecord.from_mapping(payload))
     return records
 
 
-__all__ = ["PurchaseDatabase", "PurchaseRecord", "ACHATS_TABLE_HEADERS", "table_to_purchase_records"]
+def table_to_stock_records(table: TableData | None) -> list[StockRecord]:
+    """Convert a :class:`TableData` Stock table to structured records."""
+
+    if table is None:
+        return []
+    records: list[StockRecord] = []
+    for row in table.rows:
+        payload: dict[str, object] = {}
+        for column, header in _STOCK_COLUMN_TO_HEADER:
+            payload[column] = row.get(header)
+        records.append(StockRecord.from_mapping(payload))
+    return records
+
+
+__all__ = [
+    "PurchaseDatabase",
+    "PurchaseRecord",
+    "StockRecord",
+    "ACHATS_TABLE_HEADERS",
+    "STOCK_TABLE_HEADERS",
+    "table_to_purchase_records",
+    "table_to_stock_records",
+]
