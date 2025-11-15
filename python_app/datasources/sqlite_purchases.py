@@ -1,7 +1,7 @@
 """SQLite persistence layer for the Achats table."""
 from __future__ import annotations
 
-from dataclasses import dataclass, fields
+from dataclasses import MISSING, dataclass, fields
 from pathlib import Path
 import sqlite3
 from typing import Iterable, Mapping, Sequence
@@ -44,7 +44,12 @@ class PurchaseRecord:
 
     @classmethod
     def from_mapping(cls, payload: Mapping[str, object]) -> "PurchaseRecord":
-        values = {field.name: payload.get(field.name) for field in fields(cls)}
+        values = {}
+        for field in fields(cls):
+            value = payload.get(field.name)
+            if value is None and field.default is not MISSING:
+                value = field.default
+            values[field.name] = value
         return cls(**values)
 
     def as_sql_params(self) -> tuple:
