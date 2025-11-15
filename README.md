@@ -16,17 +16,24 @@ pip install customtkinter openpyxl
 python -m python_app.main  # charge automatiquement « Prerelease 1.2.xlsx » depuis la racine du dépôt
 ```
 
-Vous pouvez passer un autre chemin vers un fichier Excel compatible :
+Vous pouvez passer un autre chemin vers un fichier Excel compatible ou remplacer l'onglet Achats par une base SQLite générée localement :
 ```bash
-python -m python_app.main /chemin/vers/mon_fichier.xlsx
+python -m python_app.seed_purchases_db  # produit python_app/data/achats.db
+python -m python_app.main /chemin/vers/mon_fichier.xlsx --achats-db python_app/data/achats.db
 ```
 
 ## Structure Python
 - `python_app/config.py` : transcription Python des constantes `config.gs` (HEADERS, noms de mois, etc.).
 - `python_app/datasources/workbook.py` : dépôt pour charger les feuilles Excel (`TableData`).
+- `python_app/datasources/sqlite_purchases.py` : mini dépôt SQLite pour l'onglet Achats (création du schéma et hydratation en `TableData`).
 - `python_app/services/summaries.py` : calcul du snapshot inventaire (stock vs ventes, marges moyennes).
 - `python_app/services/workflow.py` : réplique le flux Achats > Stock > Ventes/Compta et expose une API manipulée par l'onglet Workflow.
 - `python_app/ui/tables.py` : composant table scrollable.
 - `python_app/main.py` : point d'entrée CustomTkinter (`VintageErpApp`).
 
 Ce socle permet d'itérer vers une reproduction complète des workflows Apps Script dans une application desktop Python.
+
+## Base Achats SQLite
+- Les données fournies dans la feuille Achats ont été converties en fixtures `python_app/data/purchases_seed.py` (texte).
+- Générez localement `python_app/data/achats.db` via `python -m python_app.seed_purchases_db` : le fichier n'est pas versionné pour éviter d'inclure un binaire lourd dans Git.
+- L'application peut consommer cette base à la place de l'onglet Excel grâce au flag `--achats-db` (voir section *Démarrage*).

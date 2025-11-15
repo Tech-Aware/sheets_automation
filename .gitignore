@@ -1,0 +1,2 @@
+# Ignore generated SQLite databases
+python_app/data/*.db
