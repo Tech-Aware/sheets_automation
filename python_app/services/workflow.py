@@ -91,7 +91,7 @@ class WorkflowCoordinator:
         total_ttc = round(prix_achat + data.frais_colissage + data.frais_lavage, 2)
         prix_unitaire_ttc = round(total_ttc / qty_received, 2) if qty_received else total_ttc
         delai = (livraison_date - achat_date).days if achat_date and livraison_date else ""
-        reference = self._normalize_reference(data.reference) or self._generate_reference(data.article, data.marque)
+        reference = self._normalize_reference(data.reference) or self._generate_reference(data.article, data.marque, data.genre)
 
         row: dict = {}
         self._set_purchase_value(row, HEADERS["ACHATS"].ID, purchase_id)
@@ -181,8 +181,8 @@ class WorkflowCoordinator:
             stock_row[self._stock_column(HEADERS["STOCK"].DATE_VENTE_ALT)] = ""
         return sale_row
 
-    def build_sku_base(self, article: str, marque: str) -> str:
-        return self._generate_reference(article, marque)
+    def build_sku_base(self, article: str, marque: str, genre: str = "") -> str:
+        return self._generate_reference(article, marque, genre)
 
     def prepare_stock_from_purchase(self, purchase_id: str, ready_date: str | None = None) -> list[dict]:
         purchase = self._find_row(self.achats.rows, HEADERS["ACHATS"].ID, purchase_id)
@@ -198,7 +198,7 @@ class WorkflowCoordinator:
         article = self._get_purchase_value(purchase, HEADERS["ACHATS"].ARTICLE) or ""
         marque = self._get_purchase_value(purchase, HEADERS["ACHATS"].MARQUE) or ""
         if not base:
-            base = self._generate_reference(article, marque)
+            base = self._generate_reference(article, marque, genre)
             self._set_purchase_value(purchase, HEADERS["ACHATS"].REFERENCE, base)
         ready_stamp = ready_date or self._today()
         self._set_purchase_value(purchase, HEADERS["ACHATS"].PRET_STOCK_COMBINED, ready_stamp)
@@ -336,10 +336,11 @@ class WorkflowCoordinator:
             return ""
         return self._clean_letters(value)
 
-    def _generate_reference(self, article: str, marque: str) -> str:
+    def _generate_reference(self, article: str, marque: str, genre: str = "") -> str:
         article_code = self._build_initials(article, 2)
         marque_code = self._build_initials(marque, 3)
-        base = f"{article_code}{marque_code}".strip()
+        genre_code = self._genre_initial(genre)
+        base = f"{article_code}{marque_code}{genre_code}".strip()
         return base or "SKU"
 
     def _build_initials(self, value: str, limit: int) -> str:
@@ -359,6 +360,14 @@ class WorkflowCoordinator:
         normalized = unicodedata.normalize("NFKD", value or "")
         ascii_value = "".join(ch for ch in normalized if ch.isalnum())
         return ascii_value.upper()
+
+    def _genre_initial(self, genre: str) -> str:
+        code = self._clean_letters(genre)
+        if code.startswith("H"):
+            return "H"
+        if code.startswith("F"):
+            return "F"
+        return ""
 
     def _next_sku_suffix(self, base: str) -> int:
         sku_column = self._stock_column(HEADERS["STOCK"].SKU)
