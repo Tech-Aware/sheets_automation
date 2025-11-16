@@ -264,10 +264,14 @@ function toNumber_(value) {
 
     const normalized = trimmed
       .replace(/\u00A0/g, '')
-      .replace(/\s+/g, '')
-      .replace(/,/g, '.');
+      .replace(/[€$£]/g, '')
+      .replace(/,/g, '.')
+      .replace(/\s+/g, '');
 
-    const parsed = Number(normalized);
+    const match = normalized.match(/-?\d+(?:\.\d+)?/);
+    if (!match) return NaN;
+
+    const parsed = Number(match[0]);
     return Number.isFinite(parsed) ? parsed : NaN;
   }
 
@@ -333,34 +337,48 @@ function buildShippingFeeLookup_(ss) {
     || colExact(HEADERS.STOCK.TAILLE_COLIS_ALT)
     || colExact(HEADERS.STOCK.TAILLE)
     || colWhere(isShippingSizeHeader_);
-  const COL_LOT = colExact('LOT') || colWhere(h => h.includes('lot'));
+  const COL_LOT = colExact('LOT') || colWhere(h => h === 'lot');
   const COL_FEE = colExact('FRAIS DE COLISSAGE')
     || colWhere(h => h.includes('frais') && h.includes('colis'))
     || colWhere(h => h.includes('frais') && h.includes('exped'));
 
+  const lotColumns = [];
+  resolver.normalized.forEach((header, idx) => {
+    if (!header.includes('lot')) return;
+    const match = header.match(/(\d+[\d.,]*)/);
+    const count = match ? toNumber_(match[1]) : NaN;
+    if (Number.isFinite(count) && count > 0) {
+      lotColumns.push({ col: idx + 1, count });
+    }
+  });
+
   if (!COL_SIZE || !COL_FEE) return null;
 
-  const sizeValues = frais.getRange(2, COL_SIZE, lastRow - 1, 1).getValues();
-  const lotValues = COL_LOT ? frais.getRange(2, COL_LOT, lastRow - 1, 1).getValues() : null;
-  const feeValues = frais.getRange(2, COL_FEE, lastRow - 1, 1).getValues();
-
-  if (sizeValues.length !== feeValues.length) return null;
-
+  const rows = frais.getRange(2, 1, lastRow - 1, lastCol).getValues();
   const map = new Map();
 
-  for (let i = 0; i < sizeValues.length; i++) {
-    const sizeKey = normText_(sizeValues[i][0]);
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i];
+    const sizeKey = normText_(row[COL_SIZE - 1]);
     if (!sizeKey) continue;
 
-    const lotRaw = lotValues ? lotValues[i][0] : null;
+    const feeValue = row[COL_FEE - 1];
+    const baseFee = Number.isFinite(toNumber_(feeValue)) ? toNumber_(feeValue) : null;
+    const lotRaw = COL_LOT ? row[COL_LOT - 1] : null;
     const lotKey = Number.isFinite(parseLotCount_(lotRaw)) ? parseLotCount_(lotRaw) : null;
-    const feeValue = feeValues[i][0];
-    const fee = Number.isFinite(toNumber_(feeValue)) ? toNumber_(feeValue) : null;
 
-    if (fee === null) continue;
+    if (baseFee !== null) {
+      const key = lotKey ? `${sizeKey}__lot_${lotKey}` : sizeKey;
+      map.set(key, baseFee);
+    }
 
-    const key = lotKey ? `${sizeKey}__lot_${lotKey}` : sizeKey;
-    map.set(key, fee);
+    lotColumns.forEach(({ col, count }) => {
+      const value = row[col - 1];
+      const fee = Number.isFinite(toNumber_(value)) ? toNumber_(value) : null;
+      if (fee !== null) {
+        map.set(`${sizeKey}__lot_${count}`, fee);
+      }
+    });
   }
 
   return function lookup(size, lot) {
