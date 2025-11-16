@@ -173,7 +173,9 @@ class VintageErpApp(ctk.CTk):
         self.protocol("WM_DELETE_WINDOW", self._handle_close)
 
     def _build_tabs(self):
-        summary = build_inventory_snapshot(self.tables["Stock"].rows, self.tables["Ventes"].rows)
+        summary = build_inventory_snapshot(
+            self.tables["Stock"].rows, self.tables["Ventes"].rows, self.tables["Achats"].rows
+        )
 
         dashboard_tab = self.tabview.add("Dashboard")
         self.dashboard_view = DashboardView(dashboard_tab, summary)
@@ -206,7 +208,9 @@ class VintageErpApp(ctk.CTk):
         StockOptionsView(stock_options_tab, self.tables["Stock"], self.refresh_views)
 
     def refresh_views(self):
-        summary = build_inventory_snapshot(self.tables["Stock"].rows, self.tables["Ventes"].rows)
+        summary = build_inventory_snapshot(
+            self.tables["Stock"].rows, self.tables["Ventes"].rows, self.tables["Achats"].rows
+        )
         self.dashboard_view.refresh(summary)
         if self.purchase_view is not None:
             self.purchase_view.refresh()
