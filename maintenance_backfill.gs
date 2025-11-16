@@ -611,14 +611,7 @@ function runBackfillMonthlyLedgers_(filter) {
 
     let dateCell = colDate ? row[colDate - 1] : null;
     if (!(dateCell instanceof Date) || isNaN(dateCell)) {
-      if (typeof dateCell === 'number') {
-        dateCell = new Date(dateCell);
-      } else if (typeof dateCell === 'string' && dateCell.trim()) {
-        const parsed = new Date(dateCell);
-        dateCell = isNaN(parsed) ? null : parsed;
-      } else {
-        dateCell = null;
-      }
+      dateCell = getDateOrNull_(dateCell);
     }
 
     if (!(dateCell instanceof Date) || isNaN(dateCell)) {
@@ -667,7 +660,8 @@ function runBackfillMonthlyLedgers_(filter) {
       margeBrute: marge,
       coeffMarge: coeff,
       nbPieces: 1,
-      sku
+      sku,
+      sourceRowNumber: i + 2
     }, { updateExisting: true });
 
     if (result && result.inserted) {
