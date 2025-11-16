@@ -807,9 +807,6 @@ class StockCardList(ctk.CTkFrame):
     SELECTED_COLOR = "#bfdbfe"
     BORDER_COLOR = "#cbd5e1"
     BORDER_COLOR_SELECTED = "#60a5fa"
-    GRADIENT_START_COLOR = "#ffffff"
-    GRADIENT_END_COLOR = "#8b5cf6"
-    GRADIENT_OPACITY = 0.6
 
     def __init__(self, master, table, *, on_open_details, on_mark_sold, on_bulk_action, on_selection_change=None):
         super().__init__(master)
@@ -820,7 +817,6 @@ class StockCardList(ctk.CTkFrame):
         self.on_selection_change = on_selection_change
         self._selected_indices: set[int] = set()
         self._cards: dict[int, ctk.CTkFrame] = {}
-        self._card_canvases: dict[int, tk.Canvas] = {}
         ctk.CTkLabel(
             self,
             text=(
@@ -838,7 +834,6 @@ class StockCardList(ctk.CTkFrame):
         for child in self.container.winfo_children():
             child.destroy()
         self._cards.clear()
-        self._card_canvases.clear()
         self._selected_indices = {idx for idx in self._selected_indices if idx < len(rows)}
         for idx, row in enumerate(rows):
             self._add_card(idx, row)
@@ -852,20 +847,10 @@ class StockCardList(ctk.CTkFrame):
         label = row.get(HEADERS["STOCK"].ARTICLE, "") or row.get(HEADERS["STOCK"].LIBELLE, "")
         status = "Vendu" if row.get(HEADERS["STOCK"].VENDU_ALT, "") else ""
         subtitle = f"{sku} – {label}" if label else sku
-        card = ctk.CTkFrame(self.container, height=76, fg_color="transparent", border_width=1)
+        card = ctk.CTkFrame(self.container, height=76, fg_color=self.DEFAULT_COLOR, border_width=1)
         card.grid_propagate(False)
         card.pack(fill="x", padx=4, pady=2)
         self._cards[index] = card
-
-        gradient_canvas = tk.Canvas(card, highlightthickness=0, bd=0)
-        gradient_canvas.place(relx=0, rely=0, relwidth=1, relheight=1)
-        gradient_canvas.bind(
-            "<Configure>",
-            lambda event, canvas=gradient_canvas, idx=index: self._draw_card_gradient(
-                canvas, idx in self._selected_indices, event.width, event.height
-            ),
-        )
-        self._card_canvases[index] = gradient_canvas
 
         text_frame = ctk.CTkFrame(card, fg_color="transparent")
         text_frame.place(relx=0, rely=0, relwidth=1, relheight=1)
@@ -940,43 +925,7 @@ class StockCardList(ctk.CTkFrame):
         border_color = self.BORDER_COLOR_SELECTED if selected else self.BORDER_COLOR
         card = self._cards.get(index)
         if card is not None:
-            card.configure(border_color=border_color)
-        canvas = self._card_canvases.get(index)
-        if canvas is not None:
-            self._draw_card_gradient(canvas, selected)
-
-    def _draw_card_gradient(self, canvas: tk.Canvas, selected: bool, width: int | None = None, height: int | None = None):
-        canvas.delete("gradient")
-        width = width or canvas.winfo_width()
-        height = height or canvas.winfo_height()
-        if width <= 0 or height <= 0:
-            return
-        base_hex = self.SELECTED_COLOR if selected else self.DEFAULT_COLOR
-        base_rgb = self._hex_to_rgb(base_hex)
-        start_rgb = self._apply_opacity(self.GRADIENT_START_COLOR, base_rgb, self.GRADIENT_OPACITY)
-        end_rgb = self._apply_opacity(self.GRADIENT_END_COLOR, base_rgb, self.GRADIENT_OPACITY)
-        steps = max(int(height), 1)
-        for i in range(steps):
-            ratio = i / steps
-            blended = self._blend_colors(start_rgb, end_rgb, ratio)
-            color = f"#{blended[0]:02x}{blended[1]:02x}{blended[2]:02x}"
-            canvas.create_rectangle(0, i, width, i + 1, outline="", fill=color, tags="gradient")
-
-    @staticmethod
-    def _hex_to_rgb(value: str) -> tuple[int, int, int]:
-        value = value.lstrip("#")
-        return tuple(int(value[i : i + 2], 16) for i in (0, 2, 4))
-
-    @staticmethod
-    def _apply_opacity(foreground_hex: str, background_rgb: tuple[int, int, int], opacity: float) -> tuple[int, int, int]:
-        foreground_rgb = StockCardList._hex_to_rgb(foreground_hex)
-        return tuple(
-            int(foreground_rgb[i] * opacity + background_rgb[i] * (1 - opacity)) for i in range(3)
-        )
-
-    @staticmethod
-    def _blend_colors(start: tuple[int, int, int], end: tuple[int, int, int], ratio: float) -> tuple[int, int, int]:
-        return tuple(int(start[i] + (end[i] - start[i]) * ratio) for i in range(3))
+            card.configure(border_color=border_color, fg_color=self.SELECTED_COLOR if selected else self.DEFAULT_COLOR)
 
     def _scroll_to_widget(self, widget: tk.Widget):
         container = self.container
