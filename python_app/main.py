@@ -713,8 +713,10 @@ class TableView(ctk.CTkFrame):
         helper = ctk.CTkFrame(table_frame)
         helper.pack(fill="x", padx=12, pady=(12, 0))
         self.helper_frame = helper
+        self.actions_frame = ctk.CTkFrame(helper)
+        self.actions_frame.pack(side="left")
         self.status_var = tk.StringVar(value="Double-cliquez sur une cellule pour la modifier.")
-        ctk.CTkLabel(helper, textvariable=self.status_var, anchor="w").pack(side="left")
+        ctk.CTkLabel(helper, textvariable=self.status_var, anchor="w").pack(side="right", fill="x", expand=True, padx=(12, 0))
         self.table_widget = ScrollableTable(
             table_frame,
             self._visible_headers(),
@@ -774,7 +776,6 @@ class StockTableView(TableView):
     }
 
     def __init__(self, master, table, on_table_changed=None):
-        self.delete_id_var = tk.StringVar(value="")
         super().__init__(master, table, on_table_changed=on_table_changed)
 
     def _visible_headers(self) -> Sequence[str]:
@@ -788,27 +789,14 @@ class StockTableView(TableView):
     def _build_extra_controls(self, parent):
         parent.grid_columnconfigure(0, weight=5)
         parent.grid_columnconfigure(1, weight=0)
+        ctk.CTkButton(
+            self.actions_frame,
+            text="Supprimer la sélection",
+            command=self._delete_selected_rows,
+        ).pack(side="left")
+
         panel = ctk.CTkFrame(parent)
         panel.grid(row=0, column=1, sticky="nsew", padx=(12, 0), pady=12)
-        ctk.CTkLabel(panel, text="Supprimer des articles du stock", font=ctk.CTkFont(size=16, weight="bold"), anchor="w").pack(
-            fill="x", padx=12, pady=(4, 0)
-        )
-        id_row = ctk.CTkFrame(panel)
-        id_row.pack(fill="x", padx=12, pady=(8, 4))
-        ctk.CTkLabel(id_row, text="ID achat", width=120, anchor="w").pack(side="left")
-        entry = ctk.CTkEntry(id_row, textvariable=self.delete_id_var)
-        entry.pack(side="left", fill="x", expand=True, padx=(8, 0))
-        buttons = ctk.CTkFrame(panel)
-        buttons.pack(fill="x", padx=12, pady=(4, 8))
-        ctk.CTkButton(buttons, text="Supprimer cet ID", command=self._delete_by_id).pack(side="left")
-        ctk.CTkButton(buttons, text="Supprimer la sélection", command=self._delete_selected_rows).pack(
-            side="left", padx=(8, 0)
-        )
-        ctk.CTkLabel(
-            panel,
-            text="Choisissez des lignes dans la table ou saisissez un ID pour supprimer toutes ses références.",
-            anchor="w",
-        ).pack(fill="x", padx=12, pady=(0, 8))
 
         import_frame = ctk.CTkFrame(panel)
         import_frame.pack(fill="x", padx=12, pady=(0, 8))
@@ -834,32 +822,6 @@ class StockTableView(TableView):
         removed = self._delete_rows_by_indices(indices)
         if removed:
             self.status_var.set(f"{removed} article(s) supprimé(s) du stock.")
-        else:
-            self.status_var.set("Aucune ligne supprimée.")
-
-    def _delete_by_id(self):
-        target = self.delete_id_var.get().strip()
-        if not target:
-            self.status_var.set("Saisissez l'ID achat à supprimer.")
-            return
-        indices = [
-            idx
-            for idx, row in enumerate(self.table.rows)
-            if str(row.get(HEADERS["STOCK"].ID, "")).strip() == target
-        ]
-        if not indices:
-            self.status_var.set(f"Aucun article trouvé pour l'ID {target}.")
-            return
-        count = len(indices)
-        if not messagebox.askyesno(
-            "Confirmer la suppression",
-            f"Supprimer les {count} article(s) rattachés à l'ID {target} ?",
-        ):
-            return
-        removed = self._delete_rows_by_indices(indices)
-        if removed:
-            self.status_var.set(f"{removed} article(s) de l'ID {target} supprimé(s).")
-            self.delete_id_var.set("")
         else:
             self.status_var.set("Aucune ligne supprimée.")
 
