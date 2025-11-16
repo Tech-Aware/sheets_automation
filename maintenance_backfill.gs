@@ -204,9 +204,11 @@ function registerSalesActionsMenu_(ui, ss) {
 }
 
 function registerAccountingActionsMenu_(ui) {
+  const nextYearLabel = `Faire suivre sur année ${getNextAccountingYear_()}`;
   ui.createMenu('Actions compta')
     .addItem('Calculer les frais (feuille active)', 'recalculateActiveLedgerFees')
     .addItem('Supprimer les doublons (feuille active)', 'purgeActiveLedgerDuplicates')
+    .addItem(nextYearLabel, 'copySpreadsheetToNextAccountingYear')
     .addToUi();
 }
 
@@ -252,6 +254,26 @@ function purgeActiveLedgerDuplicates() {
     ? `${result.removed} doublon(s) supprimé(s).`
     : 'Aucun doublon trouvé.';
   ss.toast(message, 'Doublons compta', 5);
+}
+
+function copySpreadsheetToNextAccountingYear() {
+  const nextYear = getNextAccountingYear_();
+  const targetName = `comptabilité ${nextYear}`;
+
+  const ss = SpreadsheetApp.getActive();
+  const existing = DriveApp.getFilesByName(targetName);
+  if (existing.hasNext()) {
+    const url = existing.next().getUrl();
+    ss.toast(`Le classeur "${targetName}" existe déjà.\n${url}`, 'Passage à l\'année suivante', 10);
+    return;
+  }
+
+  const copy = ss.copy(targetName);
+  ss.toast(`Les données ont été copiées vers "${targetName}".\n${copy.getUrl()}`, 'Passage à l\'année suivante', 10);
+}
+
+function getNextAccountingYear_() {
+  return new Date().getFullYear() + 1;
 }
 
 function noopBackfillMonthlyLedgerMenu() {
