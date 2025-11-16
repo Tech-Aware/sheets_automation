@@ -280,7 +280,7 @@ class PurchasesView(ctk.CTkFrame):
             height=18,
             column_width=135,
             column_widths={
-                HEADERS["ACHATS"].ID: 50,
+                HEADERS["ACHATS"].ID: 32,
                 HEADERS["ACHATS"].TOTAL_TTC: 110,
             },
             enable_inline_edit=False,
@@ -708,7 +708,7 @@ class TableView(ctk.CTkFrame):
             height=20,
             on_cell_edited=self._on_cell_edit,
             column_width=160,
-            column_widths={"ID": 80},
+            column_widths={"ID": 52},
         )
         self.table_widget.pack(fill="both", expand=True, padx=12, pady=12)
         self._build_extra_controls(self.content)
