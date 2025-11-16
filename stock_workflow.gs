@@ -85,21 +85,19 @@ function handleStock(e) {
   }
 
   function computeDateFromPrevious_(key) {
+    const now = new Date();
     const index = findChronologyIndex_(key);
     if (index <= 0) {
-      return getTomorrow_();
+      return now;
     }
 
     const previous = chronology[index - 1];
     const baseDate = getChronoDate_(previous.key);
-    if (baseDate) {
-      const shifted = addDays_(baseDate, 1);
-      if (shifted) {
-        return shifted;
-      }
+    if (baseDate && baseDate instanceof Date && !isNaN(baseDate)) {
+      return baseDate.getTime() > now.getTime() ? new Date(baseDate.getTime()) : now;
     }
 
-    return getTomorrow_();
+    return now;
   }
 
   function setChronoDateFromPrevious_(key) {
@@ -108,9 +106,7 @@ function handleStock(e) {
       return null;
     }
 
-    const nextDate = key === 'dvente'
-      ? new Date()
-      : computeDateFromPrevious_(key);
+    const nextDate = computeDateFromPrevious_(key);
     const cell = sh.getRange(r, entry.column);
     cell.setValue(nextDate);
     cell.setNumberFormat('dd/MM/yyyy');
