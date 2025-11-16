@@ -623,6 +623,7 @@ function handleStock(e) {
       const fallbackValue = oldValueDate ? new Date(oldValueDate.getTime()) : '';
       storePreviousCellValue_(sh, r, C_DVENTE, fallbackValue);
       ensureValidPriceOrWarn_(sh, r, C_PRIX);
+      refreshValiderCheckbox_();
       return;
     }
 
@@ -645,6 +646,8 @@ function handleStock(e) {
         valCell.clearDataValidations();
         valCell.clearContent();
       }
+
+      refreshValiderCheckbox_();
 
       restoreCheckboxValidation_(cell, previousValidation);
       return;
@@ -709,6 +712,7 @@ function handleStock(e) {
       const fallbackValue = oldValueDate ? new Date(oldValueDate.getTime()) : '';
       storePreviousCellValue_(sh, r, C_DVENTE, fallbackValue);
       ensureValidPriceOrWarn_(sh, r, C_PRIX);
+      refreshValiderCheckbox_();
       return;
     }
 
@@ -716,6 +720,7 @@ function handleStock(e) {
     if (C_PRIX) {
       ensureValidPriceOrWarn_(sh, r, C_PRIX);
     }
+    refreshValiderCheckbox_();
     if (oldValueDate) {
       cell.clearDataValidations();
       cell.setNumberFormat('dd/MM/yyyy');
@@ -745,6 +750,7 @@ function handleStock(e) {
       }
       propagateForwardFrom_('dvente');
       ensureValidPriceOrWarn_(sh, r, C_PRIX);
+      refreshValiderCheckbox_();
       return;
     }
 
@@ -767,6 +773,8 @@ function handleStock(e) {
         valCell.clearDataValidations();
         valCell.clearContent();
       }
+
+      refreshValiderCheckbox_();
       return;
     }
 
