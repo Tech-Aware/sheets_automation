@@ -563,6 +563,8 @@ function runBackfillMonthlyLedgers_(filter) {
   const colDate = resolver.colExact(HEADERS.VENTES.DATE_VENTE);
   const colPrix = resolver.colExact(HEADERS.VENTES.PRIX_VENTE)
     || resolver.colExact(HEADERS.VENTES.PRIX_VENTE_ALT);
+  const colCompta = resolver.colExact(HEADERS.VENTES.COMPTABILISE)
+    || resolver.colWhere(h => h.toLowerCase().includes('compt'));
 
   if (!colDate) {
     ss.toast(`Colonne ${HEADERS.VENTES.DATE_VENTE} introuvable dans "Ventes".`, 'Recopie comptable', 8);
@@ -591,6 +593,9 @@ function runBackfillMonthlyLedgers_(filter) {
   let duplicates = 0;
   let missingDate = 0;
   let skippedByFilter = 0;
+  let alreadyAccounted = 0;
+
+  const touchedLedgers = new Set();
 
   if (progress && resumeProgress) {
     startIndex = Math.max(0, Math.min(Number(progress.nextIndex) || 0, totalRows));
@@ -604,6 +609,15 @@ function runBackfillMonthlyLedgers_(filter) {
   const startTime = Date.now();
   let timedOut = false;
   let nextIndex = startIndex;
+
+  const cleanupLedgers = () => {
+    touchedLedgers.forEach(name => {
+      const ledgerSheet = ss.getSheetByName(name);
+      if (ledgerSheet) {
+        removeLedgerDuplicateSkus_(ledgerSheet);
+      }
+    });
+  };
 
   for (let i = startIndex; i < data.length; i++) {
     const row = data[i];
@@ -629,6 +643,11 @@ function runBackfillMonthlyLedgers_(filter) {
     const idVal = colId ? row[colId - 1] : '';
     const libelle = colLibelle ? row[colLibelle - 1] : '';
     const sku = colSku ? row[colSku - 1] : '';
+    const comptaFlag = colCompta ? row[colCompta - 1] : '';
+    if (isComptabiliseFlagActive_(comptaFlag)) {
+      alreadyAccounted++;
+      continue;
+    }
 
     let prixVente = NaN;
     if (colPrix) {
@@ -664,12 +683,20 @@ function runBackfillMonthlyLedgers_(filter) {
       sourceRowNumber: i + 2
     }, { updateExisting: true });
 
+    if (result && result.sheetName) {
+      touchedLedgers.add(result.sheetName);
+    }
+
     if (result && result.inserted) {
       copied++;
     } else if (result && result.updated) {
       updated++;
     } else {
       duplicates++;
+    }
+
+    if ((result && (result.inserted || result.updated || result.skipped)) && colCompta) {
+      ventes.getRange(i + 2, colCompta).setValue(true);
     }
 
     if ((Date.now() - startTime) >= BACKFILL_MAX_RUNTIME_MS && i < data.length - 1) {
@@ -687,6 +714,9 @@ function runBackfillMonthlyLedgers_(filter) {
   }
   if (missingDate) {
     messageParts.push(`${missingDate} vente(s) sans date de vente.`);
+  }
+  if (alreadyAccounted) {
+    messageParts.push(`${alreadyAccounted} vente(s) déjà comptabilisées.`);
   }
   if (filter && skippedByFilter && copied === 0 && updated === 0) {
     messageParts.push(`${skippedByFilter} ligne(s) ignorée(s) car hors du mois sélectionné.`);
@@ -708,11 +738,13 @@ function runBackfillMonthlyLedgers_(filter) {
       lastUpdated: new Date().toISOString()
     });
     messageParts.push(`Limite de temps atteinte (${nextIndex}/${totalRows}). Relance la recopie pour continuer.`);
+    cleanupLedgers();
     ss.toast(messageParts.join(' '), title, 8);
     return;
   }
 
   clearBackfillProgress_(filterKey);
+  cleanupLedgers();
   ss.toast(messageParts.join(' '), title, 8);
 }
 

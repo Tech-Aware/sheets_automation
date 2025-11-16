@@ -82,6 +82,18 @@ function clearReturnFlag_(range) {
   range.clearContent();
 }
 
+function isComptabiliseFlagActive_(value) {
+  if (value === true) return true;
+  if (value === 'TRUE') return true;
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase();
+    if (normalized === 'oui' || normalized === 'true' || normalized === 'comptabilisé' || normalized === 'comptabilise') {
+      return true;
+    }
+  }
+  return false;
+}
+
 function buildSaleRecordFromVentesRow_(rowValues, resolver, rowNumber) {
   if (!rowValues || !resolver) return {};
   const colExact = resolver.colExact.bind(resolver);
@@ -101,6 +113,8 @@ function buildSaleRecordFromVentesRow_(rowValues, resolver, rowNumber) {
   const COL_TAILLE = colExact(HEADERS.VENTES.TAILLE_COLIS)
     || colExact(HEADERS.VENTES.TAILLE)
     || colWhere(isShippingSizeHeader_);
+  const COL_COMPTA = colExact(HEADERS.VENTES.COMPTABILISE)
+    || colWhere(h => h.toLowerCase().includes('compt'));
 
   const id = COL_ID ? rowValues[COL_ID - 1] : '';
   const sku = COL_SKU ? rowValues[COL_SKU - 1] : '';
@@ -109,6 +123,7 @@ function buildSaleRecordFromVentesRow_(rowValues, resolver, rowNumber) {
   const dateRaw = COL_DATE ? rowValues[COL_DATE - 1] : null;
   const lot = COL_LOT ? rowValues[COL_LOT - 1] : '';
   const taille = COL_TAILLE ? rowValues[COL_TAILLE - 1] : '';
+  const comptabilise = COL_COMPTA ? isComptabiliseFlagActive_(rowValues[COL_COMPTA - 1]) : false;
 
   const prixVente = prixVenteRaw === '' || prixVenteRaw === null || prixVenteRaw === undefined
     ? ''
@@ -126,6 +141,7 @@ function buildSaleRecordFromVentesRow_(rowValues, resolver, rowNumber) {
     nbPieces: 1,
     lot,
     taille,
+    comptabilise,
     sourceRowNumber: Number.isFinite(rowNumber) ? rowNumber : undefined
   };
 }
@@ -296,6 +312,8 @@ function exportVente_(e, row, C_ID, C_LABEL, C_SKU, C_PRIX, C_DVENTE, C_STAMPV, 
     || ventesWhere(isShippingSizeHeader_);
   const COL_LOT_VENTE   = ventesExact(HEADERS.VENTES.LOT)
     || ventesWhere(h => h.includes('lot'));
+  const COL_COMPTA      = ventesExact(HEADERS.VENTES.COMPTABILISE)
+    || ventesWhere(h => h.toLowerCase().includes('compt'));
   const COL_DELAI_IMM   = ventesExact(HEADERS.VENTES.DELAI_IMMOBILISATION)
     || ventesWhere(h => h.includes('immobilisation'));
   const COL_DELAI_ML    = ventesExact(HEADERS.VENTES.DELAI_MISE_EN_LIGNE)
@@ -414,6 +432,16 @@ function exportVente_(e, row, C_ID, C_LABEL, C_SKU, C_PRIX, C_DVENTE, C_STAMPV, 
     sku
   });
 
+  if (COL_COMPTA) {
+    ventes.getRange(start, COL_COMPTA).setValue(true);
+  }
+
+  const ledgerName = getLedgerSheetNameForDate_(dateV);
+  const ledgerSheet = ledgerName ? ss.getSheetByName(ledgerName) : null;
+  if (ledgerSheet) {
+    removeLedgerDuplicateSkus_(ledgerSheet);
+  }
+
   const lastV = ventes.getLastRow();
   if (lastV > 2 && COL_DATE_VENTE) {
     ventes.getRange(2, 1, lastV - 1, ventes.getLastColumn()).sort([{column: COL_DATE_VENTE, ascending: false}]);
@@ -471,18 +499,25 @@ function getAchatsRecordByIdOrSku_(ss, idVal, sku) {
   return null;
 }
 
+function getLedgerSheetNameForDate_(date) {
+  if (!(date instanceof Date) || isNaN(date)) return '';
+  const month = date.getMonth();
+  const year = date.getFullYear();
+  return `Compta ${String(month + 1).padStart(2, '0')}-${year}`;
+}
+
 function copySaleToMonthlySheet_(ss, sale, options) {
   if (!sale || !(sale.dateVente instanceof Date) || isNaN(sale.dateVente)) {
-    return { inserted: false, updated: false };
+    return { inserted: false, updated: false, sheetName: '' };
   }
 
   const opts = options || {};
   const allowUpdates = Boolean(opts.updateExisting);
   const isReturn = Boolean(sale.retour);
 
+  const sheetName = getLedgerSheetNameForDate_(sale.dateVente);
   const month = sale.dateVente.getMonth();
   const year = sale.dateVente.getFullYear();
-  const sheetName = `Compta ${String(month + 1).padStart(2, '0')}-${year}`;
   const monthStart = new Date(year, month, 1);
 
   let sheet = ss.getSheetByName(sheetName);
@@ -517,13 +552,13 @@ function copySaleToMonthlySheet_(ss, sale, options) {
       : '';
 
     if (!noteMatches && normalizedSku && rowSku === normalizedSku) {
-      return { inserted: false, updated: false, skipped: true };
+      return { inserted: false, updated: false, skipped: true, sheetName };
     }
   }
 
   if (isReturn) {
     if (!existingRowNumber) {
-      return { inserted: false, updated: false, removed: false };
+      return { inserted: false, updated: false, removed: false, sheetName };
     }
 
     const weekNumber = findLedgerWeekNumberForRow_(sheet, existingRowNumber);
@@ -537,7 +572,7 @@ function copySaleToMonthlySheet_(ss, sale, options) {
     applySkuPaletteFormatting_(sheet, MONTHLY_LEDGER_INDEX.SKU + 1, MONTHLY_LEDGER_INDEX.LIBELLE + 1);
     ensureLedgerWeekHighlight_(sheet, headersLen);
 
-    return { inserted: false, updated: false, removed: true };
+    return { inserted: false, updated: false, removed: true, sheetName };
   }
 
   const weekRanges = computeMonthlyWeekRanges_(monthStart);
@@ -652,7 +687,7 @@ function copySaleToMonthlySheet_(ss, sale, options) {
   applySkuPaletteFormatting_(sheet, MONTHLY_LEDGER_INDEX.SKU + 1, MONTHLY_LEDGER_INDEX.LIBELLE + 1);
   ensureLedgerWeekHighlight_(sheet, headersLen);
 
-  return { inserted: insertedRow, updated: updatedRow, removed: false };
+  return { inserted: insertedRow, updated: updatedRow, removed: false, sheetName };
 }
 
 function ensureMonthlyLedgerSheet_(sheet, monthStart) {
@@ -678,6 +713,64 @@ function ensureMonthlyLedgerSheet_(sheet, monthStart) {
   applySkuPaletteFormatting_(sheet, MONTHLY_LEDGER_INDEX.SKU + 1, MONTHLY_LEDGER_INDEX.LIBELLE + 1);
   ensureLedgerWeekHighlight_(sheet, headersLen);
   updateLedgerResultRow_(sheet, headersLen);
+}
+
+function removeLedgerDuplicateSkus_(sheet) {
+  if (!sheet || !isMonthlyLedgerSheet_(sheet)) return { removed: 0, weeks: [] };
+  const headersLen = MONTHLY_LEDGER_HEADERS.length;
+  const last = sheet.getLastRow();
+  if (last <= 2) return { removed: 0, weeks: [] };
+
+  const values = sheet.getRange(2, 1, last - 1, headersLen).getValues();
+  const seen = {};
+  const rowsToDelete = [];
+  const affectedWeeks = new Set();
+
+  for (let i = 0; i < values.length; i++) {
+    const rowNumber = i + 2;
+    const label = String(values[i][0] || '').toUpperCase();
+    if (label.startsWith('SEMAINE') || label.startsWith('TOTAL VENTE') || label.startsWith(LEDGER_RESULT_LABEL)) {
+      continue;
+    }
+
+    const hasKeyInfo = [MONTHLY_LEDGER_INDEX.ID, MONTHLY_LEDGER_INDEX.SKU, MONTHLY_LEDGER_INDEX.LIBELLE]
+      .filter(idx => idx >= 0)
+      .some(idx => String(values[i][idx] || '').trim() !== '');
+    if (!hasKeyInfo) continue;
+
+    const skuIdx = MONTHLY_LEDGER_INDEX.SKU;
+    const rawSku = skuIdx >= 0 ? values[i][skuIdx] : '';
+    const normSku = rawSku ? normText_(rawSku) : '';
+    if (!normSku) continue;
+
+    if (seen[normSku]) {
+      rowsToDelete.push(rowNumber);
+      const weekNumber = findLedgerWeekNumberForRow_(sheet, rowNumber);
+      if (weekNumber) {
+        affectedWeeks.add(weekNumber);
+      }
+    } else {
+      seen[normSku] = rowNumber;
+    }
+  }
+
+  if (!rowsToDelete.length) {
+    return { removed: 0, weeks: [] };
+  }
+
+  rowsToDelete.sort((a, b) => b - a).forEach(r => sheet.deleteRow(r));
+
+  const weeks = Array.from(affectedWeeks);
+  weeks.forEach(week => {
+    sortWeekRowsByDate_(sheet, week, headersLen);
+    updateWeeklyTotals_(sheet, week, headersLen);
+  });
+  updateMonthlyTotals_(sheet, headersLen);
+  updateLedgerResultRow_(sheet, headersLen);
+  applySkuPaletteFormatting_(sheet, MONTHLY_LEDGER_INDEX.SKU + 1, MONTHLY_LEDGER_INDEX.LIBELLE + 1);
+  ensureLedgerWeekHighlight_(sheet, headersLen);
+
+  return { removed: rowsToDelete.length, weeks };
 }
 
 function buildSaleDedupeKey_(sale) {
