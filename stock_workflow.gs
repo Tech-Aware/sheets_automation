@@ -325,6 +325,15 @@ function handleStock(e) {
     const oldValueDate = getDateOrNull_(oldValue);
     const checkboxInfo = !oldValueDate ? { range: cell, oldValue } : null;
 
+    if (oldValueDate && (turnedOn || turnedOff)) {
+      cell.setValue(oldValueDate);
+      cell.setNumberFormat('dd/MM/yyyy');
+      if (wasCheckbox) {
+        cell.clearDataValidations();
+      }
+      return;
+    }
+
     if (turnedOff) {
       if (published) {
         cell.setValue(true);
@@ -338,10 +347,14 @@ function handleStock(e) {
       if (!ensureChronologyOrRevert_('dmis', oldValue, checkboxInfo) && wasCheckbox) {
         restoreCheckboxValidation_(cell, previousValidation);
       }
+      restorePreviousCellValue_(sh, r, C_DMIS);
+      restoreCheckboxValidation_(cell, previousValidation);
       return;
     }
 
     if (turnedOn) {
+      const fallbackValue = oldValueDate ? new Date(oldValueDate.getTime()) : '';
+      storePreviousCellValue_(sh, r, C_DMIS, fallbackValue);
       if (wasCheckbox) {
         cell.clearDataValidations();
       }
@@ -428,6 +441,15 @@ function handleStock(e) {
     const oldValueDate = getDateOrNull_(oldValue);
     const checkboxInfo = !oldValueDate ? { range: cell, oldValue } : null;
 
+    if (oldValueDate && (turnedOn || turnedOff)) {
+      cell.setValue(oldValueDate);
+      cell.setNumberFormat('dd/MM/yyyy');
+      if (wasCheckbox) {
+        cell.clearDataValidations();
+      }
+      return;
+    }
+
     if (turnedOff) {
       if (sold) {
         cell.setValue(true);
@@ -442,10 +464,14 @@ function handleStock(e) {
       if (!ensureChronologyOrRevert_('dpub', oldValue, checkboxInfo) && wasCheckbox) {
         restoreCheckboxValidation_(cell, previousValidation);
       }
+      restorePreviousCellValue_(sh, r, C_DPUB);
+      restoreCheckboxValidation_(cell, previousValidation);
       return;
     }
 
     if (turnedOn) {
+      const fallbackValue = oldValueDate ? new Date(oldValueDate.getTime()) : '';
+      storePreviousCellValue_(sh, r, C_DPUB, fallbackValue);
       if (wasCheckbox) {
         cell.clearDataValidations();
       }
