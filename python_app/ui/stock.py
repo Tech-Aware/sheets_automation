@@ -93,11 +93,20 @@ class StockCardList(ctk.CTkFrame):
             text=subtitle or "(SKU manquant)",
             anchor="w",
             font=ctk.CTkFont(weight="bold"),
+            wraplength=560,
+            justify="left",
         )
         title.pack(fill="x")
         metadata_labels = []
         for line in self._build_metadata_lines(row):
-            lbl = ctk.CTkLabel(content_frame, text=line, anchor="w", font=ctk.CTkFont(size=12))
+            lbl = ctk.CTkLabel(
+                content_frame,
+                text=line,
+                anchor="w",
+                font=ctk.CTkFont(size=12),
+                wraplength=560,
+                justify="left",
+            )
             lbl.pack(fill="x")
             metadata_labels.append(lbl)
 
