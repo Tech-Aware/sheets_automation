@@ -58,8 +58,8 @@ function handleStock(e) {
   const c = e.range.getColumn(), r = e.range.getRow();
 
   try {
-    applyListValidation_(C_TAILLE, ['Petit', 'Moyen', 'Grand']);
-    applyListValidation_(C_LOT, ['2', '3', '4', '5']);
+    applyStockListValidation_(sh, C_TAILLE, ['Petit', 'Moyen', 'Grand']);
+    applyStockListValidation_(sh, C_LOT, ['2', '3', '4', '5']);
     const chronoCols = {
       dms: C_DMS,
       dmis: C_DMIS,
@@ -127,17 +127,7 @@ function handleStock(e) {
     return match ? match.key : null;
   }
 
-  function applyListValidation_(col, values) {
-    if (!col || !Array.isArray(values) || !values.length) return;
-    const lastRow = sh.getMaxRows();
-    if (lastRow < 2) return;
-    const rule = SpreadsheetApp
-      .newDataValidation()
-      .requireValueInList(values, true)
-      .setAllowInvalid(false)
-      .build();
-    sh.getRange(2, col, lastRow - 1, 1).setDataValidation(rule);
-  }
+  
 
   function hasValidPrice_() {
     if (!C_PRIX) return false;
@@ -897,4 +887,36 @@ function handleStock(e) {
   } finally {
     applySkuPaletteFormatting_(sh, C_SKU, C_LABEL);
   }
+}
+
+function applyStockListValidation_(sheet, col, values) {
+  if (!sheet || !col || !Array.isArray(values) || !values.length) return;
+  const lastRow = sheet.getMaxRows();
+  if (lastRow < 2) return;
+  const rule = SpreadsheetApp
+    .newDataValidation()
+    .requireValueInList(values, true)
+    .setAllowInvalid(false)
+    .build();
+  sheet.getRange(2, col, lastRow - 1, 1).setDataValidation(rule);
+}
+
+function ensureStockSizeDropdowns() {
+  const ss = SpreadsheetApp.getActive();
+  if (!ss) return;
+
+  const stockSheet = ss.getSheetByName('Stock');
+  if (!stockSheet) return;
+
+  const stockHeaders = stockSheet.getRange(1, 1, 1, stockSheet.getLastColumn()).getValues()[0];
+  const resolver = makeHeaderResolver_(stockHeaders);
+  const colExact = resolver.colExact.bind(resolver);
+  const colWhere = resolver.colWhere.bind(resolver);
+
+  const sizeCol = colExact(HEADERS.STOCK.TAILLE_COLIS)
+    || colExact(HEADERS.STOCK.TAILLE_COLIS_ALT)
+    || colExact(HEADERS.STOCK.TAILLE)
+    || colWhere(isShippingSizeHeader_);
+
+  applyStockListValidation_(stockSheet, sizeCol, ['Petit', 'Moyen', 'Grand']);
 }
