@@ -7,10 +7,11 @@ import math
 import re
 import unicodedata
 from sys import version_info
-from typing import Optional, Sequence
+from typing import Mapping, Optional, Sequence
 
 from ..config import HEADERS, MONTH_NAMES_FR
 from ..datasources.workbook import TableData
+from ..services.summaries import InventoryCache
 from ..utils.datefmt import format_display_date, parse_date_value
 
 
@@ -70,12 +71,20 @@ class WorkflowCoordinator:
         self.compta = compta
         self._achats_header_map = self._build_header_map(self.achats.headers)
         self._stock_header_map = self._build_header_map(self.stock.headers)
+        self._purchase_by_id: dict[str, dict] = {}
+        self._stock_by_sku: dict[str, dict] = {}
+        self._sales_by_sku: dict[str, dict] = {}
+        self._sku_suffix_index: dict[str, int] = {}
+        self._max_purchase_id = 0
+        self._max_sale_id = 0
+        self._inventory_cache = InventoryCache.from_tables(self.stock.rows, self.ventes.rows, self.achats.rows)
+        self._rebuild_indexes()
 
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
     def create_purchase(self, data: PurchaseInput) -> dict:
-        purchase_id = str(self._next_numeric_id(self.achats.rows, HEADERS["ACHATS"].ID))
+        purchase_id = str(self._next_purchase_id())
         achat_date = self._parse_date_string(data.date_achat) or self._today_date()
         livraison_date = self._parse_date_string(data.date_livraison) or achat_date
         mois_label, mois_num = self._month_info(achat_date)
@@ -121,6 +130,8 @@ class WorkflowCoordinator:
         self._set_purchase_value(row, HEADERS["ACHATS"].PRET_STOCK_COMBINED, "")
         self._set_purchase_value(row, HEADERS["ACHATS"].DATE_MISE_EN_STOCK, "")
         self.achats.rows.append(row)
+        self._index_purchase(row)
+        self._inventory_cache.on_purchase_added(row)
         return row
 
     def delete_purchases(self, row_indices: Sequence[int]) -> tuple[int, int]:
@@ -138,11 +149,13 @@ class WorkflowCoordinator:
             purchase_id = self._get_purchase_value(row, HEADERS["ACHATS"].ID)
             if purchase_id not in (None, ""):
                 removed_purchase_ids.append(str(purchase_id).strip())
+            self._purchase_by_id.pop(self._normalize_id_key(purchase_id), None)
+            self._inventory_cache.on_purchase_removed(row)
         stock_removed = self._remove_stock_rows(removed_purchase_ids)
         return removed, stock_removed
 
     def transfer_to_stock(self, data: StockInput) -> dict:
-        purchase = self._find_row(self.achats.rows, HEADERS["ACHATS"].ID, data.purchase_id)
+        purchase = self._purchase_by_id.get(self._normalize_id_key(data.purchase_id))
         if purchase is None:
             raise ValueError(f"Achat {data.purchase_id} introuvable")
         stock_id_value = self._get_purchase_value(purchase, HEADERS["ACHATS"].ID) or data.purchase_id
@@ -165,18 +178,21 @@ class WorkflowCoordinator:
         self._set_stock_value(row, HEADERS["STOCK"].DATE_LIVRAISON, self._get_purchase_value(purchase, HEADERS["ACHATS"].DATE_LIVRAISON))
         self._set_stock_value(row, HEADERS["STOCK"].DATE_MISE_EN_STOCK, date_stock)
         self.stock.rows.append(row)
+        self._index_stock_row(row)
+        self._inventory_cache.on_stock_added(row)
         return row
 
     def register_sale(self, data: SaleInput) -> dict:
-        stock_row = self._find_row(self.stock.rows, HEADERS["STOCK"].SKU, data.sku)
+        stock_row = self._stock_by_sku.get(self._normalize_sku_key(data.sku))
         if stock_row is None:
             raise ValueError(f"Article {data.sku} introuvable dans le stock")
         sale_date_value = self._parse_date_string(data.date_vente) or self._today_date()
         sale_date = self._format_date(sale_date_value)
+        was_sold = self._is_stock_sold(stock_row)
         stock_row[self._stock_column(HEADERS["STOCK"].VENDU_ALT)] = sale_date
         stock_row[self._stock_column(HEADERS["STOCK"].DATE_VENTE_ALT)] = sale_date
         stock_row[self._stock_column(HEADERS["STOCK"].PRIX_VENTE)] = round(data.prix_vente, 2)
-        sale_id = str(self._next_numeric_id(self.ventes.rows, HEADERS["VENTES"].ID))
+        sale_id = str(self._next_sale_id())
         libelle = self._get_stock_value(stock_row, HEADERS["STOCK"].LIBELLE) or self._get_stock_value(
             stock_row, HEADERS["STOCK"].ARTICLE
         )
@@ -191,27 +207,39 @@ class WorkflowCoordinator:
             HEADERS["VENTES"].LOT: data.lot or self._get_stock_value(stock_row, HEADERS["STOCK"].LOT),
         }
         self.ventes.rows.append(sale_row)
+        self._sales_by_sku[self._normalize_sku_key(data.sku)] = sale_row
+        self._inventory_cache.on_stock_sold(
+            stock_row,
+            sale_price=data.prix_vente,
+            frais=data.frais_colissage,
+            was_sold=was_sold,
+        )
         ledger_row = self._build_compta_row(sale_row)
         if ledger_row:
             self.compta.rows.append(ledger_row)
         return sale_row
 
     def register_return(self, sku: str, note: str) -> dict:
-        sale_row = self._find_row(self.ventes.rows, HEADERS["VENTES"].SKU, sku)
+        sale_row = self._sales_by_sku.get(self._normalize_sku_key(sku))
         if sale_row is None:
             raise ValueError(f"Aucune vente trouvée pour le SKU {sku}")
         sale_row[HEADERS["VENTES"].RETOUR] = note or "Retour client"
-        stock_row = self._find_row(self.stock.rows, HEADERS["STOCK"].SKU, sku)
+        stock_row = self._stock_by_sku.get(self._normalize_sku_key(sku))
         if stock_row is not None:
+            was_sold = self._is_stock_sold(stock_row)
             stock_row[self._stock_column(HEADERS["STOCK"].VENDU_ALT)] = ""
             stock_row[self._stock_column(HEADERS["STOCK"].DATE_VENTE_ALT)] = ""
+            self._inventory_cache.on_stock_return(stock_row, was_sold=was_sold)
         return sale_row
 
     def build_sku_base(self, article: str, marque: str, genre: str = "") -> str:
         return self._generate_reference(article, marque, genre)
 
+    def inventory_snapshot(self) -> "InventorySnapshot":
+        return self._inventory_cache.snapshot()
+
     def prepare_stock_from_purchase(self, purchase_id: str, ready_date: str | None = None) -> list[dict]:
-        purchase = self._find_row(self.achats.rows, HEADERS["ACHATS"].ID, purchase_id)
+        purchase = self._purchase_by_id.get(self._normalize_id_key(purchase_id))
         if purchase is None:
             raise ValueError(f"Achat {purchase_id} introuvable")
         already_ready = self._get_purchase_value(purchase, HEADERS["ACHATS"].PRET_STOCK_COMBINED)
@@ -261,6 +289,8 @@ class WorkflowCoordinator:
             self._set_stock_value(stock_row, HEADERS["STOCK"].DATE_LIVRAISON, livraison_str)
             self._set_stock_value(stock_row, HEADERS["STOCK"].DATE_MISE_EN_STOCK, ready_stamp)
             self.stock.rows.append(stock_row)
+            self._index_stock_row(stock_row, base=base, suffix=next_suffix + idx + 1)
+            self._inventory_cache.on_stock_added(stock_row)
             created.append(stock_row)
         return created
 
@@ -306,6 +336,9 @@ class WorkflowCoordinator:
             if row.get(column) == value:
                 return row
         return None
+
+    def rebuild_indexes(self) -> None:
+        self._rebuild_indexes()
 
     def _today(self) -> str:
         return self._format_date(self._today_date())
@@ -355,6 +388,13 @@ class WorkflowCoordinator:
         except (TypeError, ValueError):
             return 0
 
+    @staticmethod
+    def _safe_float(value) -> float:
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return 0.0
+
     def _parse_date_string(self, value) -> date | None:
         return parse_date_value(value)
 
@@ -403,8 +443,11 @@ class WorkflowCoordinator:
             value = self._get_stock_value(self.stock.rows[idx], HEADERS["STOCK"].ID)
             if value is None:
                 continue
+            sku = self._get_stock_value(self.stock.rows[idx], HEADERS["STOCK"].SKU)
             if str(value).strip() in normalized:
-                del self.stock.rows[idx]
+                row = self.stock.rows.pop(idx)
+                self._stock_by_sku.pop(self._normalize_sku_key(sku), None)
+                self._inventory_cache.on_stock_removed(row)
                 removed += 1
         return removed
 
@@ -423,22 +466,86 @@ class WorkflowCoordinator:
         return ""
 
     def _next_sku_suffix(self, base: str) -> int:
-        sku_column = self._stock_column(HEADERS["STOCK"].SKU)
-        prefix = f"{base}-"
-        max_suffix = 0
+        return self._sku_suffix_index.get(base, 0)
+
+    def _normalize_id_key(self, value) -> str:
+        return str(value).strip() if value not in (None, "") else ""
+
+    def _normalize_sku_key(self, sku) -> str:
+        return str(sku).strip().upper() if sku not in (None, "") else ""
+
+    def _index_purchase(self, row: dict) -> None:
+        purchase_id = self._normalize_id_key(self._get_purchase_value(row, HEADERS["ACHATS"].ID))
+        if purchase_id:
+            self._purchase_by_id[purchase_id] = row
+            numeric = self._coerce_numeric_id(purchase_id)
+            if numeric is not None:
+                self._max_purchase_id = max(self._max_purchase_id, numeric)
+
+    def _index_sale(self, row: dict) -> None:
+        sku = self._normalize_sku_key(row.get(HEADERS["VENTES"].SKU))
+        if sku:
+            self._sales_by_sku[sku] = row
+        numeric = self._coerce_numeric_id(row.get(HEADERS["VENTES"].ID))
+        if numeric is not None:
+            self._max_sale_id = max(self._max_sale_id, numeric)
+
+    def _extract_sku_base(self, sku: str | None) -> str:
+        if not sku:
+            return ""
+        parts = str(sku).strip().upper().rsplit("-", 1)
+        return parts[0] if parts else ""
+
+    def _extract_sku_suffix(self, sku: str | None) -> int:
+        if not sku:
+            return 0
+        parts = str(sku).strip().upper().rsplit("-", 1)
+        if len(parts) != 2:
+            return 0
+        try:
+            return int(parts[1])
+        except ValueError:
+            return 0
+
+    def _index_stock_row(self, row: dict, *, base: str | None = None, suffix: int | None = None) -> None:
+        sku = self._normalize_sku_key(self._get_stock_value(row, HEADERS["STOCK"].SKU))
+        if sku:
+            self._stock_by_sku[sku] = row
+        sku_base = base or self._extract_sku_base(sku) or self._normalize_sku_key(
+            self._get_stock_value(row, HEADERS["STOCK"].REFERENCE)
+        )
+        if sku_base:
+            current_suffix = suffix if suffix is not None else self._extract_sku_suffix(sku)
+            if current_suffix:
+                self._sku_suffix_index[sku_base] = max(self._sku_suffix_index.get(sku_base, 0), current_suffix)
+
+    def _is_stock_sold(self, row: Mapping) -> bool:
+        vendu = row.get(self._stock_column(HEADERS["STOCK"].VENDU_ALT))
+        vendu = vendu or row.get(self._stock_column(HEADERS["STOCK"].VENDU))
+        return bool(vendu)
+
+    def _rebuild_indexes(self) -> None:
+        self._purchase_by_id.clear()
+        self._stock_by_sku.clear()
+        self._sales_by_sku.clear()
+        self._sku_suffix_index.clear()
+        self._max_purchase_id = 0
+        self._max_sale_id = 0
+        for row in self.achats.rows:
+            self._index_purchase(row)
         for row in self.stock.rows:
-            raw = row.get(sku_column)
-            if raw is None:
-                continue
-            text = str(raw).strip().upper()
-            if not text.startswith(prefix):
-                continue
-            suffix = text[len(prefix) :]
-            try:
-                max_suffix = max(max_suffix, int(suffix))
-            except ValueError:
-                continue
-        return max_suffix
+            self._index_stock_row(row)
+        for row in self.ventes.rows:
+            self._index_sale(row)
+        self._inventory_cache = InventoryCache.from_tables(self.stock.rows, self.ventes.rows, self.achats.rows)
+
+    def _next_purchase_id(self) -> int:
+        self._max_purchase_id += 1
+        return self._max_purchase_id
+
+    def _next_sale_id(self) -> int:
+        self._max_sale_id += 1
+        return self._max_sale_id
 
     def _build_compta_row(self, sale_row: dict) -> dict:
         if not self.compta.headers:

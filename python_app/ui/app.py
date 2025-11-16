@@ -8,7 +8,6 @@ import customtkinter as ctk
 
 from ..datasources.sqlite_purchases import PurchaseDatabase, table_to_purchase_records, table_to_stock_records
 from ..datasources.workbook import TableData
-from ..services.summaries import build_inventory_snapshot
 from ..services.workflow import WorkflowCoordinator
 from .calendar import CalendarView
 from .dashboard import DashboardView
@@ -43,9 +42,7 @@ class VintageErpApp(ctk.CTk):
         self.protocol("WM_DELETE_WINDOW", self._handle_close)
 
     def _build_tabs(self):
-        summary = build_inventory_snapshot(
-            self.tables["Stock"].rows, self.tables["Ventes"].rows, self.tables["Achats"].rows
-        )
+        summary = self.workflow.inventory_snapshot()
 
         dashboard_tab = self.tabview.add("Dashboard")
         self.dashboard_view = DashboardView(dashboard_tab, summary)
@@ -78,9 +75,8 @@ class VintageErpApp(ctk.CTk):
         StockOptionsView(stock_options_tab, self.tables["Stock"], self.refresh_views)
 
     def refresh_views(self):
-        summary = build_inventory_snapshot(
-            self.tables["Stock"].rows, self.tables["Ventes"].rows, self.tables["Achats"].rows
-        )
+        self.workflow.rebuild_indexes()
+        summary = self.workflow.inventory_snapshot()
         if self.dashboard_view is not None:
             self.dashboard_view.refresh(summary)
         if self.purchase_view is not None:
