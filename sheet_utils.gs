@@ -613,29 +613,6 @@ function extractSkuSuffix_(sku, expectedBase) {
   return Number.isFinite(value) && value > 0 ? value : null;
 }
 
-function computeSkuPaletteKey_(sku) {
-  const base = extractSkuBase_(sku);
-  return base ? base.slice(0, 3) : '';
-}
-
-function computeSkuPaletteColor_(sku) {
-  const key = computeSkuPaletteKey_(sku);
-  if (!key) return SKU_COLOR_DEFAULT;
-  if (SKU_COLOR_OVERRIDES[key]) {
-    return SKU_COLOR_OVERRIDES[key];
-  }
-  const index = key.charCodeAt(0) % SKU_COLOR_PALETTE.length;
-  return SKU_COLOR_PALETTE[index] || SKU_COLOR_DEFAULT;
-}
-
-function applySkuPaletteFormatting_() {
-  // Mise en forme supprimée : fonction volontairement vide.
-}
-
-function ensureLedgerWeekHighlight_() {
-  // Mise en forme supprimée : fonction volontairement vide.
-}
-
 function ensureLegacyFormattingCleared_(ss) {
   if (!ss || typeof PropertiesService === 'undefined') {
     return;
