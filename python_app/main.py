@@ -801,6 +801,12 @@ class StockTableView(TableView):
         HEADERS["STOCK"].DATE_VENTE_ALT,
     }
 
+    _CHECKBOX_STYLE_COLUMNS = (
+        _DATE_COLUMNS
+        | _PUBLICATION_COLUMNS
+        | _SALE_COLUMNS
+    )
+
     def __init__(self, master, table, on_table_changed=None):
         super().__init__(master, table, on_table_changed=on_table_changed)
 
@@ -883,20 +889,26 @@ class StockTableView(TableView):
         row = self.table.rows[row_index]
         if column in self._DATE_COLUMNS:
             columns = self._DATE_COLUMNS
-            message = "Date de mise en ligne renseignée"
+            set_message = "Date de mise en ligne renseignée"
+            clear_message = "Date de mise en ligne effacée"
         elif column in self._PUBLICATION_COLUMNS:
             columns = self._PUBLICATION_COLUMNS
-            message = "Date de publication renseignée"
+            set_message = "Date de publication renseignée"
+            clear_message = "Date de publication effacée"
         elif column in self._SALE_COLUMNS:
             columns = self._SALE_COLUMNS
-            message = "Date de vente renseignée"
+            set_message = "Date de vente renseignée"
+            clear_message = "Date de vente effacée"
         else:
             return False
 
+        has_date = any(str(row.get(key, "")).strip() for key in columns)
+        new_value = "" if has_date else today
         for key in columns:
-            row[key] = today
+            row[key] = new_value
         self.table_widget.refresh(self.table.rows)
-        self.status_var.set(f"{message} pour la ligne {row_index + 1}")
+        status = clear_message if has_date else set_message
+        self.status_var.set(f"{status} pour la ligne {row_index + 1}")
         self._notify_data_changed()
         return True
 
@@ -947,7 +959,7 @@ class StockTableView(TableView):
                 row[alias] = row.get(source, "")
 
     def _format_cell_value(self, header: str, value: object) -> str:
-        if header in self._SALE_COLUMNS and not _has_ready_date(value):
+        if header in self._CHECKBOX_STYLE_COLUMNS and not _has_ready_date(value):
             return "☐"
         return "" if value is None else str(value)
 
