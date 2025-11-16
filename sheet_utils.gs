@@ -264,10 +264,14 @@ function toNumber_(value) {
 
     const normalized = trimmed
       .replace(/\u00A0/g, '')
-      .replace(/\s+/g, '')
-      .replace(/,/g, '.');
+      .replace(/[€$£]/g, '')
+      .replace(/,/g, '.')
+      .replace(/\s+/g, '');
 
-    const parsed = Number(normalized);
+    const match = normalized.match(/-?\d+(?:\.\d+)?/);
+    if (!match) return NaN;
+
+    const parsed = Number(match[0]);
     return Number.isFinite(parsed) ? parsed : NaN;
   }
 
