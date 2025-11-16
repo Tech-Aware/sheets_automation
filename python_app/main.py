@@ -805,9 +805,11 @@ class StockCardList(ctk.CTkFrame):
 
     DEFAULT_COLOR = "#e5e7eb"
     SELECTED_COLOR = "#bfdbfe"
-    GRADIENT_COLOR = "#dbeafe"
     BORDER_COLOR = "#cbd5e1"
     BORDER_COLOR_SELECTED = "#60a5fa"
+    GRADIENT_START_COLOR = "#ffffff"
+    GRADIENT_END_COLOR = "#8b5cf6"
+    GRADIENT_OPACITY = 0.6
 
     def __init__(self, master, table, *, on_open_details, on_mark_sold, on_bulk_action, on_selection_change=None):
         super().__init__(master)
@@ -949,10 +951,10 @@ class StockCardList(ctk.CTkFrame):
         height = height or canvas.winfo_height()
         if width <= 0 or height <= 0:
             return
-        start_hex = self.SELECTED_COLOR if selected else self.GRADIENT_COLOR
-        end_hex = self.GRADIENT_COLOR if selected else self.DEFAULT_COLOR
-        start_rgb = self._hex_to_rgb(start_hex)
-        end_rgb = self._hex_to_rgb(end_hex)
+        base_hex = self.SELECTED_COLOR if selected else self.DEFAULT_COLOR
+        base_rgb = self._hex_to_rgb(base_hex)
+        start_rgb = self._apply_opacity(self.GRADIENT_START_COLOR, base_rgb, self.GRADIENT_OPACITY)
+        end_rgb = self._apply_opacity(self.GRADIENT_END_COLOR, base_rgb, self.GRADIENT_OPACITY)
         steps = max(int(height), 1)
         for i in range(steps):
             ratio = i / steps
@@ -964,6 +966,13 @@ class StockCardList(ctk.CTkFrame):
     def _hex_to_rgb(value: str) -> tuple[int, int, int]:
         value = value.lstrip("#")
         return tuple(int(value[i : i + 2], 16) for i in (0, 2, 4))
+
+    @staticmethod
+    def _apply_opacity(foreground_hex: str, background_rgb: tuple[int, int, int], opacity: float) -> tuple[int, int, int]:
+        foreground_rgb = StockCardList._hex_to_rgb(foreground_hex)
+        return tuple(
+            int(foreground_rgb[i] * opacity + background_rgb[i] * (1 - opacity)) for i in range(3)
+        )
 
     @staticmethod
     def _blend_colors(start: tuple[int, int, int], end: tuple[int, int, int], ratio: float) -> tuple[int, int, int]:
