@@ -25,11 +25,11 @@ try:  # pragma: no cover - defensive import path configuration
         table_to_stock_records,
     )
     from .services.stock_import import merge_stock_table
-from .services.summaries import (
-    _base_reference_from_stock,
-    _build_reference_unit_price_index,
-    build_inventory_snapshot,
-)
+    from .services.summaries import (
+        _base_reference_from_stock,
+        _build_reference_unit_price_index,
+        build_inventory_snapshot,
+    )
     from .services.workflow import PurchaseInput, SaleInput, StockInput, WorkflowCoordinator
     from .ui.tables import ScrollableTable
     from .ui.widgets import DatePickerEntry
@@ -805,6 +805,9 @@ class StockCardList(ctk.CTkFrame):
 
     DEFAULT_COLOR = "#e5e7eb"
     SELECTED_COLOR = "#bfdbfe"
+    GRADIENT_COLOR = "#dbeafe"
+    BORDER_COLOR = "#cbd5e1"
+    BORDER_COLOR_SELECTED = "#60a5fa"
 
     def __init__(self, master, table, *, on_open_details, on_mark_sold, on_bulk_action, on_selection_change=None):
         super().__init__(master)
@@ -815,6 +818,7 @@ class StockCardList(ctk.CTkFrame):
         self.on_selection_change = on_selection_change
         self._selected_indices: set[int] = set()
         self._cards: dict[int, ctk.CTkFrame] = {}
+        self._card_canvases: dict[int, tk.Canvas] = {}
         ctk.CTkLabel(
             self,
             text=(
@@ -832,12 +836,11 @@ class StockCardList(ctk.CTkFrame):
         for child in self.container.winfo_children():
             child.destroy()
         self._cards.clear()
+        self._card_canvases.clear()
         self._selected_indices = {idx for idx in self._selected_indices if idx < len(rows)}
         for idx, row in enumerate(rows):
             self._add_card(idx, row)
         self._update_selection_display()
-        if self.on_selection_change is not None:
-            self.on_selection_change(self.get_selected_indices())
 
     def get_selected_indices(self) -> list[int]:
         return sorted(self._selected_indices)
@@ -847,13 +850,25 @@ class StockCardList(ctk.CTkFrame):
         label = row.get(HEADERS["STOCK"].ARTICLE, "") or row.get(HEADERS["STOCK"].LIBELLE, "")
         status = "Vendu" if row.get(HEADERS["STOCK"].VENDU_ALT, "") else ""
         subtitle = f"{sku} – {label}" if label else sku
-        card = ctk.CTkFrame(self.container, height=68, fg_color=self.DEFAULT_COLOR)
+        card = ctk.CTkFrame(self.container, height=76, fg_color="transparent", border_width=1)
         card.grid_propagate(False)
         card.pack(fill="x", padx=4, pady=2)
         self._cards[index] = card
 
+        gradient_canvas = tk.Canvas(card, highlightthickness=0, bd=0)
+        gradient_canvas.place(relx=0, rely=0, relwidth=1, relheight=1)
+        gradient_canvas.bind(
+            "<Configure>",
+            lambda event, canvas=gradient_canvas, idx=index: self._draw_card_gradient(
+                canvas, idx in self._selected_indices, event.width, event.height
+            ),
+        )
+        self._card_canvases[index] = gradient_canvas
+
         text_frame = ctk.CTkFrame(card, fg_color="transparent")
-        text_frame.pack(side="left", fill="x", expand=True, padx=8, pady=6)
+        text_frame.place(relx=0, rely=0, relwidth=1, relheight=1)
+        text_frame.grid_propagate(False)
+        text_frame.configure(padx=10, pady=8)
         title = ctk.CTkLabel(text_frame, text=subtitle or "(SKU manquant)", anchor="w", font=ctk.CTkFont(weight="bold"))
         title.pack(fill="x")
         metadata_labels = []
@@ -879,20 +894,17 @@ class StockCardList(ctk.CTkFrame):
         else:
             self._selected_indices.add(index)
         self._update_selection_display()
-        if self.on_selection_change is not None:
-            self.on_selection_change(self.get_selected_indices())
 
     def _update_selection_display(self):
-        for idx, card in self._cards.items():
-            selected = idx in self._selected_indices
-            card.configure(fg_color=self.SELECTED_COLOR if selected else self.DEFAULT_COLOR)
+        for idx in self._cards:
+            self._apply_card_style(idx, idx in self._selected_indices)
+        if self.on_selection_change is not None:
+            self.on_selection_change(self.get_selected_indices())
 
     def _handle_right_click(self, event, index: int):
         if index not in self._selected_indices:
             self._selected_indices = {index}
             self._update_selection_display()
-            if self.on_selection_change is not None:
-                self.on_selection_change(self.get_selected_indices())
         click_date = date.today()
         if len(self._selected_indices) > 1:
             self._show_context_menu(event, click_date)
@@ -913,6 +925,70 @@ class StockCardList(ctk.CTkFrame):
                 command=lambda act=action: self.on_bulk_action(self.get_selected_indices(), act, click_date),
             )
         menu.tk_popup(event.x_root, event.y_root)
+
+    def _apply_card_style(self, index: int, selected: bool):
+        border_color = self.BORDER_COLOR_SELECTED if selected else self.BORDER_COLOR
+        card = self._cards.get(index)
+        if card is not None:
+            card.configure(border_color=border_color)
+        canvas = self._card_canvases.get(index)
+        if canvas is not None:
+            self._draw_card_gradient(canvas, selected)
+
+    def _draw_card_gradient(self, canvas: tk.Canvas, selected: bool, width: int | None = None, height: int | None = None):
+        canvas.delete("gradient")
+        width = width or canvas.winfo_width()
+        height = height or canvas.winfo_height()
+        if width <= 0 or height <= 0:
+            return
+        start_hex = self.SELECTED_COLOR if selected else self.GRADIENT_COLOR
+        end_hex = self.GRADIENT_COLOR if selected else self.DEFAULT_COLOR
+        start_rgb = self._hex_to_rgb(start_hex)
+        end_rgb = self._hex_to_rgb(end_hex)
+        steps = max(int(height), 1)
+        for i in range(steps):
+            ratio = i / steps
+            blended = self._blend_colors(start_rgb, end_rgb, ratio)
+            color = f"#{blended[0]:02x}{blended[1]:02x}{blended[2]:02x}"
+            canvas.create_rectangle(0, i, width, i + 1, outline="", fill=color, tags="gradient")
+
+    @staticmethod
+    def _hex_to_rgb(value: str) -> tuple[int, int, int]:
+        value = value.lstrip("#")
+        return tuple(int(value[i : i + 2], 16) for i in (0, 2, 4))
+
+    @staticmethod
+    def _blend_colors(start: tuple[int, int, int], end: tuple[int, int, int], ratio: float) -> tuple[int, int, int]:
+        return tuple(int(start[i] + (end[i] - start[i]) * ratio) for i in range(3))
+
+    def _scroll_to_widget(self, widget: tk.Widget):
+        container = self.container
+        canvas = getattr(container, "_parent_canvas", None)
+        if canvas is None:
+            return
+        container.update_idletasks()
+        widget_y = widget.winfo_y()
+        height = container.winfo_height()
+        total_height = container.winfo_reqheight()
+        if total_height <= height:
+            return
+        fraction = max(0.0, min(1.0, widget_y / (total_height - height)))
+        canvas.yview_moveto(fraction)
+
+    def focus_on_sku(self, query: str) -> bool:
+        query_lower = query.lower()
+        for idx, row in enumerate(self.table.rows):
+            sku = str(row.get(HEADERS["STOCK"].SKU, "")).lower()
+            if not sku:
+                continue
+            if query_lower in sku:
+                self._selected_indices = {idx}
+                self._update_selection_display()
+                card = self._cards.get(idx)
+                if card is not None:
+                    self._scroll_to_widget(card)
+                return True
+        return False
 
     @staticmethod
     def _first_non_empty(row: dict, keys: tuple[str, ...]):
@@ -1215,6 +1291,8 @@ class StockTableView(TableView):
 
     def __init__(self, master, table, *, workflow: WorkflowCoordinator | None = None, on_table_changed=None):
         self.workflow = workflow
+        self.search_var: tk.StringVar | None = None
+        self.search_entry: ctk.CTkEntry | None = None
         super().__init__(master, table, on_table_changed=on_table_changed)
         self.status_var.set(
             "Sélectionnez une vignette (clic), double-clic pour détailler, clic droit pour actions rapides."
@@ -1263,6 +1341,16 @@ class StockTableView(TableView):
             text="Supprimer la sélection",
             command=self._delete_selected_rows,
         ).pack(side="left")
+        search_frame = ctk.CTkFrame(self.actions_frame, fg_color="transparent")
+        search_frame.pack(side="left", padx=(12, 0))
+        ctk.CTkLabel(search_frame, text="Rechercher SKU:").pack(side="left", padx=(0, 6))
+        self.search_var = tk.StringVar()
+        self.search_entry = ctk.CTkEntry(search_frame, textvariable=self.search_var, width=180)
+        self.search_entry.pack(side="left")
+        self.search_entry.bind("<Return>", lambda _e: self._handle_sku_search())
+        ctk.CTkButton(search_frame, text="Go", width=56, command=self._handle_sku_search).pack(
+            side="left", padx=(8, 0)
+        )
 
         parent.grid_rowconfigure(1, weight=1)
         self.card_list = StockCardList(
@@ -1336,6 +1424,19 @@ class StockTableView(TableView):
         self.status_var.set(f"{status} pour la ligne {row_index + 1}")
         self._notify_data_changed()
         return True
+
+    def _handle_sku_search(self):
+        if self.search_var is None:
+            return
+        query = self.search_var.get().strip()
+        if not query:
+            self.status_var.set("Saisissez un SKU à rechercher.")
+            return
+        found = self.card_list.focus_on_sku(query)
+        if found:
+            self.status_var.set(f"Vignette trouvée pour le SKU contenant '{query}'.")
+        else:
+            self.status_var.set(f"Aucun article ne correspond au SKU '{query}'.")
 
     def _ensure_display_aliases(self):
         for row in self.table.rows:
