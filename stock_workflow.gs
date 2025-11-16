@@ -56,7 +56,6 @@ function handleStock(e) {
 
   const c = e.range.getColumn(), r = e.range.getRow();
 
-  try {
   const chronoCols = {
     dms: C_DMS,
     dmis: C_DMIS,
@@ -847,11 +846,8 @@ function handleStock(e) {
       { shipping: { size: tailleValue, lot: lotValue, fee: perItemFee } }
     );
     return;
+    }
   }
-  } finally {
-    applySkuPaletteFormatting_(sh, C_SKU, C_LABEL);
-  }
-}
 
 function bulkSetStockStatusMisEnLigne() {
   bulkSetStockStatusForKey_({

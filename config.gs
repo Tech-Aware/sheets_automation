@@ -138,27 +138,6 @@ const LEDGER_FEE_TYPES = Object.freeze([
   'Autres'
 ]);
 
-const SKU_COLOR_PALETTE = Object.freeze([
-  Object.freeze({ background: '#FDEBD0', text: '#BA4A00' }),
-  Object.freeze({ background: '#FADBD8', text: '#943126' }),
-  Object.freeze({ background: '#E8DAEF', text: '#633974' }),
-  Object.freeze({ background: '#D6EAF8', text: '#1F618D' }),
-  Object.freeze({ background: '#D1F2EB', text: '#0E6655' }),
-  Object.freeze({ background: '#FCF3CF', text: '#7D6608' }),
-  Object.freeze({ background: '#F5EEF8', text: '#6C3483' }),
-  Object.freeze({ background: '#EBDEF0', text: '#512E5F' }),
-  Object.freeze({ background: '#E8F6F3', text: '#0B5345' }),
-  Object.freeze({ background: '#FEF5E7', text: '#935116' }),
-  Object.freeze({ background: '#EBF5FB', text: '#154360' }),
-  Object.freeze({ background: '#F9EBEA', text: '#78281F' })
-]);
-
-const SKU_COLOR_OVERRIDES = Object.freeze({
-  // Exemple : 'JLF': { background: '#E8F8F5', text: '#117A65' }
-});
-
-const SKU_COLOR_DEFAULT = Object.freeze({ background: '#FFFFFF', text: '#000000' });
-
 const LEDGER_WEEK_RULE_DESCRIPTION = 'auto-ledger-week-highlight';
 const LEDGER_MONTH_TOTAL_RULE_DESCRIPTION = 'auto-ledger-month-total-highlight';
 
