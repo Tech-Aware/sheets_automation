@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 from datetime import date
+import math
 import sys
 import tkinter as tk
 from pathlib import Path
@@ -88,28 +89,36 @@ def _ensure_purchase_ready_dates(table: TableData | None) -> None:
             row.setdefault(ready_header, "")
 
 
-def _normalize_stock_ids(table: TableData | None) -> None:
-    """Convert float-like stock IDs to integers for cleaner display."""
+def _normalize_integer_value(value) -> int | None:
+    """Return ``value`` as a clean integer when possible."""
+
+    if value in (None, "") or isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        if not math.isfinite(value) or not value.is_integer():
+            return None
+        return int(value)
+    text = str(value).strip()
+    if not text:
+        return None
+    try:
+        number = float(text)
+    except ValueError:
+        return None
+    if not math.isfinite(number) or not number.is_integer():
+        return None
+    return int(number)
+
+
+def _normalize_id_column(table: TableData | None, id_header: str) -> None:
+    """Ensure ID columns are stored as integers instead of floats."""
 
     if table is None:
         return
-    id_header = HEADERS["STOCK"].ID
     for row in table.rows:
-        value = row.get(id_header)
-        if value in (None, ""):
-            continue
-        normalized: str | None = None
-        if isinstance(value, (int, float)):
-            if isinstance(value, float) and not value.is_integer():
-                continue
-            normalized = str(int(value))
-        elif isinstance(value, str):
-            try:
-                number = float(value)
-            except ValueError:
-                continue
-            if number.is_integer():
-                normalized = str(int(number))
+        normalized = _normalize_integer_value(row.get(id_header))
         if normalized is not None:
             row[id_header] = normalized
 
@@ -139,7 +148,10 @@ class VintageErpApp(ctk.CTk):
             _ensure_purchase_ready_dates(self.tables["Achats"])
         if stock_table is not None:
             self.tables["Stock"] = stock_table
-        _normalize_stock_ids(self.tables.get("Stock"))
+        _normalize_id_column(self.tables.get("Achats"), HEADERS["ACHATS"].ID)
+        _normalize_id_column(self.tables.get("Stock"), HEADERS["STOCK"].ID)
+        _normalize_id_column(self.tables.get("Ventes"), HEADERS["VENTES"].ID)
+        _normalize_id_column(self.tables.get("Compta 09-2025"), "ID")
         self.workflow = WorkflowCoordinator(
             self.tables["Achats"],
             self.tables["Stock"],
@@ -280,7 +292,7 @@ class PurchasesView(ctk.CTkFrame):
             height=18,
             column_width=135,
             column_widths={
-                HEADERS["ACHATS"].ID: 32,
+                HEADERS["ACHATS"].ID: 21,
                 HEADERS["ACHATS"].TOTAL_TTC: 110,
             },
             enable_inline_edit=False,
@@ -708,7 +720,7 @@ class TableView(ctk.CTkFrame):
             height=20,
             on_cell_edited=self._on_cell_edit,
             column_width=160,
-            column_widths={"ID": 52},
+            column_widths={"ID": 34},
         )
         self.table_widget.pack(fill="both", expand=True, padx=12, pady=12)
         self._build_extra_controls(self.content)
