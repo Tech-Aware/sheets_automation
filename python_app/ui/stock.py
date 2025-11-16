@@ -60,11 +60,30 @@ class StockCardList(ctk.CTkFrame):
         self.refresh(self.table.rows)
 
     def refresh(self, rows: Sequence[dict]):
+        indexed_rows = list(enumerate(rows))
+        self._render_cards(indexed_rows)
+
+    def filter_by_sku_prefix(self, prefix: str) -> int:
+        query = prefix.strip().lower()
+        if not query:
+            self.refresh(self.table.rows)
+            return len(self.table.rows)
+
+        indexed_rows = [
+            (idx, row)
+            for idx, row in enumerate(self.table.rows)
+            if str(row.get(HEADERS["STOCK"].SKU, "")).strip().lower().startswith(query)
+        ]
+        self._render_cards(indexed_rows)
+        return len(indexed_rows)
+
+    def _render_cards(self, indexed_rows: Sequence[tuple[int, dict]]):
         for child in self.container.winfo_children():
             child.destroy()
         self._cards.clear()
-        self._selected_indices = {idx for idx in self._selected_indices if idx < len(rows)}
-        for idx, row in enumerate(rows):
+        visible_indices = {idx for idx, _ in indexed_rows}
+        self._selected_indices = {idx for idx in self._selected_indices if idx in visible_indices}
+        for idx, row in indexed_rows:
             self._add_card(idx, row)
         self._update_selection_display()
 
@@ -526,6 +545,7 @@ class StockTableView(TableView):
         self.search_entry = ctk.CTkEntry(search_frame, textvariable=self.search_var, width=180)
         self.search_entry.pack(side="left")
         self.search_entry.bind("<Return>", lambda _e: self._handle_sku_search())
+        self.search_entry.bind("<KeyRelease>", self._handle_live_sku_filter)
         ctk.CTkButton(search_frame, text="Go", width=56, command=self._handle_sku_search).pack(
             side="left", padx=(8, 0)
         )
@@ -590,17 +610,27 @@ class StockTableView(TableView):
             self.table.rows[row_index][key] = normalized
         self.table.rows[row_index][primary_key] = normalized
 
+    def _handle_live_sku_filter(self, _event=None):
+        if not self.search_var:
+            return
+        self._apply_sku_filter(self.search_var.get())
+
     def _handle_sku_search(self):
-        if not self.search_entry or not self.search_var:
+        if not self.search_var:
             return
-        query = self.search_var.get().strip()
+        self._apply_sku_filter(self.search_var.get())
+
+    def _apply_sku_filter(self, prefix: str):
+        results = self.card_list.filter_by_sku_prefix(prefix) if hasattr(self, "card_list") else 0
+        query = prefix.strip()
         if not query:
+            self.status_var.set("Toutes les vignettes sont affichées.")
             return
-        found = self.card_list.focus_on_sku(query)
-        if found:
-            self.status_var.set(f"Vignette trouvée pour le SKU contenant '{query}'.")
+
+        if results:
+            self.status_var.set(f"{results} résultat(s) pour le préfixe SKU '{query}'.")
         else:
-            self.status_var.set(f"Aucun article ne correspond au SKU '{query}'.")
+            self.status_var.set("Aucun résultat pour ce préfixe SKU.")
 
     def _ensure_display_aliases(self):
         for row in self.table.rows:
