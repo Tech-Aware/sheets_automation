@@ -195,8 +195,8 @@ class VintageErpApp(ctk.CTk):
         months_tab = self.tabview.add("Calendrier")
         CalendarView(months_tab)
 
-        workflow_tab = self.tabview.add("Workflow")
-        WorkflowView(workflow_tab, self.workflow, self.refresh_views)
+        stock_options_tab = self.tabview.add("Options du stock")
+        StockOptionsView(stock_options_tab, self.tables["Stock"], self.refresh_views)
 
     def refresh_views(self):
         summary = build_inventory_snapshot(self.tables["Stock"].rows, self.tables["Ventes"].rows)
@@ -1511,6 +1511,75 @@ class CalendarView(ctk.CTkFrame):
         for month in MONTH_NAMES_FR:
             listbox.insert(tk.END, month)
         listbox.pack(fill="both", expand=True, padx=32, pady=16)
+
+
+class StockOptionsView(ctk.CTkFrame):
+    def __init__(self, master, table: TableData, refresh_callback):
+        super().__init__(master)
+        self.table = table
+        self.refresh_callback = refresh_callback
+        self.pack(fill="both", expand=True)
+
+        self.status_var = tk.StringVar(value="Importer ou ajuster les données du stock.")
+
+        title = ctk.CTkLabel(self, text="Options du stock", font=ctk.CTkFont(size=20, weight="bold"))
+        title.pack(pady=(16, 8))
+
+        frame = ctk.CTkFrame(self)
+        frame.pack(fill="x", padx=16, pady=12)
+
+        ctk.CTkLabel(frame, text="Importer des articles", anchor="w", font=ctk.CTkFont(weight="bold")).pack(
+            fill="x", pady=(12, 4)
+        )
+        ctk.CTkLabel(
+            frame,
+            text="Sélectionnez un export Excel pour ajouter les nouveaux articles (sans doublons).",
+            anchor="w",
+            wraplength=800,
+            justify="left",
+        ).pack(fill="x", padx=12)
+        ctk.CTkButton(frame, text="Charger un XLSX pour le stock", command=self._handle_import_xlsx).pack(
+            pady=(8, 12), padx=12
+        )
+
+        ctk.CTkLabel(self, textvariable=self.status_var, anchor="w").pack(fill="x", padx=16, pady=(4, 16))
+
+    def _handle_import_xlsx(self):
+        path = filedialog.askopenfilename(
+            title="Importer le stock",
+            filetypes=(
+                ("Excel", "*.xlsx *.xlsm"),
+                ("Tous les fichiers", "*.*"),
+            ),
+        )
+        if not path:
+            return
+        try:
+            repository = WorkbookRepository(path)
+            sheet_name = self._resolve_stock_sheet(repository)
+            if sheet_name is None:
+                raise ValueError("Ce classeur ne contient aucun onglet exploitable.")
+            source_table = repository.load_table(sheet_name)
+        except Exception as exc:  # pragma: no cover - UI guard
+            messagebox.showerror("Import du stock", f"Impossible de lire le fichier sélectionné : {exc}")
+            return
+        added = merge_stock_table(self.table, source_table)
+        filename = Path(path).name
+        if added:
+            self.status_var.set(f"{added} article(s) importé(s) depuis {filename}.")
+            self.refresh_callback()
+        else:
+            self.status_var.set(f"Aucun nouvel article à importer depuis {filename}.")
+
+    @staticmethod
+    def _resolve_stock_sheet(repository: WorkbookRepository) -> str | None:
+        sheet_names = list(repository.available_tables())
+        if not sheet_names:
+            return None
+        for name in sheet_names:
+            if name.lower() == "stock":
+                return name
+        return sheet_names[0]
 
 
 DEFAULT_WORKBOOK = Path(__file__).resolve().parent.parent / "Prerelease 1.2.xlsx"
