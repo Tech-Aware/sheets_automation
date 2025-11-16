@@ -776,6 +776,8 @@ class StockTableView(TableView):
     _DISPLAY_FALLBACKS = {
         HEADERS["STOCK"].LOT_ALT: HEADERS["STOCK"].LOT,
         HEADERS["STOCK"].VALIDER_SAISIE_ALT: HEADERS["STOCK"].VALIDER_SAISIE,
+        HEADERS["STOCK"].PUBLIE_ALT: HEADERS["STOCK"].PUBLIE,
+        HEADERS["STOCK"].DATE_PUBLICATION_ALT: HEADERS["STOCK"].DATE_PUBLICATION,
     }
 
     _DATE_COLUMNS = {
@@ -783,6 +785,13 @@ class StockTableView(TableView):
         HEADERS["STOCK"].MIS_EN_LIGNE_ALT,
         HEADERS["STOCK"].DATE_MISE_EN_LIGNE,
         HEADERS["STOCK"].DATE_MISE_EN_LIGNE_ALT,
+    }
+
+    _PUBLICATION_COLUMNS = {
+        HEADERS["STOCK"].PUBLIE,
+        HEADERS["STOCK"].PUBLIE_ALT,
+        HEADERS["STOCK"].DATE_PUBLICATION,
+        HEADERS["STOCK"].DATE_PUBLICATION_ALT,
     }
 
     def __init__(self, master, table, on_table_changed=None):
@@ -858,16 +867,25 @@ class StockTableView(TableView):
         self.status_var.set(f"Ligne {row_index + 1} – {column} mis à jour")
 
     def _handle_cell_activation(self, row_index: int | None, column: str) -> bool:
-        if column not in self._DATE_COLUMNS or row_index is None:
+        if row_index is None:
             return False
         if not (0 <= row_index < len(self.table.rows)):
             return False
         today = format_display_date(date.today())
         row = self.table.rows[row_index]
-        for key in self._DATE_COLUMNS:
+        if column in self._DATE_COLUMNS:
+            columns = self._DATE_COLUMNS
+            message = "Date de mise en ligne renseignée"
+        elif column in self._PUBLICATION_COLUMNS:
+            columns = self._PUBLICATION_COLUMNS
+            message = "Date de publication renseignée"
+        else:
+            return False
+
+        for key in columns:
             row[key] = today
         self.table_widget.refresh(self.table.rows)
-        self.status_var.set(f"Date de mise en ligne renseignée pour la ligne {row_index + 1}")
+        self.status_var.set(f"{message} pour la ligne {row_index + 1}")
         self._notify_data_changed()
         return True
 
