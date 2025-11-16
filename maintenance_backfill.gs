@@ -195,7 +195,8 @@ function registerSalesActionsMenu_(ui, ss) {
   const salesMenu = ui.createMenu('Actions Ventes');
   salesMenu
     .addItem('Trier les ventes (date décroissante)', 'sortVentesByDate')
-    .addItem('Retirer du Stock les ventes importées', 'purgeStockFromVentes');
+    .addItem('Retirer du Stock les ventes importées', 'purgeStockFromVentes')
+    .addItem('Supprimer les doublons', 'purgeVentesDuplicates');
 
   registerBackfillMenu_(salesMenu, ss);
   salesMenu.addToUi();
@@ -204,6 +205,7 @@ function registerSalesActionsMenu_(ui, ss) {
 function registerAccountingActionsMenu_(ui) {
   ui.createMenu('Actions compta')
     .addItem('Calculer les frais (feuille active)', 'recalculateActiveLedgerFees')
+    .addItem('Supprimer les doublons (feuille active)', 'purgeActiveLedgerDuplicates')
     .addToUi();
 }
 
@@ -234,6 +236,21 @@ function recalculateActiveLedgerFees() {
   updateMonthlyTotals_(sheet, headersLen);
   updateLedgerResultRow_(sheet, headersLen);
   ss.toast('Les frais et totaux ont été recalculés.', 'Calcul des frais', 5);
+}
+
+function purgeActiveLedgerDuplicates() {
+  const ss = SpreadsheetApp.getActive();
+  const sheet = ss.getActiveSheet();
+  if (!sheet || !isMonthlyLedgerSheet_(sheet)) {
+    ss.toast('La feuille active n\'est pas un grand livre mensuel.', 'Doublons compta', 6);
+    return;
+  }
+
+  const result = removeLedgerDuplicateSkus_(sheet);
+  const message = result && result.removed
+    ? `${result.removed} doublon(s) supprimé(s).`
+    : 'Aucun doublon trouvé.';
+  ss.toast(message, 'Doublons compta', 5);
 }
 
 function noopBackfillMonthlyLedgerMenu() {
@@ -522,6 +539,55 @@ function purgeStockFromVentes() {
   if (remainingSales.length) {
     Logger.log('Ventes restantes sans correspondance : %s', JSON.stringify(remainingSales));
   }
+}
+
+function purgeVentesDuplicates() {
+  const ss = SpreadsheetApp.getActive();
+  const ventes = ss.getSheetByName('Ventes');
+  if (!ventes) {
+    ss.toast('Feuille "Ventes" introuvable.', 'Doublons Ventes', 5);
+    return;
+  }
+
+  const lastRow = ventes.getLastRow();
+  if (lastRow < 2) {
+    ss.toast('Aucune ligne à vérifier dans "Ventes".', 'Doublons Ventes', 5);
+    return;
+  }
+
+  const width = ventes.getLastColumn();
+  const headers = ventes.getRange(1, 1, 1, width).getValues()[0];
+  const resolver = makeHeaderResolver_(headers);
+  const colId = resolver.colExact(HEADERS.VENTES.ID);
+  const colSku = resolver.colExact(HEADERS.VENTES.SKU);
+
+  if (!colId || !colSku) {
+    ss.toast('Colonnes ID ou SKU manquantes dans "Ventes".', 'Doublons Ventes', 8);
+    return;
+  }
+
+  const data = ventes.getRange(2, 1, lastRow - 1, width).getValues();
+  const seen = new Set();
+  const rowsToDelete = [];
+
+  for (let i = 0; i < data.length; i++) {
+    const key = buildIdSkuDuplicateKey_(data[i][colId - 1], data[i][colSku - 1]);
+    if (!key) continue;
+    const rowNumber = i + 2;
+    if (seen.has(key)) {
+      rowsToDelete.push(rowNumber);
+    } else {
+      seen.add(key);
+    }
+  }
+
+  if (!rowsToDelete.length) {
+    ss.toast('Aucun doublon trouvé dans "Ventes".', 'Doublons Ventes', 5);
+    return;
+  }
+
+  rowsToDelete.sort((a, b) => b - a).forEach(r => ventes.deleteRow(r));
+  ss.toast(`${rowsToDelete.length} doublon(s) supprimé(s) de "Ventes".`, 'Doublons Ventes', 5);
 }
 
 function backfillMonthlyLedgers() {

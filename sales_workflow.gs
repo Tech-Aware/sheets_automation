@@ -546,12 +546,18 @@ function copySaleToMonthlySheet_(ss, sale, options) {
     const note = sheet.getRange(existingRowNumber, 1).getNote();
     const noteMatches = dedupeKey && note === dedupeKey;
 
-    const normalizedSku = sale.sku ? normText_(sale.sku) : '';
+    const rowId = MONTHLY_LEDGER_INDEX.ID >= 0
+      ? sheet.getRange(existingRowNumber, MONTHLY_LEDGER_INDEX.ID + 1).getValue()
+      : '';
     const rowSku = MONTHLY_LEDGER_INDEX.SKU >= 0
-      ? normText_(sheet.getRange(existingRowNumber, MONTHLY_LEDGER_INDEX.SKU + 1).getValue())
+      ? sheet.getRange(existingRowNumber, MONTHLY_LEDGER_INDEX.SKU + 1).getValue()
       : '';
 
-    if (!noteMatches && normalizedSku && rowSku === normalizedSku) {
+    const saleKey = buildIdSkuDuplicateKey_(rawId, rawSku);
+    const rowKey = buildIdSkuDuplicateKey_(rowId, rowSku);
+    const idSkuMatch = saleKey && rowKey && saleKey === rowKey;
+
+    if (!noteMatches && idSkuMatch) {
       return { inserted: false, updated: false, skipped: true, sheetName };
     }
   }
@@ -715,6 +721,18 @@ function ensureMonthlyLedgerSheet_(sheet, monthStart) {
   updateLedgerResultRow_(sheet, headersLen);
 }
 
+function buildIdSkuDuplicateKey_(idValue, skuValue) {
+  const idPart = idValue !== undefined && idValue !== null && String(idValue).trim() !== ''
+    ? normText_(idValue)
+    : '';
+  const skuPart = skuValue !== undefined && skuValue !== null && String(skuValue).trim() !== ''
+    ? normText_(skuValue)
+    : '';
+
+  if (!idPart || !skuPart) return '';
+  return `${idPart}|${skuPart}`;
+}
+
 function removeLedgerDuplicateSkus_(sheet) {
   if (!sheet || !isMonthlyLedgerSheet_(sheet)) return { removed: 0, weeks: [] };
   const headersLen = MONTHLY_LEDGER_HEADERS.length;
@@ -738,19 +756,20 @@ function removeLedgerDuplicateSkus_(sheet) {
       .some(idx => String(values[i][idx] || '').trim() !== '');
     if (!hasKeyInfo) continue;
 
-    const skuIdx = MONTHLY_LEDGER_INDEX.SKU;
-    const rawSku = skuIdx >= 0 ? values[i][skuIdx] : '';
-    const normSku = rawSku ? normText_(rawSku) : '';
-    if (!normSku) continue;
+    const key = buildIdSkuDuplicateKey_(
+      MONTHLY_LEDGER_INDEX.ID >= 0 ? values[i][MONTHLY_LEDGER_INDEX.ID] : '',
+      MONTHLY_LEDGER_INDEX.SKU >= 0 ? values[i][MONTHLY_LEDGER_INDEX.SKU] : ''
+    );
+    if (!key) continue;
 
-    if (seen[normSku]) {
+    if (seen[key]) {
       rowsToDelete.push(rowNumber);
       const weekNumber = findLedgerWeekNumberForRow_(sheet, rowNumber);
       if (weekNumber) {
         affectedWeeks.add(weekNumber);
       }
     } else {
-      seen[normSku] = rowNumber;
+      seen[key] = rowNumber;
     }
   }
 
@@ -949,8 +968,11 @@ function findLedgerRowByIdentifiers_(sheet, headersLen, sale, dedupeKey, allowUp
 
   const allowDataMatch = Boolean(allowUpdates);
   const allowPriceMismatch = Boolean(allowUpdates);
+  const requireExactIdSku = !allowUpdates;
   const normalizedSku = sale.sku ? normText_(sale.sku) : '';
   const skuIndex = MONTHLY_LEDGER_INDEX.SKU;
+  const idIndex = MONTHLY_LEDGER_INDEX.ID;
+  const saleIdSkuKey = requireExactIdSku ? buildIdSkuDuplicateKey_(sale.id, sale.sku) : '';
 
   const candidateKeys = [];
   if (dedupeKey) candidateKeys.push(dedupeKey);
@@ -974,7 +996,10 @@ function findLedgerRowByIdentifiers_(sheet, headersLen, sale, dedupeKey, allowUp
         return rowIndex;
       }
 
-      if (ledgerRowMatchesSale_(sheet, headersLen, rowIndex, sale, { allowPriceMismatch })) {
+      if (ledgerRowMatchesSale_(sheet, headersLen, rowIndex, sale, {
+        allowPriceMismatch,
+        requireIdSkuPair: requireExactIdSku
+      })) {
         return rowIndex;
       }
     }
@@ -987,16 +1012,20 @@ function findLedgerRowByIdentifiers_(sheet, headersLen, sale, dedupeKey, allowUp
 
     if (normalizedSku && skuIndex >= 0) {
       const candidateSku = normText_(row[skuIndex]);
-      if (candidateSku === normalizedSku) {
+      const idSkuMatch = requireExactIdSku
+        ? doesRowMatchIdSkuPair_(row, sale, idIndex, skuIndex, saleIdSkuKey)
+        : true;
+
+      if (candidateSku === normalizedSku && idSkuMatch) {
         if (!firstSkuMatchRow) firstSkuMatchRow = i + 2;
 
-        if (ledgerRowDataMatchesSale_(row, sale, { allowPriceMismatch: true })) {
+        if (ledgerRowDataMatchesSale_(row, sale, { allowPriceMismatch: true, requireIdSkuPair: requireExactIdSku })) {
           return i + 2;
         }
       }
     }
 
-    if (allowDataMatch && ledgerRowDataMatchesSale_(row, sale, { allowPriceMismatch })) {
+    if (allowDataMatch && ledgerRowDataMatchesSale_(row, sale, { allowPriceMismatch, requireIdSkuPair: requireExactIdSku })) {
       return i + 2;
     }
   }
@@ -1019,6 +1048,7 @@ function ledgerRowDataMatchesSale_(row, sale, options) {
 
   const opts = options || {};
   const allowPriceMismatch = Boolean(opts.allowPriceMismatch);
+  const requireIdSkuPair = Boolean(opts.requireIdSkuPair);
 
   const idIndex = MONTHLY_LEDGER_INDEX.ID;
   const skuIndex = MONTHLY_LEDGER_INDEX.SKU;
@@ -1029,23 +1059,35 @@ function ledgerRowDataMatchesSale_(row, sale, options) {
 
   let matchedIdentifier = false;
 
-  if (idIndex >= 0 && sale.id !== undefined && sale.id !== null) {
-    const candidateId = String(row[idIndex] || '').trim();
-    if (candidateId !== String(sale.id).trim()) {
+  if (requireIdSkuPair) {
+    const rowKey = buildIdSkuDuplicateKey_(
+      idIndex >= 0 ? row[idIndex] : '',
+      skuIndex >= 0 ? row[skuIndex] : ''
+    );
+    const saleKey = buildIdSkuDuplicateKey_(sale.id, sale.sku);
+    if (!saleKey || !rowKey || rowKey !== saleKey) {
       return false;
     }
     matchedIdentifier = true;
-  }
+  } else {
+    if (idIndex >= 0 && sale.id !== undefined && sale.id !== null) {
+      const candidateId = String(row[idIndex] || '').trim();
+      if (candidateId !== String(sale.id).trim()) {
+        return false;
+      }
+      matchedIdentifier = true;
+    }
 
-  const normalizedSku = sale.sku ? normText_(sale.sku) : '';
-  if (normalizedSku && skuIndex >= 0) {
-    const candidateSku = normText_(row[skuIndex]);
-    if (candidateSku !== normalizedSku) {
+    const normalizedSku = sale.sku ? normText_(sale.sku) : '';
+    if (normalizedSku && skuIndex >= 0) {
+      const candidateSku = normText_(row[skuIndex]);
+      if (candidateSku !== normalizedSku) {
+        return false;
+      }
+      matchedIdentifier = true;
+    } else if (normalizedSku) {
       return false;
     }
-    matchedIdentifier = true;
-  } else if (normalizedSku) {
-    return false;
   }
 
   if (dateIndex >= 0 && sale.dateVente instanceof Date && !isNaN(sale.dateVente)) {
@@ -1091,6 +1133,19 @@ function ledgerRowDataMatchesSale_(row, sale, options) {
   }
 
   return matchedIdentifier;
+}
+
+function doesRowMatchIdSkuPair_(row, sale, idIndex, skuIndex, prebuiltSaleKey) {
+  if (!row || !sale) return false;
+  const saleKey = prebuiltSaleKey || buildIdSkuDuplicateKey_(sale.id, sale.sku);
+  if (!saleKey) return false;
+
+  const rowKey = buildIdSkuDuplicateKey_(
+    idIndex >= 0 ? row[idIndex] : '',
+    skuIndex >= 0 ? row[skuIndex] : ''
+  );
+
+  return Boolean(rowKey) && rowKey === saleKey;
 }
 
 function sortWeekRowsByDate_(sheet, weekNumber, headersLen) {
