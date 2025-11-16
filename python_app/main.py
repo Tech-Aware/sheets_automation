@@ -803,13 +803,13 @@ class TableView(ctk.CTkFrame):
 class StockCardList(ctk.CTkFrame):
     """Compact list of stock items rendered as tappable rectangles."""
 
-    DEFAULT_COLOR = "#e5e7eb"
-    SELECTED_COLOR = "#bfdbfe"
-    BORDER_COLOR = "#cbd5e1"
+    DEFAULT_COLOR = "#eef2ff"
+    SELECTED_COLOR = "#dbeafe"
+    BORDER_COLOR = "#c7d2fe"
     BORDER_COLOR_SELECTED = "#60a5fa"
     GRADIENT_START_COLOR = "#ffffff"
-    GRADIENT_END_COLOR = "#8b5cf6"
-    GRADIENT_OPACITY = 0.6
+    GRADIENT_END_COLOR = "#a5b4fc"
+    GRADIENT_OPACITY = 0.8
 
     def __init__(self, master, table, *, on_open_details, on_mark_sold, on_bulk_action, on_selection_change=None):
         super().__init__(master)
@@ -890,7 +890,7 @@ class StockCardList(ctk.CTkFrame):
         if status:
             ctk.CTkLabel(card, text=status, text_color="#0f5132").pack(side="right", padx=8)
 
-        for widget in (card, text_frame, content_frame, title, *metadata_labels):
+        for widget in (gradient_canvas, card, text_frame, content_frame, title, *metadata_labels):
             self._bind_card_events(widget, index)
 
     def _bind_card_events(self, widget, index: int):
