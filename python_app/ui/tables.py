@@ -23,6 +23,7 @@ class ScrollableTable(ttk.Frame):
         on_row_activated: Callable[[int], None] | None = None,
         enable_inline_edit: bool = True,
         value_formatter: Callable[[str, object], str] | None = None,
+        dropdown_choices: Mapping[str, Sequence[str]] | None = None,
     ):
         super().__init__(master)
         self.on_cell_edited = on_cell_edited
@@ -30,7 +31,8 @@ class ScrollableTable(ttk.Frame):
         self.on_row_activated = on_row_activated
         self.enable_inline_edit = enable_inline_edit
         self.value_formatter = value_formatter
-        self._editor: tk.Entry | None = None
+        self._dropdown_choices = {key: tuple(values) for key, values in (dropdown_choices or {}).items()}
+        self._editor: tk.Entry | ttk.Combobox | None = None
         self._editing_item: str | None = None
         self._editing_column: str | None = None
         self._item_to_row_index: dict[str, int] = {}
@@ -147,14 +149,22 @@ class ScrollableTable(ttk.Frame):
         value = self.tree.set(item, column_id)
         self._editing_item = item
         self._editing_column = column_id
-        self._editor = tk.Entry(self.tree)
-        self._editor.insert(0, value)
-        self._editor.select_range(0, tk.END)
-        self._editor.focus()
-        self._editor.place(x=x, y=y, width=width, height=height)
-        self._editor.bind("<Return>", self._finalize_edit)
-        self._editor.bind("<Escape>", self._cancel_edit)
-        self._editor.bind("<FocusOut>", self._finalize_edit)
+        choices = self._dropdown_choices.get(column_id)
+        if choices:
+            editor = ttk.Combobox(self.tree, values=choices, state="readonly")
+            if value:
+                editor.set(value)
+            editor.bind("<<ComboboxSelected>>", self._finalize_edit)
+        else:
+            editor = tk.Entry(self.tree)
+            editor.insert(0, value)
+            editor.select_range(0, tk.END)
+            editor.bind("<Return>", self._finalize_edit)
+            editor.bind("<Escape>", self._cancel_edit)
+        editor.focus()
+        editor.place(x=x, y=y, width=width, height=height)
+        editor.bind("<FocusOut>", self._finalize_edit)
+        self._editor = editor
 
     def _finalize_edit(self, _event=None):
         if not self._editor or self._editing_item is None or self._editing_column is None:
