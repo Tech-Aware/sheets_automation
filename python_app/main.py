@@ -773,6 +773,8 @@ class TableView(ctk.CTkFrame):
 class StockTableView(TableView):
     DISPLAY_HEADERS: Sequence[str] = DEFAULT_STOCK_HEADERS
 
+    SIZE_CHOICES: Sequence[str] = ("Petit", "Moyen", "Grand")
+
     _DISPLAY_FALLBACKS = {
         HEADERS["STOCK"].LOT_ALT: HEADERS["STOCK"].LOT,
         HEADERS["STOCK"].VALIDER_SAISIE_ALT: HEADERS["STOCK"].VALIDER_SAISIE,
@@ -821,6 +823,7 @@ class StockTableView(TableView):
             column_width=160,
             column_widths={"ID": 34},
             value_formatter=self._format_cell_value,
+            dropdown_choices={HEADERS["STOCK"].TAILLE: self.SIZE_CHOICES},
         )
 
     def _visible_headers(self) -> Sequence[str]:
