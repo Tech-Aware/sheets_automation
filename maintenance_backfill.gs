@@ -261,6 +261,13 @@ function copySpreadsheetToNextAccountingYear() {
   const targetName = `comptabilité ${nextYear}`;
 
   const ss = SpreadsheetApp.getActive();
+  const requiredSheets = ['Stock', 'Frais', 'Achats', 'Ventes'];
+  const missing = requiredSheets.filter(name => !ss.getSheetByName(name));
+  if (missing.length > 0) {
+    ss.toast(`Impossible de préparer l'année ${nextYear} : feuille(s) manquante(s) ${missing.join(', ')}.`, 'Passage à l\'année suivante', 10);
+    return;
+  }
+
   const existing = DriveApp.getFilesByName(targetName);
   if (existing.hasNext()) {
     const url = existing.next().getUrl();
@@ -269,6 +276,31 @@ function copySpreadsheetToNextAccountingYear() {
   }
 
   const copy = ss.copy(targetName);
+  const copySheets = copy.getSheets();
+  const sheetsToDelete = [];
+
+  for (let i = 0; i < copySheets.length; i++) {
+    const sheet = copySheets[i];
+    const name = sheet.getName();
+    if (requiredSheets.includes(name)) {
+      continue;
+    }
+    if (isMonthlyLedgerSheet_(sheet)) {
+      sheetsToDelete.push(sheet);
+    }
+  }
+
+  sheetsToDelete.forEach(sheet => copy.deleteSheet(sheet));
+
+  const ventesCopy = copy.getSheetByName('Ventes');
+  if (ventesCopy) {
+    const lastRow = ventesCopy.getLastRow();
+    const lastColumn = ventesCopy.getLastColumn();
+    if (lastRow > 1 && lastColumn > 0) {
+      ventesCopy.getRange(2, 1, lastRow - 1, lastColumn).clearContent();
+    }
+  }
+
   ss.toast(`Les données ont été copiées vers "${targetName}".\n${copy.getUrl()}`, 'Passage à l\'année suivante', 10);
 }
 
