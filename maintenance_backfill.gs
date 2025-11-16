@@ -195,7 +195,9 @@ function registerSalesActionsMenu_(ui, ss) {
   const salesMenu = ui.createMenu('Actions Ventes');
   salesMenu
     .addItem('Trier les ventes (date décroissante)', 'sortVentesByDate')
-    .addItem('Retirer du Stock les ventes importées', 'purgeStockFromVentes');
+    .addItem('Retirer du Stock les ventes importées', 'purgeStockFromVentes')
+    .addItem('Supprimer les doublons', 'purgeVentesDuplicates')
+    .addItem('Cocher les ventes déjà comptabilisé', 'markVentesAlreadyAccounted');
 
   registerBackfillMenu_(salesMenu, ss);
   salesMenu.addToUi();
@@ -204,6 +206,7 @@ function registerSalesActionsMenu_(ui, ss) {
 function registerAccountingActionsMenu_(ui) {
   ui.createMenu('Actions compta')
     .addItem('Calculer les frais (feuille active)', 'recalculateActiveLedgerFees')
+    .addItem('Supprimer les doublons (feuille active)', 'purgeActiveLedgerDuplicates')
     .addToUi();
 }
 
@@ -234,6 +237,21 @@ function recalculateActiveLedgerFees() {
   updateMonthlyTotals_(sheet, headersLen);
   updateLedgerResultRow_(sheet, headersLen);
   ss.toast('Les frais et totaux ont été recalculés.', 'Calcul des frais', 5);
+}
+
+function purgeActiveLedgerDuplicates() {
+  const ss = SpreadsheetApp.getActive();
+  const sheet = ss.getActiveSheet();
+  if (!sheet || !isMonthlyLedgerSheet_(sheet)) {
+    ss.toast('La feuille active n\'est pas un grand livre mensuel.', 'Doublons compta', 6);
+    return;
+  }
+
+  const result = removeLedgerDuplicateSkus_(sheet);
+  const message = result && result.removed
+    ? `${result.removed} doublon(s) supprimé(s).`
+    : 'Aucun doublon trouvé.';
+  ss.toast(message, 'Doublons compta', 5);
 }
 
 function noopBackfillMonthlyLedgerMenu() {
@@ -524,6 +542,126 @@ function purgeStockFromVentes() {
   }
 }
 
+function purgeVentesDuplicates() {
+  const ss = SpreadsheetApp.getActive();
+  const ventes = ss.getSheetByName('Ventes');
+  if (!ventes) {
+    ss.toast('Feuille "Ventes" introuvable.', 'Doublons Ventes', 5);
+    return;
+  }
+
+  const lastRow = ventes.getLastRow();
+  if (lastRow < 2) {
+    ss.toast('Aucune ligne à vérifier dans "Ventes".', 'Doublons Ventes', 5);
+    return;
+  }
+
+  const width = ventes.getLastColumn();
+  const headers = ventes.getRange(1, 1, 1, width).getValues()[0];
+  const resolver = makeHeaderResolver_(headers);
+  const colId = resolver.colExact(HEADERS.VENTES.ID);
+  const colSku = resolver.colExact(HEADERS.VENTES.SKU);
+
+  if (!colId || !colSku) {
+    ss.toast('Colonnes ID ou SKU manquantes dans "Ventes".', 'Doublons Ventes', 8);
+    return;
+  }
+
+  const data = ventes.getRange(2, 1, lastRow - 1, width).getValues();
+  const seen = new Set();
+  const rowsToDelete = [];
+
+  for (let i = 0; i < data.length; i++) {
+    const key = buildIdSkuDuplicateKey_(data[i][colId - 1], data[i][colSku - 1]);
+    if (!key) continue;
+    const rowNumber = i + 2;
+    if (seen.has(key)) {
+      rowsToDelete.push(rowNumber);
+    } else {
+      seen.add(key);
+    }
+  }
+
+  if (!rowsToDelete.length) {
+    ss.toast('Aucun doublon trouvé dans "Ventes".', 'Doublons Ventes', 5);
+    return;
+  }
+
+  rowsToDelete.sort((a, b) => b - a).forEach(r => ventes.deleteRow(r));
+  ss.toast(`${rowsToDelete.length} doublon(s) supprimé(s) de "Ventes".`, 'Doublons Ventes', 5);
+}
+
+function markVentesAlreadyAccounted() {
+  const ss = SpreadsheetApp.getActive();
+  const ventes = ss.getSheetByName('Ventes');
+  if (!ventes) {
+    ss.toast('Feuille "Ventes" introuvable.', 'Comptabilisé', 6);
+    return;
+  }
+
+  const ledgerSheets = ss.getSheets().filter(isMonthlyLedgerSheet_);
+  if (!ledgerSheets.length) {
+    ss.toast('Aucune feuille de compta trouvée.', 'Comptabilisé', 6);
+    return;
+  }
+
+  const lastRow = ventes.getLastRow();
+  if (lastRow < 2) {
+    ss.toast('Aucune vente à analyser.', 'Comptabilisé', 5);
+    return;
+  }
+
+  const headerWidth = Math.max(DEFAULT_VENTES_HEADERS.length, ventes.getLastColumn());
+  const headerRange = ventes.getRange(1, 1, 1, headerWidth);
+  const ventesHeaders = headerRange.getValues()[0];
+  let headerMutated = false;
+  for (let i = 0; i < DEFAULT_VENTES_HEADERS.length; i++) {
+    if (!ventesHeaders[i]) {
+      ventesHeaders[i] = DEFAULT_VENTES_HEADERS[i];
+      headerMutated = true;
+    }
+  }
+  if (headerMutated) {
+    headerRange.setValues([ventesHeaders]);
+  }
+
+  const resolver = makeHeaderResolver_(ventesHeaders);
+  const colCompta = resolver.colExact(HEADERS.VENTES.COMPTABILISE)
+    || resolver.colWhere(h => h.toLowerCase().includes('compt'));
+  if (!colCompta) {
+    ss.toast('Colonne "COMPTABILISÉ" introuvable.', 'Comptabilisé', 6);
+    return;
+  }
+
+  const width = ventes.getLastColumn();
+  const dataRange = ventes.getRange(2, 1, lastRow - 1, width);
+  const data = dataRange.getValues();
+  const comptaColumnValues = ventes.getRange(2, colCompta, lastRow - 1, 1).getValues();
+
+  const markedRows = [];
+  for (let i = 0; i < data.length; i++) {
+    if (isComptabiliseFlagActive_(comptaColumnValues[i][0])) continue;
+
+    const rowNumber = i + 2;
+    const sale = buildSaleRecordFromVentesRow_(data[i], resolver, rowNumber);
+    const hasIdSku = Boolean(buildIdSkuDuplicateKey_(sale.id, sale.sku));
+    if (!hasIdSku) continue;
+
+    if (saleAlreadyInLedgers_(ledgerSheets, sale)) {
+      comptaColumnValues[i][0] = true;
+      markedRows.push(rowNumber);
+    }
+  }
+
+  if (!markedRows.length) {
+    ss.toast('Aucune vente supplémentaire marquée comme comptabilisée.', 'Comptabilisé', 6);
+    return;
+  }
+
+  ventes.getRange(2, colCompta, comptaColumnValues.length, 1).setValues(comptaColumnValues);
+  ss.toast(`${markedRows.length} vente(s) marquée(s) comme comptabilisée(s).`, 'Comptabilisé', 6);
+}
+
 function backfillMonthlyLedgers() {
   runBackfillMonthlyLedgers_();
 }
@@ -563,6 +701,8 @@ function runBackfillMonthlyLedgers_(filter) {
   const colDate = resolver.colExact(HEADERS.VENTES.DATE_VENTE);
   const colPrix = resolver.colExact(HEADERS.VENTES.PRIX_VENTE)
     || resolver.colExact(HEADERS.VENTES.PRIX_VENTE_ALT);
+  const colCompta = resolver.colExact(HEADERS.VENTES.COMPTABILISE)
+    || resolver.colWhere(h => h.toLowerCase().includes('compt'));
 
   if (!colDate) {
     ss.toast(`Colonne ${HEADERS.VENTES.DATE_VENTE} introuvable dans "Ventes".`, 'Recopie comptable', 8);
@@ -591,6 +731,9 @@ function runBackfillMonthlyLedgers_(filter) {
   let duplicates = 0;
   let missingDate = 0;
   let skippedByFilter = 0;
+  let alreadyAccounted = 0;
+
+  const touchedLedgers = new Set();
 
   if (progress && resumeProgress) {
     startIndex = Math.max(0, Math.min(Number(progress.nextIndex) || 0, totalRows));
@@ -605,20 +748,22 @@ function runBackfillMonthlyLedgers_(filter) {
   let timedOut = false;
   let nextIndex = startIndex;
 
+  const cleanupLedgers = () => {
+    touchedLedgers.forEach(name => {
+      const ledgerSheet = ss.getSheetByName(name);
+      if (ledgerSheet) {
+        removeLedgerDuplicateSkus_(ledgerSheet);
+      }
+    });
+  };
+
   for (let i = startIndex; i < data.length; i++) {
     const row = data[i];
     nextIndex = i + 1;
 
     let dateCell = colDate ? row[colDate - 1] : null;
     if (!(dateCell instanceof Date) || isNaN(dateCell)) {
-      if (typeof dateCell === 'number') {
-        dateCell = new Date(dateCell);
-      } else if (typeof dateCell === 'string' && dateCell.trim()) {
-        const parsed = new Date(dateCell);
-        dateCell = isNaN(parsed) ? null : parsed;
-      } else {
-        dateCell = null;
-      }
+      dateCell = getDateOrNull_(dateCell);
     }
 
     if (!(dateCell instanceof Date) || isNaN(dateCell)) {
@@ -636,6 +781,11 @@ function runBackfillMonthlyLedgers_(filter) {
     const idVal = colId ? row[colId - 1] : '';
     const libelle = colLibelle ? row[colLibelle - 1] : '';
     const sku = colSku ? row[colSku - 1] : '';
+    const comptaFlag = colCompta ? row[colCompta - 1] : '';
+    if (isComptabiliseFlagActive_(comptaFlag)) {
+      alreadyAccounted++;
+      continue;
+    }
 
     let prixVente = NaN;
     if (colPrix) {
@@ -667,8 +817,13 @@ function runBackfillMonthlyLedgers_(filter) {
       margeBrute: marge,
       coeffMarge: coeff,
       nbPieces: 1,
-      sku
+      sku,
+      sourceRowNumber: i + 2
     }, { updateExisting: true });
+
+    if (result && result.sheetName) {
+      touchedLedgers.add(result.sheetName);
+    }
 
     if (result && result.inserted) {
       copied++;
@@ -676,6 +831,10 @@ function runBackfillMonthlyLedgers_(filter) {
       updated++;
     } else {
       duplicates++;
+    }
+
+    if ((result && (result.inserted || result.updated || result.skipped)) && colCompta) {
+      ventes.getRange(i + 2, colCompta).setValue(true);
     }
 
     if ((Date.now() - startTime) >= BACKFILL_MAX_RUNTIME_MS && i < data.length - 1) {
@@ -693,6 +852,9 @@ function runBackfillMonthlyLedgers_(filter) {
   }
   if (missingDate) {
     messageParts.push(`${missingDate} vente(s) sans date de vente.`);
+  }
+  if (alreadyAccounted) {
+    messageParts.push(`${alreadyAccounted} vente(s) déjà comptabilisées.`);
   }
   if (filter && skippedByFilter && copied === 0 && updated === 0) {
     messageParts.push(`${skippedByFilter} ligne(s) ignorée(s) car hors du mois sélectionné.`);
@@ -714,11 +876,13 @@ function runBackfillMonthlyLedgers_(filter) {
       lastUpdated: new Date().toISOString()
     });
     messageParts.push(`Limite de temps atteinte (${nextIndex}/${totalRows}). Relance la recopie pour continuer.`);
+    cleanupLedgers();
     ss.toast(messageParts.join(' '), title, 8);
     return;
   }
 
   clearBackfillProgress_(filterKey);
+  cleanupLedgers();
   ss.toast(messageParts.join(' '), title, 8);
 }
 
