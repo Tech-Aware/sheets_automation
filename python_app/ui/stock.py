@@ -140,11 +140,20 @@ class StockCardList(ctk.CTkFrame):
         self._update_selection_display()
         click_date = date.today()
         self._show_context_menu(event, click_date)
-        if len(self._selected_indices) == 1:
-            self.after(0, lambda idx=index: self.on_open_details(idx))
 
     def _show_context_menu(self, event, click_date: date):
         menu = tk.Menu(self, tearoff=False)
+        single_selection = len(self._selected_indices) == 1
+        menu.add_command(
+            label="Ajouter des détails",
+            state="normal" if single_selection else "disabled",
+            command=(
+                lambda: self.on_open_details(next(iter(self._selected_indices)))
+                if single_selection
+                else None
+            ),
+        )
+        menu.add_separator()
         actions = (
             ("Définir la date de mise en ligne", "mise_en_ligne"),
             ("Définir la date de publication", "publication"),
@@ -166,20 +175,49 @@ class StockCardList(ctk.CTkFrame):
             card.configure(fg_color=fg_color, border_color=border)
 
     def _build_metadata_lines(self, row: Mapping) -> list[str]:
-        lines = []
-        libelle = row.get(HEADERS["STOCK"].LIBELLE)
-        if libelle:
-            lines.append(str(libelle))
-        for key in (
-            HEADERS["STOCK"].TAILLE,
-            HEADERS["STOCK"].PRIX_VENTE,
-            HEADERS["STOCK"].DATE_MISE_EN_LIGNE,
-            HEADERS["STOCK"].DATE_PUBLICATION,
-        ):
+        details: list[str] = []
+
+        size_value = row.get(HEADERS["STOCK"].TAILLE)
+        if size_value:
+            details.append(f"Taille : {size_value}")
+
+        listing_date = self._first_non_empty(
+            row,
+            (
+                HEADERS["STOCK"].DATE_MISE_EN_LIGNE,
+                HEADERS["STOCK"].MIS_EN_LIGNE,
+                HEADERS["STOCK"].MIS_EN_LIGNE_ALT,
+                HEADERS["STOCK"].DATE_MISE_EN_LIGNE_ALT,
+            ),
+        )
+        if listing_date:
+            details.append(f"Mis en ligne le {listing_date}")
+
+        publication_date = self._first_non_empty(
+            row,
+            (
+                HEADERS["STOCK"].DATE_PUBLICATION,
+                HEADERS["STOCK"].PUBLIE,
+                HEADERS["STOCK"].PUBLIE_ALT,
+                HEADERS["STOCK"].DATE_PUBLICATION_ALT,
+            ),
+        )
+        if publication_date:
+            details.append(f"Publié le {publication_date}")
+
+        lot_value = row.get(HEADERS["STOCK"].LOT_ALT) or row.get(HEADERS["STOCK"].LOT)
+        if lot_value not in (None, ""):
+            details.append(f"Lot {lot_value}")
+
+        return [" | ".join(details)] if details else []
+
+    @staticmethod
+    def _first_non_empty(row: Mapping, keys: Sequence[str]) -> str:
+        for key in keys:
             value = row.get(key)
             if value not in (None, ""):
-                lines.append(f"{key}: {value}")
-        return lines
+                return str(value)
+        return ""
 
     def _handle_right_click_sale(self, idx: int, date_label: str):
         date_text = format_display_date(date.today())
