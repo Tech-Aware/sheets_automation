@@ -533,9 +533,21 @@ function copySaleToMonthlySheet_(ss, sale, options) {
     weekIndex = weekRanges.length - 1;
   }
 
+  const targetWeekNumber = weekIndex + 1;
+  let displacedWeekNumber = 0;
+
+  if (existingRowNumber) {
+    const currentWeekNumber = findLedgerWeekNumberForRow_(sheet, existingRowNumber);
+    if (currentWeekNumber && currentWeekNumber !== targetWeekNumber) {
+      displacedWeekNumber = currentWeekNumber;
+      sheet.deleteRow(existingRowNumber);
+      existingRowNumber = 0;
+    }
+  }
+
   const labels = sheet.getRange(1, 1, sheet.getLastRow(), 1).getValues().map(row => String(row[0] || ''));
-  const labelPrefix = `SEMAINE ${weekIndex + 1}`;
-  const totalPrefix = `TOTAL VENTE SEMAINE ${weekIndex + 1}`;
+  const labelPrefix = `SEMAINE ${targetWeekNumber}`;
+  const totalPrefix = `TOTAL VENTE SEMAINE ${targetWeekNumber}`;
 
   const labelIdx = labels.findIndex(v => v.toUpperCase().startsWith(labelPrefix));
   const totalIdx = labels.findIndex((v, idx) => idx > labelIdx && v.toUpperCase().startsWith(totalPrefix));
@@ -616,8 +628,11 @@ function copySaleToMonthlySheet_(ss, sale, options) {
   sheet.getRange(saleRowNumber, 1, 1, headersLen).setValues([saleRow]);
   sheet.getRange(saleRowNumber, 1).setNote(dedupeKey || '');
 
-  sortWeekRowsByDate_(sheet, weekIndex + 1, headersLen);
-  updateWeeklyTotals_(sheet, weekIndex + 1, headersLen);
+  sortWeekRowsByDate_(sheet, targetWeekNumber, headersLen);
+  updateWeeklyTotals_(sheet, targetWeekNumber, headersLen);
+  if (displacedWeekNumber) {
+    updateWeeklyTotals_(sheet, displacedWeekNumber, headersLen);
+  }
   updateMonthlyTotals_(sheet, headersLen);
   updateLedgerResultRow_(sheet, headersLen);
   applySkuPaletteFormatting_(sheet, MONTHLY_LEDGER_INDEX.SKU + 1, MONTHLY_LEDGER_INDEX.LIBELLE + 1);
