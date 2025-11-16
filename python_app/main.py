@@ -868,19 +868,27 @@ class StockCardList(ctk.CTkFrame):
         text_frame = ctk.CTkFrame(card, fg_color="transparent")
         text_frame.place(relx=0, rely=0, relwidth=1, relheight=1)
         text_frame.grid_propagate(False)
-        text_frame.configure(padx=10, pady=8)
-        title = ctk.CTkLabel(text_frame, text=subtitle or "(SKU manquant)", anchor="w", font=ctk.CTkFont(weight="bold"))
+
+        content_frame = ctk.CTkFrame(text_frame, fg_color="transparent")
+        content_frame.pack(fill="both", expand=True, padx=10, pady=8)
+
+        title = ctk.CTkLabel(
+            content_frame,
+            text=subtitle or "(SKU manquant)",
+            anchor="w",
+            font=ctk.CTkFont(weight="bold"),
+        )
         title.pack(fill="x")
         metadata_labels = []
         for line in self._build_metadata_lines(row):
-            lbl = ctk.CTkLabel(text_frame, text=line, anchor="w", font=ctk.CTkFont(size=12))
+            lbl = ctk.CTkLabel(content_frame, text=line, anchor="w", font=ctk.CTkFont(size=12))
             lbl.pack(fill="x")
             metadata_labels.append(lbl)
 
         if status:
             ctk.CTkLabel(card, text=status, text_color="#0f5132").pack(side="right", padx=8)
 
-        for widget in (card, text_frame, title, *metadata_labels):
+        for widget in (card, text_frame, content_frame, title, *metadata_labels):
             self._bind_card_events(widget, index)
 
     def _bind_card_events(self, widget, index: int):
