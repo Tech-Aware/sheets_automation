@@ -58,12 +58,14 @@ function handleStock(e) {
   const c = e.range.getColumn(), r = e.range.getRow();
 
   try {
-  const chronoCols = {
-    dms: C_DMS,
-    dmis: C_DMIS,
-    dpub: C_DPUB,
-    dvente: C_DVENTE
-  };
+    applyListValidation_(C_TAILLE, ['Petit', 'Moyen', 'Grand']);
+    applyListValidation_(C_LOT, ['2', '3', '4', '5']);
+    const chronoCols = {
+      dms: C_DMS,
+      dmis: C_DMIS,
+      dpub: C_DPUB,
+      dvente: C_DVENTE
+    };
 
   const chronology = [
     { key: 'dms', column: chronoCols.dms, statusCol: 0 },
@@ -86,33 +88,13 @@ function handleStock(e) {
     return getDateOrNull_(value);
   }
 
-  function computeDateFromPrevious_(key) {
-    const index = findChronologyIndex_(key);
-    if (index <= 0) {
-      return getTomorrow_();
-    }
-
-    const previous = chronology[index - 1];
-    const baseDate = getChronoDate_(previous.key);
-    if (baseDate) {
-      const shifted = addDays_(baseDate, 1);
-      if (shifted) {
-        return shifted;
-      }
-    }
-
-    return getTomorrow_();
-  }
-
   function setChronoDateFromPrevious_(key) {
     const entry = chronology.find(item => item.key === key);
     if (!entry || !entry.column) {
       return null;
     }
 
-    const nextDate = key === 'dvente'
-      ? new Date()
-      : computeDateFromPrevious_(key);
+    const nextDate = new Date();
     const cell = sh.getRange(r, entry.column);
     cell.setValue(nextDate);
     cell.setNumberFormat('dd/MM/yyyy');
@@ -143,6 +125,59 @@ function handleStock(e) {
   function getChronoKeyByColumn_(column) {
     const match = chronology.find(entry => entry.column === column);
     return match ? match.key : null;
+  }
+
+  function applyListValidation_(col, values) {
+    if (!col || !Array.isArray(values) || !values.length) return;
+    const lastRow = sh.getMaxRows();
+    if (lastRow < 2) return;
+    const rule = SpreadsheetApp
+      .newDataValidation()
+      .requireValueInList(values, true)
+      .setAllowInvalid(false)
+      .build();
+    sh.getRange(2, col, lastRow - 1, 1).setDataValidation(rule);
+  }
+
+  function hasValidPrice_() {
+    if (!C_PRIX) return false;
+    const priceCell = sh.getRange(r, C_PRIX);
+    const value = priceCell.getValue();
+    const display = priceCell.getDisplayValue();
+    return (typeof value === 'number') && !isNaN(value) && value > 0 && (!display || display.indexOf('⚠️') !== 0);
+  }
+
+  function hasShippingSize_() {
+    if (!C_TAILLE) return false;
+    const val = String(sh.getRange(r, C_TAILLE).getDisplayValue() || '').trim();
+    return !!val;
+  }
+
+  function refreshValiderCheckbox_() {
+    if (!C_VALIDE) return;
+    const valCell = sh.getRange(r, C_VALIDE);
+    const validation = valCell.getDataValidation();
+    const isCheckbox = isCheckboxValidation_(validation);
+    const allowInvalid = validation && typeof validation.getAllowInvalid === 'function' && validation.getAllowInvalid();
+    const shouldEnable = hasValidPrice_() && hasShippingSize_();
+
+    if (shouldEnable) {
+      if (!isCheckbox || allowInvalid) {
+        const rule = SpreadsheetApp
+          .newDataValidation()
+          .requireCheckbox()
+          .setAllowInvalid(false)
+          .build();
+        valCell.setDataValidation(rule);
+        if (!isCheckbox) {
+          valCell.setValue(false);
+        }
+      }
+      return;
+    }
+
+    valCell.clearDataValidations();
+    valCell.clearContent();
   }
 
   function setCellToFallback_(col, fallback) {
@@ -240,32 +275,7 @@ function handleStock(e) {
     const priceValue = priceCell.getValue();
     const priceDisplay = priceCell.getDisplayValue();
 
-    if (C_VALIDE) {
-      const valCell = sh.getRange(r, C_VALIDE);
-      const validation = valCell.getDataValidation();
-      const isCheckbox = validation &&
-        typeof validation.getCriteriaType === 'function' &&
-        validation.getCriteriaType() === SpreadsheetApp.DataValidationCriteria.CHECKBOX;
-      const allowInvalid = validation && typeof validation.getAllowInvalid === 'function' && validation.getAllowInvalid();
-      const shouldEnable = (typeof priceValue === 'number') && !isNaN(priceValue) && priceValue > 0 && (!priceDisplay || priceDisplay.indexOf('⚠️') !== 0);
-
-      if (shouldEnable) {
-        if (!isCheckbox || allowInvalid) {
-          const rule = SpreadsheetApp
-            .newDataValidation()
-            .requireCheckbox()
-            .setAllowInvalid(false)
-            .build();
-          valCell.setDataValidation(rule);
-          if (!isCheckbox) {
-            valCell.setValue(false);
-          }
-        }
-      } else {
-        valCell.clearDataValidations();
-        valCell.clearContent();
-      }
-    }
+    refreshValiderCheckbox_();
 
     if (!vendu) {
       // Rien n'est coché → pas d'alerte.
@@ -276,6 +286,10 @@ function handleStock(e) {
     // La colonne VENDU est cochée → contrôle du prix
     ensureValidPriceOrWarn_(sh, r, C_PRIX);
     return;
+  }
+
+  if (C_TAILLE && c === C_TAILLE) {
+    refreshValiderCheckbox_();
   }
 
   const isCombinedMisCell = useCombinedMisCol && C_MIS && C_DMIS && C_MIS === C_DMIS;
@@ -609,6 +623,7 @@ function handleStock(e) {
       const fallbackValue = oldValueDate ? new Date(oldValueDate.getTime()) : '';
       storePreviousCellValue_(sh, r, C_DVENTE, fallbackValue);
       ensureValidPriceOrWarn_(sh, r, C_PRIX);
+      refreshValiderCheckbox_();
       return;
     }
 
@@ -631,6 +646,8 @@ function handleStock(e) {
         valCell.clearDataValidations();
         valCell.clearContent();
       }
+
+      refreshValiderCheckbox_();
 
       restoreCheckboxValidation_(cell, previousValidation);
       return;
@@ -695,6 +712,7 @@ function handleStock(e) {
       const fallbackValue = oldValueDate ? new Date(oldValueDate.getTime()) : '';
       storePreviousCellValue_(sh, r, C_DVENTE, fallbackValue);
       ensureValidPriceOrWarn_(sh, r, C_PRIX);
+      refreshValiderCheckbox_();
       return;
     }
 
@@ -702,6 +720,7 @@ function handleStock(e) {
     if (C_PRIX) {
       ensureValidPriceOrWarn_(sh, r, C_PRIX);
     }
+    refreshValiderCheckbox_();
     if (oldValueDate) {
       cell.clearDataValidations();
       cell.setNumberFormat('dd/MM/yyyy');
@@ -731,6 +750,7 @@ function handleStock(e) {
       }
       propagateForwardFrom_('dvente');
       ensureValidPriceOrWarn_(sh, r, C_PRIX);
+      refreshValiderCheckbox_();
       return;
     }
 
@@ -753,6 +773,8 @@ function handleStock(e) {
         valCell.clearDataValidations();
         valCell.clearContent();
       }
+
+      refreshValiderCheckbox_();
       return;
     }
 
@@ -829,6 +851,9 @@ function handleStock(e) {
     if (!(valDate instanceof Date) || isNaN(valDate.getTime())) return;
 
     const baseToDmsMap = buildBaseToStockDate_(ss);
+    e.range.setValue(new Date());
+    e.range.setNumberFormat('dd/MM/yyyy');
+
     exportVente_(
       null,
       r,

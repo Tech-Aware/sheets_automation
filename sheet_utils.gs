@@ -787,7 +787,7 @@ function ensureValidPriceOrWarn_(sh, row, C_PRIX) {
 
   const disp = cell.getDisplayValue();
   if (!disp || disp.indexOf('⚠️') === -1) {
-    cell.setValue(`⚠️ Vous devez obligatoirement fournir un ${HEADERS.STOCK.PRIX_VENTE}`);
+    cell.setValue('⚠️ Préciser le prix de vente');
   }
 
   return false;
