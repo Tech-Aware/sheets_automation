@@ -556,7 +556,6 @@ class StockTableView(TableView):
             date_text = format_display_date(date.today())
             self._set_sale_columns(self.table.rows[row_index], f"Vendu le {date_text}")
             self.status_var.set(f"Article {row_index + 1} marqué vendu le {date_text}")
-            self.refresh()
             self._notify_data_changed()
             return
         self._open_detail_dialog(row_index)
@@ -581,7 +580,6 @@ class StockTableView(TableView):
                 self.table.rows[row_index][HEADERS["STOCK"].TAILLE_COLIS_ALT] = value
             elif name == "lot":
                 self.table.rows[row_index][HEADERS["STOCK"].LOT_ALT] = value
-        self.refresh()
         self._notify_data_changed()
 
     def _apply_date(self, row_index: int, value: str, columns: set[str], primary_key: str):
@@ -626,7 +624,6 @@ class StockTableView(TableView):
         removed = self._delete_rows_by_indices(indices)
         if removed:
             self.status_var.set(f"{removed} article(s) supprimé(s) du stock")
-            self.refresh()
         else:
             self.status_var.set("Aucun article supprimé")
 
@@ -646,7 +643,6 @@ class StockTableView(TableView):
         sale_value = f"Vendu le {date_text}"
         self._set_sale_columns(row, sale_value)
         self.status_var.set(f"Article {row_index + 1} marqué vendu le {date_text}")
-        self.refresh()
         self._notify_data_changed()
 
     def _apply_date_to_rows(self, indices: Sequence[int], columns: set[str], label: str, date_text: str):
@@ -660,7 +656,6 @@ class StockTableView(TableView):
             updated += 1
         if updated:
             self.status_var.set(f"{label} mise à jour pour {updated} article(s)")
-            self.refresh()
             self._notify_data_changed()
 
     def _handle_bulk_card_action(self, indices: Sequence[int], action: str, click_date: date):
@@ -693,7 +688,6 @@ class StockTableView(TableView):
             messages: list[str] = []
             if success:
                 messages.append(f"Articles vendus mis à jour pour {success} vignette(s)")
-                self.refresh()
                 self._notify_data_changed()
             if failures:
                 messages.append(
