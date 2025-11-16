@@ -25,7 +25,11 @@ try:  # pragma: no cover - defensive import path configuration
         table_to_stock_records,
     )
     from .services.stock_import import merge_stock_table
-    from .services.summaries import _base_reference_from_stock, build_inventory_snapshot
+from .services.summaries import (
+    _base_reference_from_stock,
+    _build_reference_unit_price_index,
+    build_inventory_snapshot,
+)
     from .services.workflow import PurchaseInput, SaleInput, StockInput, WorkflowCoordinator
     from .ui.tables import ScrollableTable
     from .ui.widgets import DatePickerEntry
@@ -996,8 +1000,9 @@ class StockSummaryPanel(ctk.CTkFrame):
         ("value_per_piece", "Prix moyen / article"),
     )
 
-    def __init__(self, master):
+    def __init__(self, master, achats_rows: Sequence[Mapping] | None = None):
         super().__init__(master)
+        self.achats_rows: Sequence[Mapping] = achats_rows or []
         ctk.CTkLabel(
             self,
             text="Indicateurs stock",
@@ -1014,8 +1019,10 @@ class StockSummaryPanel(ctk.CTkFrame):
             value_label.pack(side="right", padx=8, pady=10)
             self.value_labels[key] = value_label
 
-    def update(self, rows: Sequence[Mapping]):
-        stats = self._compute_stats(rows)
+    def update(self, rows: Sequence[Mapping], achats_rows: Sequence[Mapping] | None = None):
+        if achats_rows is not None:
+            self.achats_rows = achats_rows
+        stats = self._compute_stats(rows, self.achats_rows)
         self.value_labels["stock_pieces"].configure(text=str(stats["stock_pieces"]))
         self.value_labels["stock_value"].configure(text=f"{stats['stock_value']:.2f} €")
         self.value_labels["reference_count"].configure(text=str(stats["reference_count"]))
@@ -1023,9 +1030,10 @@ class StockSummaryPanel(ctk.CTkFrame):
         self.value_labels["value_per_piece"].configure(text=f"{stats['value_per_piece']:.2f} €")
 
     @staticmethod
-    def _compute_stats(rows: Sequence[Mapping]) -> dict[str, float | int]:
+    def _compute_stats(
+        rows: Sequence[Mapping], achats_rows: Sequence[Mapping] | None = None
+    ) -> dict[str, float | int]:
         pieces = 0
-        stock_value = 0.0
         references: set[str] = set()
 
         for row in rows:
@@ -1033,10 +1041,21 @@ class StockSummaryPanel(ctk.CTkFrame):
             if vendu:
                 continue
             pieces += 1
-            stock_value += _safe_float(row.get(HEADERS["STOCK"].PRIX_VENTE))
             base_reference = _base_reference_from_stock(row)
             if base_reference:
                 references.add(base_reference)
+
+        base_counts = {base: 0 for base in references}
+        for row in rows:
+            vendu = row.get(HEADERS["STOCK"].VENDU_ALT) or row.get(HEADERS["STOCK"].VENDU)
+            if vendu:
+                continue
+            base_reference = _base_reference_from_stock(row)
+            if base_reference and base_reference in base_counts:
+                base_counts[base_reference] += 1
+
+        reference_unit_price = _build_reference_unit_price_index(achats_rows or [])
+        stock_value = sum(reference_unit_price.get(base, 0.0) * count for base, count in base_counts.items())
 
         reference_count = len(references)
         value_per_reference = stock_value / reference_count if reference_count else 0.0
@@ -1227,7 +1246,8 @@ class StockTableView(TableView):
         if hasattr(self, "card_list"):
             self.card_list.refresh(self.table.rows)
         if hasattr(self, "summary_panel"):
-            self.summary_panel.update(self.table.rows)
+            achats_rows = self.workflow.achats.rows if self.workflow is not None else None
+            self.summary_panel.update(self.table.rows, achats_rows)
 
     def _build_extra_controls(self, parent):
         parent.grid_columnconfigure(0, weight=2, uniform="stock")
@@ -1251,9 +1271,10 @@ class StockTableView(TableView):
         )
         self.card_list.grid(row=1, column=0, sticky="nsew", padx=(12, 6), pady=(0, 12))
 
-        self.summary_panel = StockSummaryPanel(parent)
+        achats_rows = self.workflow.achats.rows if self.workflow is not None else None
+        self.summary_panel = StockSummaryPanel(parent, achats_rows=achats_rows)
         self.summary_panel.grid(row=1, column=1, sticky="nsew", padx=(6, 12), pady=(0, 12))
-        self.summary_panel.update(self.table.rows)
+        self.summary_panel.update(self.table.rows, achats_rows)
 
     def _delete_selected_rows(self):
         indices = self.table_widget.get_selected_indices() if self.table_widget is not None else []

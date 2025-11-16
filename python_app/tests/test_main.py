@@ -25,8 +25,21 @@ def test_stock_summary_counts_base_reference_from_sku():
         },
     ]
 
-    stats = StockSummaryPanel._compute_stats(rows)
+    achats_rows = [
+        {
+            HEADERS["ACHATS"].REFERENCE: "ABC",
+            HEADERS["ACHATS"].TOTAL_TTC: 200,
+            HEADERS["ACHATS"].QUANTITE_COMMANDEE: 4,
+        },
+        {
+            HEADERS["ACHATS"].REFERENCE: "XYZ",
+            HEADERS["ACHATS"].TOTAL_TTC: 50,
+            HEADERS["ACHATS"].QUANTITE_COMMANDEE: 5,
+        },
+    ]
+
+    stats = StockSummaryPanel._compute_stats(rows, achats_rows)
 
     assert stats["reference_count"] == 2
-    assert stats["stock_value"] == 45.0
-    assert stats["value_per_reference"] == 22.5
+    assert stats["stock_value"] == 120.0
+    assert stats["value_per_reference"] == 60.0
