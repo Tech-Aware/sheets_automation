@@ -858,6 +858,13 @@ function findLedgerRowByIdentifiers_(sheet, headersLen, sale, dedupeKey, allowUp
       const note = notes[i][0];
       if (!note || candidateKeys.indexOf(note) === -1) continue;
       const rowIndex = i + 2;
+
+      const noteMatchesSourceRow = typeof dedupeKey === 'string' && dedupeKey.indexOf('ROW:') !== -1
+        && note === dedupeKey;
+      if (noteMatchesSourceRow) {
+        return rowIndex;
+      }
+
       if (ledgerRowMatchesSale_(sheet, headersLen, rowIndex, sale, { allowPriceMismatch })) {
         return rowIndex;
       }
