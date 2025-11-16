@@ -713,17 +713,19 @@ class TableView(ctk.CTkFrame):
         self.content.grid_rowconfigure(0, weight=1)
         self.content.grid_columnconfigure(0, weight=1)
 
-        table_frame = ctk.CTkFrame(self.content)
-        table_frame.grid(row=0, column=0, sticky="nsew")
-        helper = ctk.CTkFrame(table_frame)
+        self.table_frame = ctk.CTkFrame(self.content)
+        self.table_frame.grid(row=0, column=0, sticky="nsew")
+        helper = ctk.CTkFrame(self.table_frame)
         helper.pack(fill="x", padx=12, pady=(12, 0))
         self.helper_frame = helper
         self.actions_frame = ctk.CTkFrame(helper)
         self.actions_frame.pack(side="left")
         self.status_var = tk.StringVar(value="Double-cliquez sur une cellule pour la modifier.")
         ctk.CTkLabel(helper, textvariable=self.status_var, anchor="w").pack(side="right", fill="x", expand=True, padx=(12, 0))
-        self.table_widget = self._create_table_widget(table_frame, self._visible_headers(), table.rows)
-        self.table_widget.pack(fill="both", expand=True, padx=12, pady=12)
+        self.table_widget: ScrollableTable | None = None
+        if self._should_show_table():
+            self.table_widget = self._create_table_widget(self.table_frame, self._visible_headers(), table.rows)
+            self.table_widget.pack(fill="both", expand=True, padx=12, pady=12)
         self._build_extra_controls(self.content)
 
     def _create_table_widget(self, parent, headers: Sequence[str], rows: Sequence[dict]):
@@ -745,10 +747,14 @@ class TableView(ctk.CTkFrame):
         self.status_var.set(f"Ligne {row_index + 1} – {column} mis à jour")
 
     def refresh(self):
-        self.table_widget.refresh(self.table.rows)
+        if self.table_widget is not None:
+            self.table_widget.refresh(self.table.rows)
 
     def _visible_headers(self) -> Sequence[str]:
         return list(self.table.headers[:10])
+
+    def _should_show_table(self) -> bool:
+        return True
 
     def _build_extra_controls(self, parent):
         """Hook for subclasses to add contextual actions."""
@@ -826,6 +832,12 @@ class StockDetailDialog(ctk.CTkToplevel):
         self.title("Détails de l'article")
         self.geometry("420x360")
         self.resizable(False, False)
+        owner = master.winfo_toplevel() if hasattr(master, "winfo_toplevel") else None
+        if owner is not None:
+            self.transient(owner)
+        self.grab_set()
+        self.lift()
+        self.focus()
         self.row = row
         self._fields: dict[str, ctk.CTkEntry | DatePickerEntry] = {}
         form = ctk.CTkFrame(self)
@@ -953,6 +965,7 @@ class StockTableView(TableView):
     def __init__(self, master, table, *, workflow: WorkflowCoordinator | None = None, on_table_changed=None):
         self.workflow = workflow
         super().__init__(master, table, on_table_changed=on_table_changed)
+        self.status_var.set("Cliquez sur une vignette pour modifier ou valider une vente.")
 
     def _create_table_widget(self, parent, headers: Sequence[str], rows: Sequence[dict]):
         return ScrollableTable(
@@ -975,6 +988,9 @@ class StockTableView(TableView):
         self._ensure_display_aliases()
         return self.DISPLAY_HEADERS
 
+    def _should_show_table(self) -> bool:
+        return False
+
     def refresh(self):
         self._ensure_display_aliases()
         super().refresh()
@@ -984,6 +1000,7 @@ class StockTableView(TableView):
     def _build_extra_controls(self, parent):
         parent.grid_columnconfigure(0, weight=5)
         parent.grid_columnconfigure(1, weight=0)
+        parent.grid_rowconfigure(0, weight=0)
         ctk.CTkButton(
             self.actions_frame,
             text="Supprimer la sélection",
@@ -1011,7 +1028,7 @@ class StockTableView(TableView):
         self.card_list.grid(row=1, column=0, columnspan=2, sticky="nsew")
 
     def _delete_selected_rows(self):
-        indices = self.table_widget.get_selected_indices()
+        indices = self.table_widget.get_selected_indices() if self.table_widget is not None else []
         if not indices:
             self.status_var.set("Sélectionnez au moins une ligne avant de supprimer.")
             return
@@ -1060,7 +1077,8 @@ class StockTableView(TableView):
         new_value = "" if has_date else today
         for key in columns:
             row[key] = new_value
-        self.table_widget.refresh(self.table.rows)
+        if self.table_widget is not None:
+            self.table_widget.refresh(self.table.rows)
         status = clear_message if has_date else set_message
         self.status_var.set(f"{status} pour la ligne {row_index + 1}")
         self._notify_data_changed()
