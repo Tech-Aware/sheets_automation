@@ -8,7 +8,7 @@ import sys
 import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog, messagebox
-from typing import Sequence
+from typing import Mapping, Sequence
 
 import customtkinter as ctk
 
@@ -121,6 +121,13 @@ def _normalize_id_column(table: TableData | None, id_header: str) -> None:
         normalized = _normalize_integer_value(row.get(id_header))
         if normalized is not None:
             row[id_header] = normalized
+
+
+def _safe_float(value) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
 
 
 class VintageErpApp(ctk.CTk):
@@ -974,6 +981,72 @@ class StockCardList(ctk.CTkFrame):
         return lines
 
 
+class StockSummaryPanel(ctk.CTkFrame):
+    """Right-hand column that surfaces key stock metrics."""
+
+    _METRICS = (
+        ("stock_pieces", "Articles en stock"),
+        ("stock_value", "Valeur estimée du stock"),
+        ("reference_count", "Références uniques"),
+        ("value_per_reference", "Valeur moyenne / référence"),
+        ("value_per_piece", "Prix moyen / article"),
+    )
+
+    def __init__(self, master):
+        super().__init__(master)
+        ctk.CTkLabel(
+            self,
+            text="Indicateurs stock",
+            font=ctk.CTkFont(size=16, weight="bold"),
+            anchor="w",
+        ).pack(fill="x", padx=12, pady=(12, 6))
+
+        self.value_labels: dict[str, ctk.CTkLabel] = {}
+        for key, label in self._METRICS:
+            card = ctk.CTkFrame(self)
+            card.pack(fill="x", padx=12, pady=6)
+            ctk.CTkLabel(card, text=label, anchor="w").pack(side="left", padx=8, pady=10)
+            value_label = ctk.CTkLabel(card, text="-", font=ctk.CTkFont(weight="bold"))
+            value_label.pack(side="right", padx=8, pady=10)
+            self.value_labels[key] = value_label
+
+    def update(self, rows: Sequence[Mapping]):
+        stats = self._compute_stats(rows)
+        self.value_labels["stock_pieces"].configure(text=str(stats["stock_pieces"]))
+        self.value_labels["stock_value"].configure(text=f"{stats['stock_value']:.2f} €")
+        self.value_labels["reference_count"].configure(text=str(stats["reference_count"]))
+        self.value_labels["value_per_reference"].configure(text=f"{stats['value_per_reference']:.2f} €")
+        self.value_labels["value_per_piece"].configure(text=f"{stats['value_per_piece']:.2f} €")
+
+    @staticmethod
+    def _compute_stats(rows: Sequence[Mapping]) -> dict[str, float | int]:
+        pieces = 0
+        stock_value = 0.0
+        references: set[str] = set()
+
+        for row in rows:
+            vendu = row.get(HEADERS["STOCK"].VENDU_ALT) or row.get(HEADERS["STOCK"].VENDU)
+            if vendu:
+                continue
+            pieces += 1
+            stock_value += _safe_float(row.get(HEADERS["STOCK"].PRIX_VENTE))
+            reference = row.get(HEADERS["STOCK"].REFERENCE)
+            if reference not in (None, ""):
+                references.add(str(reference))
+
+        reference_count = len(references)
+        value_per_reference = stock_value / reference_count if reference_count else 0.0
+        value_per_piece = stock_value / pieces if pieces else 0.0
+
+        return {
+            "stock_pieces": pieces,
+            "stock_value": round(stock_value, 2),
+            "reference_count": reference_count,
+            "value_per_reference": round(value_per_reference, 2),
+            "value_per_piece": round(value_per_piece, 2),
+        }
+
+
 class StockDetailDialog(ctk.CTkToplevel):
     """Lightweight popup used to enrich a stock item."""
 
@@ -1149,10 +1222,14 @@ class StockTableView(TableView):
         super().refresh()
         if hasattr(self, "card_list"):
             self.card_list.refresh(self.table.rows)
+        if hasattr(self, "summary_panel"):
+            self.summary_panel.update(self.table.rows)
 
     def _build_extra_controls(self, parent):
-        parent.grid_columnconfigure(0, weight=5)
+        parent.grid_columnconfigure(0, weight=2, uniform="stock")
+        parent.grid_columnconfigure(1, weight=1, uniform="stock")
         parent.grid_rowconfigure(0, weight=0)
+        self.table_frame.grid_configure(columnspan=2, sticky="nsew")
         ctk.CTkButton(
             self.actions_frame,
             text="Supprimer la sélection",
@@ -1168,7 +1245,11 @@ class StockTableView(TableView):
             on_bulk_action=self._handle_bulk_card_action,
             on_selection_change=self._on_card_selection_change,
         )
-        self.card_list.grid(row=1, column=0, sticky="nsew")
+        self.card_list.grid(row=1, column=0, sticky="nsew", padx=(12, 6), pady=(0, 12))
+
+        self.summary_panel = StockSummaryPanel(parent)
+        self.summary_panel.grid(row=1, column=1, sticky="nsew", padx=(6, 12), pady=(0, 12))
+        self.summary_panel.update(self.table.rows)
 
     def _delete_selected_rows(self):
         indices = self.table_widget.get_selected_indices() if self.table_widget is not None else []
