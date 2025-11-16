@@ -261,25 +261,18 @@ class StockSummaryPanel(ctk.CTkFrame):
         rows: Sequence[Mapping], achats_rows: Sequence[Mapping] | None = None
     ) -> dict[str, float | int]:
         pieces = 0
-        references: set[str] = set()
+        base_counts: dict[str, int] = {}
 
         for row in rows:
             vendu = row.get(HEADERS["STOCK"].VENDU_ALT) or row.get(HEADERS["STOCK"].VENDU)
             if vendu:
                 continue
+            base_reference = _base_reference_from_stock(row)
             pieces += 1
-            base_reference = _base_reference_from_stock(row)
             if base_reference:
-                references.add(base_reference)
+                base_counts[base_reference] = base_counts.get(base_reference, 0) + 1
 
-        base_counts = {base: 0 for base in references}
-        for row in rows:
-            vendu = row.get(HEADERS["STOCK"].VENDU_ALT) or row.get(HEADERS["STOCK"].VENDU)
-            if vendu:
-                continue
-            base_reference = _base_reference_from_stock(row)
-            if base_reference and base_reference in base_counts:
-                base_counts[base_reference] += 1
+        references = set(base_counts)
 
         reference_unit_price = _build_reference_unit_price_index(achats_rows or [])
         stock_value = sum(reference_unit_price.get(base, 0.0) * count for base, count in base_counts.items())
@@ -479,7 +472,7 @@ class StockTableView(TableView):
             self.summary_panel.update(self.table.rows, achats_rows)
 
     def _build_extra_controls(self, parent):
-        parent.grid_columnconfigure(0, weight=1, uniform="stock")
+        parent.grid_columnconfigure(0, weight=3, uniform="stock")
         parent.grid_columnconfigure(1, weight=2, uniform="stock")
         parent.grid_rowconfigure(0, weight=0)
         self.table_frame.grid_configure(columnspan=2, sticky="nsew")
