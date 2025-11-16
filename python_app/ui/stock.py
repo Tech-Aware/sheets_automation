@@ -136,13 +136,12 @@ class StockCardList(ctk.CTkFrame):
 
     def _handle_right_click(self, event, index: int):
         if index not in self._selected_indices:
-            self._selected_indices = {index}
-            self._update_selection_display()
+            self._selected_indices.add(index)
+        self._update_selection_display()
         click_date = date.today()
-        if len(self._selected_indices) > 1:
-            self._show_context_menu(event, click_date)
-            return
-        self.on_mark_sold(index, click_date)
+        self._show_context_menu(event, click_date)
+        if len(self._selected_indices) == 1:
+            self.after(0, lambda idx=index: self.on_open_details(idx))
 
     def _show_context_menu(self, event, click_date: date):
         menu = tk.Menu(self, tearoff=False)
@@ -223,26 +222,24 @@ class StockSummaryPanel(ctk.CTkFrame):
     def _build(self):
         wrapper = ctk.CTkFrame(self, fg_color="transparent")
         wrapper.pack(fill="both", expand=True, pady=(0, 12))
-        title = ctk.CTkLabel(wrapper, text="Valeur du stock", font=ctk.CTkFont(size=16, weight="bold"))
+        title = ctk.CTkLabel(wrapper, text="Indicateurs de stock", font=ctk.CTkFont(size=16, weight="bold"))
         title.pack(anchor="w", padx=12, pady=(0, 8))
 
         stats_frame = ctk.CTkFrame(wrapper, fg_color="transparent")
         stats_frame.pack(fill="x", padx=12)
-        for idx, (label, var) in enumerate(
-            (
-                ("Pièces en stock", self.total_pieces),
-                ("Valeur estimée", self.total_value),
-                ("Références uniques", self.reference_count),
-                ("Valeur / référence", self.value_per_reference),
-                ("Valeur / pièce", self.value_per_piece),
-            )
+        for label, var in (
+            ("Pièces en stock", self.total_pieces),
+            ("Valeur estimée", self.total_value),
+            ("Références uniques", self.reference_count),
+            ("Valeur / référence", self.value_per_reference),
+            ("Valeur / pièce", self.value_per_piece),
         ):
             item = ctk.CTkFrame(stats_frame)
-            item.grid(row=0, column=idx, padx=(0 if idx == 0 else 12), pady=4, sticky="nsew")
-            stats_frame.grid_columnconfigure(idx, weight=1)
-            ctk.CTkLabel(item, text=label).pack(anchor="center", padx=12, pady=(10, 4))
-            ctk.CTkLabel(item, textvariable=var, font=ctk.CTkFont(size=15, weight="bold")).pack(
-                anchor="center", padx=12, pady=(0, 10)
+            item.pack(fill="x", pady=4)
+            item.grid_columnconfigure(1, weight=1)
+            ctk.CTkLabel(item, text=label, anchor="w").grid(row=0, column=0, sticky="w", padx=12, pady=8)
+            ctk.CTkLabel(item, textvariable=var, font=ctk.CTkFont(size=15, weight="bold")).grid(
+                row=0, column=1, sticky="e", padx=12, pady=8
             )
 
         ctk.CTkButton(wrapper, text="Recalculer", command=self._handle_refresh).pack(anchor="w", padx=12, pady=(4, 8))
@@ -482,8 +479,8 @@ class StockTableView(TableView):
             self.summary_panel.update(self.table.rows, achats_rows)
 
     def _build_extra_controls(self, parent):
-        parent.grid_columnconfigure(0, weight=2, uniform="stock")
-        parent.grid_columnconfigure(1, weight=1, uniform="stock")
+        parent.grid_columnconfigure(0, weight=1, uniform="stock")
+        parent.grid_columnconfigure(1, weight=2, uniform="stock")
         parent.grid_rowconfigure(0, weight=0)
         self.table_frame.grid_configure(columnspan=2, sticky="nsew")
         ctk.CTkButton(
