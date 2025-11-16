@@ -1105,14 +1105,18 @@ class StockTableView(TableView):
         ctk.CTkLabel(import_frame, text="Importer des articles", anchor="w", font=ctk.CTkFont(weight="bold")).pack(
             fill="x", pady=(4, 4)
         )
-        import_options = ("Choisir une action", "Charger un fichier XLSX")
-        self.import_choice = tk.StringVar(value=import_options[0])
-        ctk.CTkOptionMenu(
-            import_frame,
-            variable=self.import_choice,
-            values=list(import_options),
-            command=self._handle_import_menu_selection,
-        ).pack(fill="x")
+        settings_row = ctk.CTkFrame(import_frame)
+        settings_row.pack(fill="x")
+        self.settings_button = ctk.CTkButton(
+            settings_row,
+            text="⚙️",
+            width=42,
+            command=self._open_import_menu,
+        )
+        self.settings_button.pack(side="left")
+        ctk.CTkLabel(settings_row, text="Options du stock", anchor="w").pack(side="left", padx=(8, 0))
+        self.import_menu = tk.Menu(self, tearoff=False)
+        self.import_menu.add_command(label="Charger un XLSX pour le stock", command=self._handle_import_xlsx)
         ctk.CTkLabel(
             panel,
             text="Sélectionnez un export Excel pour ajouter les nouveaux articles (sans doublons).",
@@ -1181,11 +1185,16 @@ class StockTableView(TableView):
         self._notify_data_changed()
         return True
 
-    def _handle_import_menu_selection(self, choice: str):
-        if choice == "Charger un fichier XLSX":
-            self._handle_import_xlsx()
-        if hasattr(self, "import_choice"):
-            self.import_choice.set("Choisir une action")
+    def _open_import_menu(self):
+        if not hasattr(self, "import_menu"):
+            return
+        button = getattr(self, "settings_button", None)
+        x = button.winfo_rootx() if button is not None else self.winfo_rootx()
+        y = (button.winfo_rooty() + button.winfo_height()) if button is not None else self.winfo_rooty()
+        try:
+            self.import_menu.tk_popup(x, y)
+        finally:
+            self.import_menu.grab_release()
 
     def _handle_import_xlsx(self):
         path = filedialog.askopenfilename(
