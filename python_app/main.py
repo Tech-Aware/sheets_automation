@@ -794,6 +794,13 @@ class StockTableView(TableView):
         HEADERS["STOCK"].DATE_PUBLICATION_ALT,
     }
 
+    _SALE_COLUMNS = {
+        HEADERS["STOCK"].VENDU,
+        HEADERS["STOCK"].VENDU_ALT,
+        HEADERS["STOCK"].DATE_VENTE,
+        HEADERS["STOCK"].DATE_VENTE_ALT,
+    }
+
     def __init__(self, master, table, on_table_changed=None):
         super().__init__(master, table, on_table_changed=on_table_changed)
 
@@ -807,6 +814,7 @@ class StockTableView(TableView):
             on_cell_activated=self._handle_cell_activation,
             column_width=160,
             column_widths={"ID": 34},
+            value_formatter=self._format_cell_value,
         )
 
     def _visible_headers(self) -> Sequence[str]:
@@ -879,6 +887,9 @@ class StockTableView(TableView):
         elif column in self._PUBLICATION_COLUMNS:
             columns = self._PUBLICATION_COLUMNS
             message = "Date de publication renseignée"
+        elif column in self._SALE_COLUMNS:
+            columns = self._SALE_COLUMNS
+            message = "Date de vente renseignée"
         else:
             return False
 
@@ -934,6 +945,11 @@ class StockTableView(TableView):
                 if alias in row and row[alias] not in (None, ""):
                     continue
                 row[alias] = row.get(source, "")
+
+    def _format_cell_value(self, header: str, value: object) -> str:
+        if header in self._SALE_COLUMNS and not _has_ready_date(value):
+            return "☐"
+        return "" if value is None else str(value)
 
 
 class WorkflowView(ctk.CTkFrame):
