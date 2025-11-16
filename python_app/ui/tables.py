@@ -23,6 +23,7 @@ class ScrollableTable(ttk.Frame):
         on_row_activated: Callable[[int], None] | None = None,
         enable_inline_edit: bool = True,
         value_formatter: Callable[[str, object], str] | None = None,
+        dropdown_choices: Mapping[str, Sequence[str]] | None = None,
     ):
         super().__init__(master)
         self.on_cell_edited = on_cell_edited
@@ -30,7 +31,10 @@ class ScrollableTable(ttk.Frame):
         self.on_row_activated = on_row_activated
         self.enable_inline_edit = enable_inline_edit
         self.value_formatter = value_formatter
-        self._editor: tk.Entry | None = None
+        self._dropdown_choices = {key: tuple(values) for key, values in (dropdown_choices or {}).items()}
+        self._vsb: ttk.Scrollbar | None = None
+        self._hsb: ttk.Scrollbar | None = None
+        self._editor: tk.Entry | ttk.Combobox | None = None
         self._editing_item: str | None = None
         self._editing_column: str | None = None
         self._item_to_row_index: dict[str, int] = {}
@@ -67,16 +71,20 @@ class ScrollableTable(ttk.Frame):
             width = self._column_widths.get(header, column_width)
             self.tree.column(header, width=width, anchor=tk.W)
         self.tree.tag_configure("even", background="#f2f4f8")
-        vsb = ttk.Scrollbar(self, orient="vertical", command=self.tree.yview)
-        hsb = ttk.Scrollbar(self, orient="horizontal", command=self.tree.xview)
-        self.tree.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
+        self._vsb = ttk.Scrollbar(self, orient="vertical", command=self._on_vscroll)
+        self._hsb = ttk.Scrollbar(self, orient="horizontal", command=self._on_hscroll)
+        self.tree.configure(
+            yscrollcommand=self._on_tree_yscroll,
+            xscrollcommand=self._on_tree_xscroll,
+        )
         self.tree.grid(row=0, column=0, sticky="nsew")
-        vsb.grid(row=0, column=1, sticky="ns")
-        hsb.grid(row=1, column=0, sticky="ew")
+        self._vsb.grid(row=0, column=1, sticky="ns")
+        self._hsb.grid(row=1, column=0, sticky="ew")
         self.grid_rowconfigure(0, weight=1)
         self.grid_columnconfigure(0, weight=1)
         self._insert_rows(rows)
         self.tree.bind("<Double-1>", self._handle_double_click)
+        self.tree.bind("<Configure>", self._reposition_editor)
 
     def refresh(self, rows: Iterable[dict]):
         for child in self.tree.get_children():
@@ -100,11 +108,8 @@ class ScrollableTable(ttk.Frame):
             values: list[str] = []
             for header in self._headers:
                 raw_value = row.get(header, "")
-                if self.value_formatter is not None:
-                    display_value = self.value_formatter(header, raw_value)
-                else:
-                    display_value = raw_value
-                values.append("" if display_value is None else str(display_value))
+                base_value = self.value_formatter(header, raw_value) if self.value_formatter is not None else raw_value
+                values.append(self._render_display_value(header, base_value))
             item = self.tree.insert(
                 "",
                 tk.END,
@@ -144,23 +149,35 @@ class ScrollableTable(ttk.Frame):
         if not bbox:
             return
         x, y, width, height = bbox
-        value = self.tree.set(item, column_id)
+        value = self._clean_dropdown_value(column_id, self.tree.set(item, column_id))
         self._editing_item = item
         self._editing_column = column_id
-        self._editor = tk.Entry(self.tree)
-        self._editor.insert(0, value)
-        self._editor.select_range(0, tk.END)
-        self._editor.focus()
-        self._editor.place(x=x, y=y, width=width, height=height)
-        self._editor.bind("<Return>", self._finalize_edit)
-        self._editor.bind("<Escape>", self._cancel_edit)
-        self._editor.bind("<FocusOut>", self._finalize_edit)
+        choices = self._dropdown_choices.get(column_id)
+        if choices:
+            editor = ttk.Combobox(self.tree, values=choices, state="readonly")
+            if value:
+                editor.set(value)
+            editor.bind("<<ComboboxSelected>>", self._finalize_edit)
+        else:
+            editor = tk.Entry(self.tree)
+            editor.insert(0, value)
+            editor.select_range(0, tk.END)
+            editor.bind("<Return>", self._finalize_edit)
+            editor.bind("<Escape>", self._cancel_edit)
+        editor.focus()
+        editor.place(x=x, y=y, width=width, height=height)
+        editor.bind("<FocusOut>", self._finalize_edit)
+        self._editor = editor
 
     def _finalize_edit(self, _event=None):
         if not self._editor or self._editing_item is None or self._editing_column is None:
             return
-        new_value = self._editor.get()
-        self.tree.set(self._editing_item, self._editing_column, new_value)
+        new_value = self._clean_dropdown_value(self._editing_column, self._editor.get())
+        self.tree.set(
+            self._editing_item,
+            self._editing_column,
+            self._render_display_value(self._editing_column, new_value),
+        )
         row_index = self._item_to_row_index.get(self._editing_item)
         if row_index is not None and self.on_cell_edited is not None:
             self.on_cell_edited(row_index, self._editing_column, new_value)
@@ -175,6 +192,46 @@ class ScrollableTable(ttk.Frame):
         self._editor = None
         self._editing_item = None
         self._editing_column = None
+
+    def _render_display_value(self, column_id: str, raw_value) -> str:
+        display_value = "" if raw_value is None else str(raw_value)
+        if column_id in self._dropdown_choices:
+            indicator = "▼"
+            return f"{display_value} {indicator}" if display_value else indicator
+        return display_value
+
+    def _clean_dropdown_value(self, column_id: str, value: str) -> str:
+        if column_id not in self._dropdown_choices:
+            return value
+        return value.rstrip().removesuffix("▼").rstrip()
+
+    def _reposition_editor(self, _event=None):
+        if self._editor is None or self._editing_item is None or self._editing_column is None:
+            return
+        bbox = self.tree.bbox(self._editing_item, self._editing_column)
+        if not bbox:
+            self._cleanup_editor()
+            return
+        x, y, width, height = bbox
+        self._editor.place(x=x, y=y, width=width, height=height)
+
+    def _on_vscroll(self, *args):
+        self.tree.yview(*args)
+        self._reposition_editor()
+
+    def _on_hscroll(self, *args):
+        self.tree.xview(*args)
+        self._reposition_editor()
+
+    def _on_tree_yscroll(self, *args):
+        if self._vsb is not None:
+            self._vsb.set(*args)
+        self._reposition_editor()
+
+    def _on_tree_xscroll(self, *args):
+        if self._hsb is not None:
+            self._hsb.set(*args)
+        self._reposition_editor()
 
 
 __all__ = ["ScrollableTable"]
