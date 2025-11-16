@@ -774,6 +774,7 @@ class StockTableView(TableView):
     DISPLAY_HEADERS: Sequence[str] = DEFAULT_STOCK_HEADERS
 
     SIZE_CHOICES: Sequence[str] = ("Petit", "Moyen", "Grand")
+    LOT_CHOICES: Sequence[str] = ("2", "3", "4", "5")
 
     _DISPLAY_FALLBACKS = {
         HEADERS["STOCK"].LOT_ALT: HEADERS["STOCK"].LOT,
@@ -823,7 +824,10 @@ class StockTableView(TableView):
             column_width=160,
             column_widths={"ID": 34},
             value_formatter=self._format_cell_value,
-            dropdown_choices={HEADERS["STOCK"].TAILLE: self.SIZE_CHOICES},
+            dropdown_choices={
+                HEADERS["STOCK"].TAILLE: self.SIZE_CHOICES,
+                HEADERS["STOCK"].LOT_ALT: self.LOT_CHOICES,
+            },
         )
 
     def _visible_headers(self) -> Sequence[str]:
