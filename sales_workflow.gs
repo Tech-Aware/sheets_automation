@@ -507,6 +507,20 @@ function copySaleToMonthlySheet_(ss, sale, options) {
     existingRowNumber = findLedgerRowByIdentifiers_(sheet, headersLen, sale, '', allowUpdates);
   }
 
+  if (existingRowNumber && !allowUpdates) {
+    const note = sheet.getRange(existingRowNumber, 1).getNote();
+    const noteMatches = dedupeKey && note === dedupeKey;
+
+    const normalizedSku = sale.sku ? normText_(sale.sku) : '';
+    const rowSku = MONTHLY_LEDGER_INDEX.SKU >= 0
+      ? normText_(sheet.getRange(existingRowNumber, MONTHLY_LEDGER_INDEX.SKU + 1).getValue())
+      : '';
+
+    if (!noteMatches && normalizedSku && rowSku === normalizedSku) {
+      return { inserted: false, updated: false, skipped: true };
+    }
+  }
+
   if (isReturn) {
     if (!existingRowNumber) {
       return { inserted: false, updated: false, removed: false };
