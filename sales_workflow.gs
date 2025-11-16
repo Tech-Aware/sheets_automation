@@ -825,6 +825,8 @@ function findLedgerRowByIdentifiers_(sheet, headersLen, sale, dedupeKey, allowUp
   const last = sheet.getLastRow();
   if (last <= 1) return 0;
 
+  const allowDataMatch = Boolean(allowUpdates);
+
   const candidateKeys = [];
   if (dedupeKey) candidateKeys.push(dedupeKey);
 
@@ -847,6 +849,10 @@ function findLedgerRowByIdentifiers_(sheet, headersLen, sale, dedupeKey, allowUp
         return rowIndex;
       }
     }
+  }
+
+  if (!allowDataMatch) {
+    return 0;
   }
 
   const data = sheet.getRange(2, 1, last - 1, headersLen).getValues();
@@ -876,11 +882,14 @@ function ledgerRowDataMatchesSale_(row, sale) {
   const lotIndex = MONTHLY_LEDGER_INDEX.LOT;
   const sizeIndex = MONTHLY_LEDGER_INDEX.TAILLE_COLIS;
 
+  let matchedIdentifier = false;
+
   if (idIndex >= 0 && sale.id !== undefined && sale.id !== null) {
     const candidateId = String(row[idIndex] || '').trim();
-    if (candidateId && candidateId === String(sale.id).trim()) {
-      return true;
+    if (candidateId !== String(sale.id).trim()) {
+      return false;
     }
+    matchedIdentifier = true;
   }
 
   const normalizedSku = sale.sku ? normText_(sale.sku) : '';
@@ -889,6 +898,7 @@ function ledgerRowDataMatchesSale_(row, sale) {
     if (candidateSku !== normalizedSku) {
       return false;
     }
+    matchedIdentifier = true;
   } else if (normalizedSku) {
     return false;
   }
@@ -935,7 +945,7 @@ function ledgerRowDataMatchesSale_(row, sale) {
     }
   }
 
-  return normalizedSku || sale.id !== undefined && sale.id !== null;
+  return matchedIdentifier;
 }
 
 function sortWeekRowsByDate_(sheet, weekNumber, headersLen) {
