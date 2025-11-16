@@ -19,11 +19,13 @@ class ScrollableTable(ttk.Frame):
         column_width: int = 140,
         column_widths: Mapping[str, int] | None = None,
         on_cell_edited: Callable[[int, str, str], None] | None = None,
+        on_cell_activated: Callable[[int | None, str], bool] | None = None,
         on_row_activated: Callable[[int], None] | None = None,
         enable_inline_edit: bool = True,
     ):
         super().__init__(master)
         self.on_cell_edited = on_cell_edited
+        self.on_cell_activated = on_cell_activated
         self.on_row_activated = on_row_activated
         self.enable_inline_edit = enable_inline_edit
         self._editor: tk.Entry | None = None
@@ -103,33 +105,32 @@ class ScrollableTable(ttk.Frame):
             self._item_to_row_index[item] = idx
 
     def _handle_double_click(self, event):
-        if self.enable_inline_edit:
-            self._begin_edit(event)
-            return
-        if self.on_row_activated is None:
-            return
-        item = self.tree.identify_row(event.y)
-        if not item:
-            return
-        row_index = self._item_to_row_index.get(item)
-        if row_index is None:
-            return
-        self.on_row_activated(row_index)
-
-    def _begin_edit(self, event):
-        if self._editor is not None:
-            self._finalize_edit()
-        region = self.tree.identify("region", event.x, event.y)
-        if region != "cell":
-            return
         item = self.tree.identify_row(event.y)
         column = self.tree.identify_column(event.x)
         if not item or column == "#0":
             return
+
         column_index = int(column.replace("#", "")) - 1
         if column_index < 0 or column_index >= len(self._headers):
             return
         column_id = self._headers[column_index]
+        row_index = self._item_to_row_index.get(item)
+
+        if self.on_cell_activated is not None and self.on_cell_activated(row_index, column_id):
+            return
+
+        if self.enable_inline_edit:
+            self._begin_edit(item, column_id)
+            return
+        if self.on_row_activated is None:
+            return
+        if row_index is None:
+            return
+        self.on_row_activated(row_index)
+
+    def _begin_edit(self, item: str, column_id: str):
+        if self._editor is not None:
+            self._finalize_edit()
         bbox = self.tree.bbox(item, column_id)
         if not bbox:
             return
