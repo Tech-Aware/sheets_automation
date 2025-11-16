@@ -717,17 +717,20 @@ class TableView(ctk.CTkFrame):
         self.actions_frame.pack(side="left")
         self.status_var = tk.StringVar(value="Double-cliquez sur une cellule pour la modifier.")
         ctk.CTkLabel(helper, textvariable=self.status_var, anchor="w").pack(side="right", fill="x", expand=True, padx=(12, 0))
-        self.table_widget = ScrollableTable(
-            table_frame,
-            self._visible_headers(),
-            table.rows,
+        self.table_widget = self._create_table_widget(table_frame, self._visible_headers(), table.rows)
+        self.table_widget.pack(fill="both", expand=True, padx=12, pady=12)
+        self._build_extra_controls(self.content)
+
+    def _create_table_widget(self, parent, headers: Sequence[str], rows: Sequence[dict]):
+        return ScrollableTable(
+            parent,
+            headers,
+            rows,
             height=20,
             on_cell_edited=self._on_cell_edit,
             column_width=160,
             column_widths={"ID": 34},
         )
-        self.table_widget.pack(fill="both", expand=True, padx=12, pady=12)
-        self._build_extra_controls(self.content)
 
     def _on_cell_edit(self, row_index: int, column: str, new_value: str):
         try:
@@ -775,8 +778,27 @@ class StockTableView(TableView):
         HEADERS["STOCK"].VALIDER_SAISIE_ALT: HEADERS["STOCK"].VALIDER_SAISIE,
     }
 
+    _DATE_COLUMNS = {
+        HEADERS["STOCK"].MIS_EN_LIGNE,
+        HEADERS["STOCK"].MIS_EN_LIGNE_ALT,
+        HEADERS["STOCK"].DATE_MISE_EN_LIGNE,
+        HEADERS["STOCK"].DATE_MISE_EN_LIGNE_ALT,
+    }
+
     def __init__(self, master, table, on_table_changed=None):
         super().__init__(master, table, on_table_changed=on_table_changed)
+
+    def _create_table_widget(self, parent, headers: Sequence[str], rows: Sequence[dict]):
+        return ScrollableTable(
+            parent,
+            headers,
+            rows,
+            height=20,
+            on_cell_edited=self._on_cell_edit,
+            on_cell_activated=self._handle_cell_activation,
+            column_width=160,
+            column_widths={"ID": 34},
+        )
 
     def _visible_headers(self) -> Sequence[str]:
         self._ensure_display_aliases()
@@ -834,6 +856,20 @@ class StockTableView(TableView):
         except (IndexError, KeyError):
             pass
         self.status_var.set(f"Ligne {row_index + 1} – {column} mis à jour")
+
+    def _handle_cell_activation(self, row_index: int | None, column: str) -> bool:
+        if column not in self._DATE_COLUMNS or row_index is None:
+            return False
+        if not (0 <= row_index < len(self.table.rows)):
+            return False
+        today = format_display_date(date.today())
+        row = self.table.rows[row_index]
+        for key in self._DATE_COLUMNS:
+            row[key] = today
+        self.table_widget.refresh(self.table.rows)
+        self.status_var.set(f"Date de mise en ligne renseignée pour la ligne {row_index + 1}")
+        self._notify_data_changed()
+        return True
 
     def _handle_import_xlsx(self):
         path = filedialog.askopenfilename(

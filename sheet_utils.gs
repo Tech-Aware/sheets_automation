@@ -222,7 +222,12 @@ function resolveCombinedMisEnLigneColumn_(resolver) {
   const colWhere = resolver.colWhere ? resolver.colWhere.bind(resolver) : () => 0;
 
   const combined = colExact(HEADERS.STOCK.MIS_EN_LIGNE)
-    || colWhere(h => h.includes('mis en ligne') && h.includes('date'));
+    || colExact(HEADERS.STOCK.DATE_MISE_EN_LIGNE)
+    || colExact(HEADERS.STOCK.DATE_MISE_EN_LIGNE_ALT)
+    || colWhere(h => {
+      const header = String(h || '').toLowerCase();
+      return header.includes('mise en ligne') && header.includes('date');
+    });
   if (combined) {
     return combined;
   }
