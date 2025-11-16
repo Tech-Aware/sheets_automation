@@ -148,14 +148,17 @@ class WorkflowCoordinator:
         stock_id_value = self._get_purchase_value(purchase, HEADERS["ACHATS"].ID) or data.purchase_id
         stock_id = str(stock_id_value)
         date_stock = self._today()
-        libelle = self._get_purchase_value(purchase, HEADERS["ACHATS"].ARTICLE) or self._get_purchase_value(
+        article = self._get_purchase_value(purchase, HEADERS["ACHATS"].ARTICLE) or self._get_purchase_value(
             purchase, HEADERS["ACHATS"].ARTICLE_ALT
         )
+        marque = self._get_purchase_value(purchase, HEADERS["ACHATS"].MARQUE) or ""
+        libelle = " ".join(part for part in (article, marque) if part).strip()
         row: dict = {}
         self._set_stock_value(row, HEADERS["STOCK"].ID, stock_id)
         self._set_stock_value(row, HEADERS["STOCK"].SKU, data.sku)
         self._set_stock_value(row, HEADERS["STOCK"].LIBELLE, libelle)
         self._set_stock_value(row, HEADERS["STOCK"].ARTICLE, libelle)
+        self._set_stock_value(row, HEADERS["STOCK"].MARQUE, marque)
         self._set_stock_value(row, HEADERS["STOCK"].PRIX_VENTE, round(data.prix_vente, 2))
         self._set_stock_value(row, HEADERS["STOCK"].LOT, data.lot)
         self._set_stock_value(row, HEADERS["STOCK"].TAILLE, data.taille)
