@@ -182,7 +182,12 @@ class VintageErpApp(ctk.CTk):
                 view = PurchasesView(tab, self.tables[sheet], self.workflow, self.refresh_views)
                 self.purchase_view = view
             elif sheet == "Stock":
-                view = StockTableView(tab, self.tables[sheet], on_table_changed=self.refresh_views)
+                view = StockTableView(
+                    tab,
+                    self.tables[sheet],
+                    workflow=self.workflow,
+                    on_table_changed=self.refresh_views,
+                )
             else:
                 view = TableView(tab, self.tables[sheet], on_table_changed=self.refresh_views)
             self.table_views[sheet] = view
@@ -770,6 +775,141 @@ class TableView(ctk.CTkFrame):
             self.refresh()
 
 
+class StockCardList(ctk.CTkFrame):
+    """Compact list of stock items rendered as tappable rectangles."""
+
+    def __init__(self, master, table, on_edit, on_sale):
+        super().__init__(master)
+        self.table = table
+        self.on_edit = on_edit
+        self.on_sale = on_sale
+        ctk.CTkLabel(
+            self,
+            text="Vue vignettes (clic pour éditer, clic droit pour valider la vente)",
+            anchor="w",
+            font=ctk.CTkFont(weight="bold"),
+        ).pack(fill="x", padx=12, pady=(8, 4))
+        self.container = ctk.CTkScrollableFrame(self, height=240)
+        self.container.pack(fill="both", expand=True, padx=12, pady=(0, 12))
+        self.refresh(self.table.rows)
+
+    def refresh(self, rows: Sequence[dict]):
+        for child in self.container.winfo_children():
+            child.destroy()
+        for idx, row in enumerate(rows):
+            self._add_card(idx, row)
+
+    def _add_card(self, index: int, row: dict):
+        sku = str(row.get(HEADERS["STOCK"].SKU, "")).strip()
+        label = row.get(HEADERS["STOCK"].ARTICLE, "") or row.get(HEADERS["STOCK"].LIBELLE, "")
+        status = "Vendu" if row.get(HEADERS["STOCK"].VENDU_ALT, "") else ""
+        subtitle = f"{sku} – {label}" if label else sku
+        card = ctk.CTkFrame(self.container, height=25, fg_color="#e5e7eb")
+        card.grid_propagate(False)
+        card.pack(fill="x", padx=4, pady=2)
+        text = ctk.CTkLabel(card, text=subtitle or "(SKU manquant)", anchor="w")
+        text.pack(side="left", fill="x", expand=True, padx=8)
+        if status:
+            ctk.CTkLabel(card, text=status, text_color="#0f5132").pack(side="right", padx=8)
+        card.bind("<Button-1>", lambda _e, idx=index: self.on_edit(idx))
+        card.bind("<Button-3>", lambda _e, idx=index: self.on_sale(idx))
+        text.bind("<Button-1>", lambda _e, idx=index: self.on_edit(idx))
+        text.bind("<Button-3>", lambda _e, idx=index: self.on_sale(idx))
+
+
+class StockDetailDialog(ctk.CTkToplevel):
+    """Lightweight popup used to enrich a stock item."""
+
+    def __init__(self, master, row: dict, *, on_save):
+        super().__init__(master)
+        self.on_save = on_save
+        self.title("Détails de l'article")
+        self.geometry("420x360")
+        self.resizable(False, False)
+        self.row = row
+        self._fields: dict[str, ctk.CTkEntry | DatePickerEntry] = {}
+        form = ctk.CTkFrame(self)
+        form.pack(fill="both", expand=True, padx=12, pady=12)
+        self._add_field(
+            form,
+            "date_mise_en_ligne",
+            "Date de mise en ligne",
+            self._initial_date(
+                row,
+                StockTableView._DATE_COLUMNS,
+                HEADERS["STOCK"].DATE_MISE_EN_LIGNE,
+                HEADERS["STOCK"].MIS_EN_LIGNE,
+            ),
+            date_picker=True,
+        )
+        self._add_field(
+            form,
+            "date_publication",
+            "Date de publication",
+            self._initial_date(
+                row,
+                StockTableView._PUBLICATION_COLUMNS,
+                HEADERS["STOCK"].DATE_PUBLICATION,
+                HEADERS["STOCK"].PUBLIE,
+            ),
+            date_picker=True,
+        )
+        self._add_field(
+            form,
+            "date_vente",
+            "Date de vente",
+            self._initial_date(
+                row,
+                StockTableView._SALE_COLUMNS,
+                HEADERS["STOCK"].DATE_VENTE,
+                HEADERS["STOCK"].VENDU,
+            ),
+            date_picker=True,
+        )
+        self._add_field(
+            form,
+            "prix_vente",
+            "Prix de vente",
+            row.get(HEADERS["STOCK"].PRIX_VENTE, ""),
+        )
+        self._add_field(
+            form,
+            "taille_colis",
+            "Taille du colis",
+            row.get(HEADERS["STOCK"].TAILLE_COLIS) or row.get(HEADERS["STOCK"].TAILLE_COLIS_ALT, ""),
+        )
+        self._add_field(
+            form,
+            "lot",
+            "Lot",
+            row.get(HEADERS["STOCK"].LOT_ALT) or row.get(HEADERS["STOCK"].LOT, ""),
+        )
+        ctk.CTkButton(form, text="Enregistrer", command=self._save).pack(fill="x", pady=(12, 4))
+
+    def _add_field(self, parent, key: str, label: str, value, *, date_picker: bool = False):
+        row = ctk.CTkFrame(parent)
+        row.pack(fill="x", pady=4)
+        ctk.CTkLabel(row, text=label, width=160, anchor="w").pack(side="left")
+        entry = DatePickerEntry(row) if date_picker else ctk.CTkEntry(row)
+        if value not in (None, ""):
+            entry.insert(0, str(value))
+        entry.pack(side="left", fill="x", expand=True, padx=(8, 0))
+        self._fields[key] = entry
+
+    @staticmethod
+    def _initial_date(row: dict, aliases: set[str], *keys: str) -> str:
+        for key in (*keys, *aliases):
+            value = row.get(key)
+            if value not in (None, ""):
+                return value
+        return ""
+
+    def _save(self):
+        updates = {name: field.get().strip() for name, field in self._fields.items()}
+        self.on_save(updates)
+        self.destroy()
+
+
 class StockTableView(TableView):
     DISPLAY_HEADERS: Sequence[str] = DEFAULT_STOCK_HEADERS
 
@@ -810,7 +950,8 @@ class StockTableView(TableView):
         | _SALE_COLUMNS
     )
 
-    def __init__(self, master, table, on_table_changed=None):
+    def __init__(self, master, table, *, workflow: WorkflowCoordinator | None = None, on_table_changed=None):
+        self.workflow = workflow
         super().__init__(master, table, on_table_changed=on_table_changed)
 
     def _create_table_widget(self, parent, headers: Sequence[str], rows: Sequence[dict]):
@@ -837,6 +978,8 @@ class StockTableView(TableView):
     def refresh(self):
         self._ensure_display_aliases()
         super().refresh()
+        if hasattr(self, "card_list"):
+            self.card_list.refresh(self.table.rows)
 
     def _build_extra_controls(self, parent):
         parent.grid_columnconfigure(0, weight=5)
@@ -862,6 +1005,10 @@ class StockTableView(TableView):
             anchor="w",
             wraplength=260,
         ).pack(fill="x", padx=12, pady=(0, 8))
+
+        parent.grid_rowconfigure(1, weight=1)
+        self.card_list = StockCardList(parent, self.table, self._open_card_details, self._handle_card_sale)
+        self.card_list.grid(row=1, column=0, columnspan=2, sticky="nsew")
 
     def _delete_selected_rows(self):
         indices = self.table_widget.get_selected_indices()
@@ -969,6 +1116,87 @@ class StockTableView(TableView):
         if header in self._CHECKBOX_STYLE_COLUMNS and not _has_ready_date(value):
             return "☐"
         return "" if value is None else str(value)
+
+    def _open_card_details(self, row_index: int):
+        if not (0 <= row_index < len(self.table.rows)):
+            return
+        row = self.table.rows[row_index]
+
+        def _apply(updates: dict[str, str]):
+            mise = self._normalize_date_input(updates.get("date_mise_en_ligne", ""))
+            publication = self._normalize_date_input(updates.get("date_publication", ""))
+            vente = self._normalize_date_input(updates.get("date_vente", ""))
+            prix = updates.get("prix_vente", "")
+            taille_colis = updates.get("taille_colis", "")
+            lot = updates.get("lot", "")
+            if mise is not None:
+                for key in self._DATE_COLUMNS:
+                    row[key] = mise
+            if publication is not None:
+                for key in self._PUBLICATION_COLUMNS:
+                    row[key] = publication
+            if vente is not None:
+                for key in self._SALE_COLUMNS:
+                    row[key] = vente
+            if prix:
+                try:
+                    row[HEADERS["STOCK"].PRIX_VENTE] = round(float(prix), 2)
+                except ValueError:
+                    pass
+            if taille_colis is not None:
+                row[HEADERS["STOCK"].TAILLE_COLIS] = taille_colis
+                row[HEADERS["STOCK"].TAILLE_COLIS_ALT] = taille_colis
+            if lot is not None:
+                row[HEADERS["STOCK"].LOT] = lot
+                row[HEADERS["STOCK"].LOT_ALT] = lot
+            self.status_var.set(f"Ligne {row_index + 1} mise à jour via vignette")
+            self.refresh()
+            self._notify_data_changed()
+
+        StockDetailDialog(self, row, on_save=_apply)
+
+    def _handle_card_sale(self, row_index: int):
+        if self.workflow is None:
+            self.status_var.set("Validation impossible : workflow indisponible")
+            return
+        if not (0 <= row_index < len(self.table.rows)):
+            return
+        row = self.table.rows[row_index]
+        sku = str(row.get(HEADERS["STOCK"].SKU, "")).strip()
+        if not sku:
+            self.status_var.set("SKU manquant, impossible d'envoyer en Ventes")
+            return
+        prix = row.get(HEADERS["STOCK"].PRIX_VENTE) or 0
+        lot = row.get(HEADERS["STOCK"].LOT_ALT) or row.get(HEADERS["STOCK"].LOT) or ""
+        taille = row.get(HEADERS["STOCK"].TAILLE, "")
+        date_vente = row.get(HEADERS["STOCK"].DATE_VENTE) or row.get(HEADERS["STOCK"].DATE_VENTE_ALT) or ""
+        try:
+            self.workflow.register_sale(
+                SaleInput(
+                    sku=sku,
+                    prix_vente=float(prix) if prix not in (None, "") else 0.0,
+                    frais_colissage=0.0,
+                    date_vente=str(date_vente) if date_vente else None,
+                    lot=str(lot),
+                    taille=str(taille),
+                )
+            )
+        except ValueError as exc:
+            self.status_var.set(str(exc))
+            return
+        self.status_var.set(f"Article {sku} validé et envoyé vers Ventes")
+        self.refresh()
+        self._notify_data_changed()
+
+    @staticmethod
+    def _normalize_date_input(value: str | None) -> str | None:
+        if value is None:
+            return None
+        text = value.strip()
+        if not text:
+            return ""
+        parsed = parse_date_value(text)
+        return format_display_date(parsed) if parsed else text
 
 
 class WorkflowView(ctk.CTkFrame):
