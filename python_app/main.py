@@ -46,7 +46,11 @@ except ImportError:  # pragma: no cover - executed when run as a script
         table_to_stock_records,
     )
     from python_app.services.stock_import import merge_stock_table
-    from python_app.services.summaries import _base_reference_from_stock, build_inventory_snapshot
+    from python_app.services.summaries import (
+        _base_reference_from_stock,
+        _build_reference_unit_price_index,
+        build_inventory_snapshot,
+    )
     from python_app.services.workflow import PurchaseInput, SaleInput, StockInput, WorkflowCoordinator
     from python_app.ui.tables import ScrollableTable
     from python_app.ui.widgets import DatePickerEntry
