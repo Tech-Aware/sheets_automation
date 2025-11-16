@@ -810,17 +810,107 @@ class StockCardList(ctk.CTkFrame):
         label = row.get(HEADERS["STOCK"].ARTICLE, "") or row.get(HEADERS["STOCK"].LIBELLE, "")
         status = "Vendu" if row.get(HEADERS["STOCK"].VENDU_ALT, "") else ""
         subtitle = f"{sku} – {label}" if label else sku
-        card = ctk.CTkFrame(self.container, height=25, fg_color="#e5e7eb")
+        card = ctk.CTkFrame(self.container, height=68, fg_color="#e5e7eb")
         card.grid_propagate(False)
         card.pack(fill="x", padx=4, pady=2)
-        text = ctk.CTkLabel(card, text=subtitle or "(SKU manquant)", anchor="w")
-        text.pack(side="left", fill="x", expand=True, padx=8)
+
+        text_frame = ctk.CTkFrame(card, fg_color="transparent")
+        text_frame.pack(side="left", fill="x", expand=True, padx=8, pady=6)
+        title = ctk.CTkLabel(text_frame, text=subtitle or "(SKU manquant)", anchor="w", font=ctk.CTkFont(weight="bold"))
+        title.pack(fill="x")
+        metadata_labels = []
+        for line in self._build_metadata_lines(row):
+            lbl = ctk.CTkLabel(text_frame, text=line, anchor="w", font=ctk.CTkFont(size=12))
+            lbl.pack(fill="x")
+            metadata_labels.append(lbl)
+
         if status:
             ctk.CTkLabel(card, text=status, text_color="#0f5132").pack(side="right", padx=8)
-        card.bind("<Button-1>", lambda _e, idx=index: self.on_edit(idx))
-        card.bind("<Button-3>", lambda _e, idx=index: self.on_sale(idx))
-        text.bind("<Button-1>", lambda _e, idx=index: self.on_edit(idx))
-        text.bind("<Button-3>", lambda _e, idx=index: self.on_sale(idx))
+
+        for widget in (card, text_frame, title, *metadata_labels):
+            self._bind_card_events(widget, index)
+
+    def _bind_card_events(self, widget, index: int):
+        widget.bind("<Button-1>", lambda _e, idx=index: self.on_edit(idx))
+        widget.bind("<Button-3>", lambda _e, idx=index: self.on_sale(idx))
+
+    @staticmethod
+    def _first_non_empty(row: dict, keys: tuple[str, ...]):
+        for key in keys:
+            value = row.get(key)
+            if value not in (None, ""):
+                return value
+        return None
+
+    def _format_card_date(self, value) -> str:
+        parsed = parse_date_value(value)
+        if parsed:
+            return format_display_date(parsed)
+        return str(value).strip() if value not in (None, "") else ""
+
+    def _build_metadata_lines(self, row: dict) -> list[str]:
+        lines: list[str] = []
+        mise_date = self._format_card_date(
+            self._first_non_empty(
+                row,
+                (
+                    HEADERS["STOCK"].DATE_MISE_EN_LIGNE,
+                    HEADERS["STOCK"].DATE_MISE_EN_LIGNE_ALT,
+                    HEADERS["STOCK"].MIS_EN_LIGNE,
+                    HEADERS["STOCK"].MIS_EN_LIGNE_ALT,
+                ),
+            )
+        )
+        if mise_date:
+            lines.append(f"Mis en ligne le : {mise_date}")
+
+        publication_date = self._format_card_date(
+            self._first_non_empty(
+                row,
+                (
+                    HEADERS["STOCK"].DATE_PUBLICATION,
+                    HEADERS["STOCK"].DATE_PUBLICATION_ALT,
+                    HEADERS["STOCK"].PUBLIE,
+                    HEADERS["STOCK"].PUBLIE_ALT,
+                ),
+            )
+        )
+        if publication_date:
+            lines.append(f"Publié le : {publication_date}")
+
+        sale_date = self._format_card_date(
+            self._first_non_empty(
+                row,
+                (
+                    HEADERS["STOCK"].DATE_VENTE,
+                    HEADERS["STOCK"].DATE_VENTE_ALT,
+                    HEADERS["STOCK"].VENDU,
+                    HEADERS["STOCK"].VENDU_ALT,
+                ),
+            )
+        )
+        if sale_date:
+            lines.append(f"Vendu le : {sale_date}")
+
+        prix = row.get(HEADERS["STOCK"].PRIX_VENTE)
+        if prix not in (None, ""):
+            try:
+                prix_value = float(prix)
+                prix_text = f"{prix_value:.2f} €"
+            except (TypeError, ValueError):
+                prix_text = str(prix).strip()
+            if prix_text:
+                lines.append(f"Prix : {prix_text}")
+
+        taille_colis = row.get(HEADERS["STOCK"].TAILLE_COLIS_ALT) or row.get(HEADERS["STOCK"].TAILLE_COLIS, "")
+        if taille_colis not in (None, ""):
+            lines.append(f"Taille du colis : {taille_colis}")
+
+        lot = row.get(HEADERS["STOCK"].LOT_ALT) or row.get(HEADERS["STOCK"].LOT, "")
+        if lot not in (None, ""):
+            lines.append(f"Lot : {lot}")
+
+        return lines
 
 
 class StockDetailDialog(ctk.CTkToplevel):
@@ -1015,7 +1105,14 @@ class StockTableView(TableView):
         ctk.CTkLabel(import_frame, text="Importer des articles", anchor="w", font=ctk.CTkFont(weight="bold")).pack(
             fill="x", pady=(4, 4)
         )
-        ctk.CTkButton(import_frame, text="Depuis un fichier XLSX", command=self._handle_import_xlsx).pack(fill="x")
+        import_options = ("Choisir une action", "Charger un fichier XLSX")
+        self.import_choice = tk.StringVar(value=import_options[0])
+        ctk.CTkOptionMenu(
+            import_frame,
+            variable=self.import_choice,
+            values=list(import_options),
+            command=self._handle_import_menu_selection,
+        ).pack(fill="x")
         ctk.CTkLabel(
             panel,
             text="Sélectionnez un export Excel pour ajouter les nouveaux articles (sans doublons).",
@@ -1083,6 +1180,12 @@ class StockTableView(TableView):
         self.status_var.set(f"{status} pour la ligne {row_index + 1}")
         self._notify_data_changed()
         return True
+
+    def _handle_import_menu_selection(self, choice: str):
+        if choice == "Charger un fichier XLSX":
+            self._handle_import_xlsx()
+        if hasattr(self, "import_choice"):
+            self.import_choice.set("Choisir une action")
 
     def _handle_import_xlsx(self):
         path = filedialog.askopenfilename(
