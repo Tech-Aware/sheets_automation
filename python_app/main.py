@@ -890,7 +890,7 @@ class StockCardList(ctk.CTkFrame):
         if status:
             ctk.CTkLabel(card, text=status, text_color="#0f5132").pack(side="right", padx=8)
 
-        for widget in (card, text_frame, content_frame, title, *metadata_labels):
+        for widget in (gradient_canvas, card, text_frame, content_frame, title, *metadata_labels):
             self._bind_card_events(widget, index)
 
     def _bind_card_events(self, widget, index: int):
