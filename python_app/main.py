@@ -879,9 +879,14 @@ class StockCardList(ctk.CTkFrame):
             self._bind_card_events(widget, index)
 
     def _bind_card_events(self, widget, index: int):
-        widget.bind("<Button-1>", lambda _e, idx=index: self._toggle_selection(idx))
-        widget.bind("<Double-Button-1>", lambda _e, idx=index: self.on_open_details(idx))
-        widget.bind("<Button-3>", lambda e, idx=index: self._handle_right_click(e, idx))
+        widget.bind("<Button-1>", lambda _e, idx=index: self._toggle_selection(idx), add=True)
+        widget.bind("<Double-Button-1>", lambda _e, idx=index: self._open_details(idx), add=True)
+        widget.bind("<Button-3>", lambda e, idx=index: self._handle_right_click(e, idx), add=True)
+
+    def _open_details(self, index: int):
+        self._selected_indices = {index}
+        self._update_selection_display()
+        self.on_open_details(index)
 
     def _toggle_selection(self, index: int):
         if index in self._selected_indices:
