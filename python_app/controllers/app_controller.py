@@ -11,8 +11,9 @@ from ..services.workflow import WorkflowCoordinator
 from ..ui.app import VintageErpApp
 
 
-DEFAULT_WORKBOOK = Path(__file__).resolve().parent.parent / "Prerelease 1.2.xlsx"
-DEFAULT_ACHATS_DB = Path(__file__).resolve().parent / "data" / "achats.db"
+# Ressources par défaut situées à la racine du dépôt (fichier Excel) ou dans python_app/data (SQLite)
+DEFAULT_WORKBOOK = Path(__file__).resolve().parent.parent.parent / "Prerelease 1.2.xlsx"
+DEFAULT_ACHATS_DB = Path(__file__).resolve().parent.parent / "data" / "achats.db"
 
 
 class AppController:
