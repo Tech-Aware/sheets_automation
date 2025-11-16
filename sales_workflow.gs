@@ -696,6 +696,38 @@ function copySaleToMonthlySheet_(ss, sale, options) {
   return { inserted: insertedRow, updated: updatedRow, removed: false, sheetName };
 }
 
+function saleAlreadyInLedgers_(ledgerSheets, sale) {
+  if (!Array.isArray(ledgerSheets) || !ledgerSheets.length || !sale) return false;
+  const headersLen = MONTHLY_LEDGER_HEADERS.length;
+  const dedupeKey = buildSaleDedupeKey_(sale);
+  const targetName = getLedgerSheetNameForDate_(sale.dateVente);
+
+  const orderedSheets = [];
+  if (targetName) {
+    const targetSheet = ledgerSheets.find(sh => sh && sh.getName && sh.getName() === targetName);
+    if (targetSheet) {
+      orderedSheets.push(targetSheet);
+    }
+  }
+
+  ledgerSheets.forEach(sh => {
+    if (orderedSheets.indexOf(sh) === -1) {
+      orderedSheets.push(sh);
+    }
+  });
+
+  for (let i = 0; i < orderedSheets.length; i++) {
+    const sheet = orderedSheets[i];
+    if (!isMonthlyLedgerSheet_(sheet)) continue;
+    if (sheet.getLastRow() <= 1) continue;
+
+    const rowNumber = findLedgerRowByIdentifiers_(sheet, headersLen, sale, dedupeKey, false);
+    if (rowNumber) return true;
+  }
+
+  return false;
+}
+
 function ensureMonthlyLedgerSheet_(sheet, monthStart) {
   const headersLen = MONTHLY_LEDGER_HEADERS.length;
   const firstCell = sheet.getRange(1, 1).getValue();

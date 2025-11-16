@@ -196,7 +196,8 @@ function registerSalesActionsMenu_(ui, ss) {
   salesMenu
     .addItem('Trier les ventes (date décroissante)', 'sortVentesByDate')
     .addItem('Retirer du Stock les ventes importées', 'purgeStockFromVentes')
-    .addItem('Supprimer les doublons', 'purgeVentesDuplicates');
+    .addItem('Supprimer les doublons', 'purgeVentesDuplicates')
+    .addItem('Cocher les ventes déjà comptabilisé', 'markVentesAlreadyAccounted');
 
   registerBackfillMenu_(salesMenu, ss);
   salesMenu.addToUi();
@@ -588,6 +589,77 @@ function purgeVentesDuplicates() {
 
   rowsToDelete.sort((a, b) => b - a).forEach(r => ventes.deleteRow(r));
   ss.toast(`${rowsToDelete.length} doublon(s) supprimé(s) de "Ventes".`, 'Doublons Ventes', 5);
+}
+
+function markVentesAlreadyAccounted() {
+  const ss = SpreadsheetApp.getActive();
+  const ventes = ss.getSheetByName('Ventes');
+  if (!ventes) {
+    ss.toast('Feuille "Ventes" introuvable.', 'Comptabilisé', 6);
+    return;
+  }
+
+  const ledgerSheets = ss.getSheets().filter(isMonthlyLedgerSheet_);
+  if (!ledgerSheets.length) {
+    ss.toast('Aucune feuille de compta trouvée.', 'Comptabilisé', 6);
+    return;
+  }
+
+  const lastRow = ventes.getLastRow();
+  if (lastRow < 2) {
+    ss.toast('Aucune vente à analyser.', 'Comptabilisé', 5);
+    return;
+  }
+
+  const headerWidth = Math.max(DEFAULT_VENTES_HEADERS.length, ventes.getLastColumn());
+  const headerRange = ventes.getRange(1, 1, 1, headerWidth);
+  const ventesHeaders = headerRange.getValues()[0];
+  let headerMutated = false;
+  for (let i = 0; i < DEFAULT_VENTES_HEADERS.length; i++) {
+    if (!ventesHeaders[i]) {
+      ventesHeaders[i] = DEFAULT_VENTES_HEADERS[i];
+      headerMutated = true;
+    }
+  }
+  if (headerMutated) {
+    headerRange.setValues([ventesHeaders]);
+  }
+
+  const resolver = makeHeaderResolver_(ventesHeaders);
+  const colCompta = resolver.colExact(HEADERS.VENTES.COMPTABILISE)
+    || resolver.colWhere(h => h.toLowerCase().includes('compt'));
+  if (!colCompta) {
+    ss.toast('Colonne "COMPTABILISÉ" introuvable.', 'Comptabilisé', 6);
+    return;
+  }
+
+  const width = ventes.getLastColumn();
+  const dataRange = ventes.getRange(2, 1, lastRow - 1, width);
+  const data = dataRange.getValues();
+  const comptaColumnValues = ventes.getRange(2, colCompta, lastRow - 1, 1).getValues();
+
+  const markedRows = [];
+  for (let i = 0; i < data.length; i++) {
+    if (isComptabiliseFlagActive_(comptaColumnValues[i][0])) continue;
+
+    const rowNumber = i + 2;
+    const sale = buildSaleRecordFromVentesRow_(data[i], resolver, rowNumber);
+    const hasIdSku = Boolean(buildIdSkuDuplicateKey_(sale.id, sale.sku));
+    if (!hasIdSku) continue;
+
+    if (saleAlreadyInLedgers_(ledgerSheets, sale)) {
+      comptaColumnValues[i][0] = true;
+      markedRows.push(rowNumber);
+    }
+  }
+
+  if (!markedRows.length) {
+    ss.toast('Aucune vente supplémentaire marquée comme comptabilisée.', 'Comptabilisé', 6);
+    return;
+  }
+
+  ventes.getRange(2, colCompta, comptaColumnValues.length, 1).setValues(comptaColumnValues);
+  ss.toast(`${markedRows.length} vente(s) marquée(s) comme comptabilisée(s).`, 'Comptabilisé', 6);
 }
 
 function backfillMonthlyLedgers() {
