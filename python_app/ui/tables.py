@@ -22,12 +22,14 @@ class ScrollableTable(ttk.Frame):
         on_cell_activated: Callable[[int | None, str], bool] | None = None,
         on_row_activated: Callable[[int], None] | None = None,
         enable_inline_edit: bool = True,
+        value_formatter: Callable[[str, object], str] | None = None,
     ):
         super().__init__(master)
         self.on_cell_edited = on_cell_edited
         self.on_cell_activated = on_cell_activated
         self.on_row_activated = on_row_activated
         self.enable_inline_edit = enable_inline_edit
+        self.value_formatter = value_formatter
         self._editor: tk.Entry | None = None
         self._editing_item: str | None = None
         self._editing_column: str | None = None
@@ -95,7 +97,14 @@ class ScrollableTable(ttk.Frame):
     # ------------------------------------------------------------------
     def _insert_rows(self, rows: Iterable[dict]):
         for idx, row in enumerate(rows):
-            values = [row.get(header, "") for header in self._headers]
+            values: list[str] = []
+            for header in self._headers:
+                raw_value = row.get(header, "")
+                if self.value_formatter is not None:
+                    display_value = self.value_formatter(header, raw_value)
+                else:
+                    display_value = raw_value
+                values.append("" if display_value is None else str(display_value))
             item = self.tree.insert(
                 "",
                 tk.END,
