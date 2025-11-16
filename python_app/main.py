@@ -2,9 +2,13 @@
 from __future__ import annotations
 
 import argparse
+import sys
 from pathlib import Path
 
-from .controllers.app_controller import DEFAULT_WORKBOOK, AppController
+if __package__ is None or __package__ == "":  # pragma: no cover - convenience for direct execution
+    sys.path.append(str(Path(__file__).resolve().parent.parent))
+
+from python_app.controllers.app_controller import DEFAULT_WORKBOOK, AppController
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
