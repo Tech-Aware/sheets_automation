@@ -248,6 +248,7 @@ class PurchasesView(ctk.CTkFrame):
     SUMMARY_HEADERS = (
         HEADERS["ACHATS"].ID,
         HEADERS["ACHATS"].ARTICLE,
+        HEADERS["ACHATS"].REFERENCE,
         HEADERS["ACHATS"].DATE_ACHAT,
         HEADERS["ACHATS"].DATE_MISE_EN_STOCK,
         HEADERS["ACHATS"].TOTAL_TTC,
@@ -293,6 +294,7 @@ class PurchasesView(ctk.CTkFrame):
             column_width=135,
             column_widths={
                 HEADERS["ACHATS"].ID: 21,
+                HEADERS["ACHATS"].REFERENCE: 92,
                 HEADERS["ACHATS"].TOTAL_TTC: 110,
             },
             enable_inline_edit=False,
