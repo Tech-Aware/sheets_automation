@@ -195,7 +195,7 @@ class VintageErpApp(ctk.CTk):
         months_tab = self.tabview.add("Calendrier")
         CalendarView(months_tab)
 
-        stock_options_tab = self.tabview.add("Options du stock")
+        stock_options_tab = self.tabview.add("Options")
         StockOptionsView(stock_options_tab, self.tables["Stock"], self.refresh_views)
 
     def refresh_views(self):
@@ -1089,7 +1089,6 @@ class StockTableView(TableView):
 
     def _build_extra_controls(self, parent):
         parent.grid_columnconfigure(0, weight=5)
-        parent.grid_columnconfigure(1, weight=0)
         parent.grid_rowconfigure(0, weight=0)
         ctk.CTkButton(
             self.actions_frame,
@@ -1097,36 +1096,9 @@ class StockTableView(TableView):
             command=self._delete_selected_rows,
         ).pack(side="left")
 
-        panel = ctk.CTkFrame(parent)
-        panel.grid(row=0, column=1, sticky="nsew", padx=(12, 0), pady=12)
-
-        import_frame = ctk.CTkFrame(panel)
-        import_frame.pack(fill="x", padx=12, pady=(0, 8))
-        ctk.CTkLabel(import_frame, text="Importer des articles", anchor="w", font=ctk.CTkFont(weight="bold")).pack(
-            fill="x", pady=(4, 4)
-        )
-        settings_row = ctk.CTkFrame(import_frame)
-        settings_row.pack(fill="x")
-        self.settings_button = ctk.CTkButton(
-            settings_row,
-            text="⚙️",
-            width=42,
-            command=self._open_import_menu,
-        )
-        self.settings_button.pack(side="left")
-        ctk.CTkLabel(settings_row, text="Options du stock", anchor="w").pack(side="left", padx=(8, 0))
-        self.import_menu = tk.Menu(self, tearoff=False)
-        self.import_menu.add_command(label="Charger un XLSX pour le stock", command=self._handle_import_xlsx)
-        ctk.CTkLabel(
-            panel,
-            text="Sélectionnez un export Excel pour ajouter les nouveaux articles (sans doublons).",
-            anchor="w",
-            wraplength=260,
-        ).pack(fill="x", padx=12, pady=(0, 8))
-
         parent.grid_rowconfigure(1, weight=1)
         self.card_list = StockCardList(parent, self.table, self._open_card_details, self._handle_card_sale)
-        self.card_list.grid(row=1, column=0, columnspan=2, sticky="nsew")
+        self.card_list.grid(row=1, column=0, sticky="nsew")
 
     def _delete_selected_rows(self):
         indices = self.table_widget.get_selected_indices() if self.table_widget is not None else []
@@ -1184,54 +1156,6 @@ class StockTableView(TableView):
         self.status_var.set(f"{status} pour la ligne {row_index + 1}")
         self._notify_data_changed()
         return True
-
-    def _open_import_menu(self):
-        if not hasattr(self, "import_menu"):
-            return
-        button = getattr(self, "settings_button", None)
-        x = button.winfo_rootx() if button is not None else self.winfo_rootx()
-        y = (button.winfo_rooty() + button.winfo_height()) if button is not None else self.winfo_rooty()
-        try:
-            self.import_menu.tk_popup(x, y)
-        finally:
-            self.import_menu.grab_release()
-
-    def _handle_import_xlsx(self):
-        path = filedialog.askopenfilename(
-            title="Importer le stock",
-            filetypes=(
-                ("Excel", "*.xlsx *.xlsm"),
-                ("Tous les fichiers", "*.*"),
-            ),
-        )
-        if not path:
-            return
-        try:
-            repository = WorkbookRepository(path)
-            sheet_name = self._resolve_stock_sheet(repository)
-            if sheet_name is None:
-                raise ValueError("Ce classeur ne contient aucun onglet exploitable.")
-            source_table = repository.load_table(sheet_name)
-        except Exception as exc:  # pragma: no cover - UI guard
-            messagebox.showerror("Import du stock", f"Impossible de lire le fichier sélectionné : {exc}")
-            return
-        added = merge_stock_table(self.table, source_table)
-        filename = Path(path).name
-        if added:
-            self.status_var.set(f"{added} article(s) importé(s) depuis {filename}.")
-            self._notify_data_changed()
-        else:
-            self.status_var.set(f"Aucun nouvel article à importer depuis {filename}.")
-
-    @staticmethod
-    def _resolve_stock_sheet(repository: WorkbookRepository) -> str | None:
-        sheet_names = list(repository.available_tables())
-        if not sheet_names:
-            return None
-        for name in sheet_names:
-            if name.lower() == "stock":
-                return name
-        return sheet_names[0]
 
     def _ensure_display_aliases(self):
         for row in self.table.rows:
@@ -1522,7 +1446,7 @@ class StockOptionsView(ctk.CTkFrame):
 
         self.status_var = tk.StringVar(value="Importer ou ajuster les données du stock.")
 
-        title = ctk.CTkLabel(self, text="Options du stock", font=ctk.CTkFont(size=20, weight="bold"))
+        title = ctk.CTkLabel(self, text="Options", font=ctk.CTkFont(size=20, weight="bold"))
         title.pack(pady=(16, 8))
 
         frame = ctk.CTkFrame(self)
