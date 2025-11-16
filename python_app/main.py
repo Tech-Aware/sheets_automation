@@ -25,7 +25,7 @@ try:  # pragma: no cover - defensive import path configuration
         table_to_stock_records,
     )
     from .services.stock_import import merge_stock_table
-    from .services.summaries import build_inventory_snapshot
+    from .services.summaries import _base_reference_from_stock, build_inventory_snapshot
     from .services.workflow import PurchaseInput, SaleInput, StockInput, WorkflowCoordinator
     from .ui.tables import ScrollableTable
     from .ui.widgets import DatePickerEntry
@@ -42,7 +42,7 @@ except ImportError:  # pragma: no cover - executed when run as a script
         table_to_stock_records,
     )
     from python_app.services.stock_import import merge_stock_table
-    from python_app.services.summaries import build_inventory_snapshot
+    from python_app.services.summaries import _base_reference_from_stock, build_inventory_snapshot
     from python_app.services.workflow import PurchaseInput, SaleInput, StockInput, WorkflowCoordinator
     from python_app.ui.tables import ScrollableTable
     from python_app.ui.widgets import DatePickerEntry
@@ -1034,9 +1034,9 @@ class StockSummaryPanel(ctk.CTkFrame):
                 continue
             pieces += 1
             stock_value += _safe_float(row.get(HEADERS["STOCK"].PRIX_VENTE))
-            reference = row.get(HEADERS["STOCK"].REFERENCE)
-            if reference not in (None, ""):
-                references.add(str(reference))
+            base_reference = _base_reference_from_stock(row)
+            if base_reference:
+                references.add(base_reference)
 
         reference_count = len(references)
         value_per_reference = stock_value / reference_count if reference_count else 0.0
