@@ -794,6 +794,13 @@ class StockTableView(TableView):
         HEADERS["STOCK"].DATE_PUBLICATION_ALT,
     }
 
+    _SALE_COLUMNS = {
+        HEADERS["STOCK"].VENDU,
+        HEADERS["STOCK"].VENDU_ALT,
+        HEADERS["STOCK"].DATE_VENTE,
+        HEADERS["STOCK"].DATE_VENTE_ALT,
+    }
+
     def __init__(self, master, table, on_table_changed=None):
         super().__init__(master, table, on_table_changed=on_table_changed)
 
@@ -807,6 +814,7 @@ class StockTableView(TableView):
             on_cell_activated=self._handle_cell_activation,
             column_width=160,
             column_widths={"ID": 34},
+            value_formatter=self._format_cell_value,
         )
 
     def _visible_headers(self) -> Sequence[str]:
@@ -875,16 +883,25 @@ class StockTableView(TableView):
         row = self.table.rows[row_index]
         if column in self._DATE_COLUMNS:
             columns = self._DATE_COLUMNS
-            message = "Date de mise en ligne renseignée"
+            message_set = "Date de mise en ligne renseignée"
+            message_cleared = "Statut de mise en ligne réinitialisé"
         elif column in self._PUBLICATION_COLUMNS:
             columns = self._PUBLICATION_COLUMNS
-            message = "Date de publication renseignée"
+            message_set = "Date de publication renseignée"
+            message_cleared = "Statut de publication réinitialisé"
+        elif column in self._SALE_COLUMNS:
+            columns = self._SALE_COLUMNS
+            message_set = "Date de vente renseignée"
+            message_cleared = "Statut de vente réinitialisé"
         else:
             return False
 
+        has_date = any(_has_ready_date(row.get(key)) for key in columns)
+        new_value = "" if has_date else today
         for key in columns:
-            row[key] = today
+            row[key] = new_value
         self.table_widget.refresh(self.table.rows)
+        message = message_cleared if has_date else message_set
         self.status_var.set(f"{message} pour la ligne {row_index + 1}")
         self._notify_data_changed()
         return True
@@ -934,6 +951,11 @@ class StockTableView(TableView):
                 if alias in row and row[alias] not in (None, ""):
                     continue
                 row[alias] = row.get(source, "")
+
+    def _format_cell_value(self, header: str, value: object) -> str:
+        if header in (*self._DATE_COLUMNS, *self._PUBLICATION_COLUMNS, *self._SALE_COLUMNS) and not _has_ready_date(value):
+            return "☐"
+        return "" if value is None else str(value)
 
 
 class WorkflowView(ctk.CTkFrame):
