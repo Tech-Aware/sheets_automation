@@ -527,8 +527,8 @@ function copySaleToMonthlySheet_(ss, sale, options) {
   }
 
   const weekRanges = computeMonthlyWeekRanges_(monthStart);
-  const saleTime = sale.dateVente.getTime();
-  let weekIndex = weekRanges.findIndex(range => saleTime >= range.start.getTime() && saleTime <= range.end.getTime());
+  const saleDayKey = dateToDayKey_(sale.dateVente);
+  let weekIndex = weekRanges.findIndex(range => saleDayKey >= range.startKey && saleDayKey <= range.endKey);
   if (weekIndex < 0) {
     weekIndex = weekRanges.length - 1;
   }
@@ -1362,13 +1362,26 @@ function computeMonthlyWeekRanges_(monthStart) {
       weekEnd = new Date(monthEnd);
     }
 
-    ranges.push({ start: weekStart, end: weekEnd });
+    ranges.push({
+      start: weekStart,
+      end: weekEnd,
+      startKey: dateToDayKey_(weekStart),
+      endKey: dateToDayKey_(weekEnd)
+    });
 
     current = new Date(weekEnd);
     current.setDate(current.getDate() + 1);
   }
 
   return ranges;
+}
+
+function dateToDayKey_(date) {
+  if (!(date instanceof Date) || isNaN(date)) return NaN;
+  const y = date.getFullYear();
+  const m = date.getMonth() + 1;
+  const d = date.getDate();
+  return (y * 10000) + (m * 100) + d;
 }
 
 function formatDateString_(date) {
