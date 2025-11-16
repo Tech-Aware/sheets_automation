@@ -842,6 +842,8 @@ function findLedgerRowByIdentifiers_(sheet, headersLen, sale, dedupeKey, allowUp
 
   const allowDataMatch = Boolean(allowUpdates);
   const allowPriceMismatch = Boolean(allowUpdates);
+  const normalizedSku = sale.sku ? normText_(sale.sku) : '';
+  const skuIndex = MONTHLY_LEDGER_INDEX.SKU;
 
   const candidateKeys = [];
   if (dedupeKey) candidateKeys.push(dedupeKey);
@@ -871,16 +873,29 @@ function findLedgerRowByIdentifiers_(sheet, headersLen, sale, dedupeKey, allowUp
     }
   }
 
-  if (!allowDataMatch) {
-    return 0;
-  }
-
   const data = sheet.getRange(2, 1, last - 1, headersLen).getValues();
+  let firstSkuMatchRow = 0;
   for (let i = 0; i < data.length; i++) {
     const row = data[i];
-    if (ledgerRowDataMatchesSale_(row, sale, { allowPriceMismatch })) {
+
+    if (normalizedSku && skuIndex >= 0) {
+      const candidateSku = normText_(row[skuIndex]);
+      if (candidateSku === normalizedSku) {
+        if (!firstSkuMatchRow) firstSkuMatchRow = i + 2;
+
+        if (ledgerRowDataMatchesSale_(row, sale, { allowPriceMismatch: true })) {
+          return i + 2;
+        }
+      }
+    }
+
+    if (allowDataMatch && ledgerRowDataMatchesSale_(row, sale, { allowPriceMismatch })) {
       return i + 2;
     }
+  }
+
+  if (firstSkuMatchRow) {
+    return firstSkuMatchRow;
   }
 
   return 0;
