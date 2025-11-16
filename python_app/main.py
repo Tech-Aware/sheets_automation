@@ -784,14 +784,24 @@ class TableView(ctk.CTkFrame):
 class StockCardList(ctk.CTkFrame):
     """Compact list of stock items rendered as tappable rectangles."""
 
-    def __init__(self, master, table, on_edit, on_sale):
+    DEFAULT_COLOR = "#e5e7eb"
+    SELECTED_COLOR = "#bfdbfe"
+
+    def __init__(self, master, table, *, on_open_details, on_mark_sold, on_bulk_action, on_selection_change=None):
         super().__init__(master)
         self.table = table
-        self.on_edit = on_edit
-        self.on_sale = on_sale
+        self.on_open_details = on_open_details
+        self.on_mark_sold = on_mark_sold
+        self.on_bulk_action = on_bulk_action
+        self.on_selection_change = on_selection_change
+        self._selected_indices: set[int] = set()
+        self._cards: dict[int, ctk.CTkFrame] = {}
         ctk.CTkLabel(
             self,
-            text="Vue vignettes (clic pour éditer, clic droit pour valider la vente)",
+            text=(
+                "Vue vignettes (clic pour sélectionner, double-clic pour détailler, "
+                "clic droit pour marquer vendu ou appliquer une action de groupe)"
+            ),
             anchor="w",
             font=ctk.CTkFont(weight="bold"),
         ).pack(fill="x", padx=12, pady=(8, 4))
@@ -802,17 +812,26 @@ class StockCardList(ctk.CTkFrame):
     def refresh(self, rows: Sequence[dict]):
         for child in self.container.winfo_children():
             child.destroy()
+        self._cards.clear()
+        self._selected_indices = {idx for idx in self._selected_indices if idx < len(rows)}
         for idx, row in enumerate(rows):
             self._add_card(idx, row)
+        self._update_selection_display()
+        if self.on_selection_change is not None:
+            self.on_selection_change(self.get_selected_indices())
+
+    def get_selected_indices(self) -> list[int]:
+        return sorted(self._selected_indices)
 
     def _add_card(self, index: int, row: dict):
         sku = str(row.get(HEADERS["STOCK"].SKU, "")).strip()
         label = row.get(HEADERS["STOCK"].ARTICLE, "") or row.get(HEADERS["STOCK"].LIBELLE, "")
         status = "Vendu" if row.get(HEADERS["STOCK"].VENDU_ALT, "") else ""
         subtitle = f"{sku} – {label}" if label else sku
-        card = ctk.CTkFrame(self.container, height=68, fg_color="#e5e7eb")
+        card = ctk.CTkFrame(self.container, height=68, fg_color=self.DEFAULT_COLOR)
         card.grid_propagate(False)
         card.pack(fill="x", padx=4, pady=2)
+        self._cards[index] = card
 
         text_frame = ctk.CTkFrame(card, fg_color="transparent")
         text_frame.pack(side="left", fill="x", expand=True, padx=8, pady=6)
@@ -831,8 +850,50 @@ class StockCardList(ctk.CTkFrame):
             self._bind_card_events(widget, index)
 
     def _bind_card_events(self, widget, index: int):
-        widget.bind("<Button-1>", lambda _e, idx=index: self.on_edit(idx))
-        widget.bind("<Button-3>", lambda _e, idx=index: self.on_sale(idx))
+        widget.bind("<Button-1>", lambda _e, idx=index: self._toggle_selection(idx))
+        widget.bind("<Double-Button-1>", lambda _e, idx=index: self.on_open_details(idx))
+        widget.bind("<Button-3>", lambda e, idx=index: self._handle_right_click(e, idx))
+
+    def _toggle_selection(self, index: int):
+        if index in self._selected_indices:
+            self._selected_indices.remove(index)
+        else:
+            self._selected_indices.add(index)
+        self._update_selection_display()
+        if self.on_selection_change is not None:
+            self.on_selection_change(self.get_selected_indices())
+
+    def _update_selection_display(self):
+        for idx, card in self._cards.items():
+            selected = idx in self._selected_indices
+            card.configure(fg_color=self.SELECTED_COLOR if selected else self.DEFAULT_COLOR)
+
+    def _handle_right_click(self, event, index: int):
+        if index not in self._selected_indices:
+            self._selected_indices = {index}
+            self._update_selection_display()
+            if self.on_selection_change is not None:
+                self.on_selection_change(self.get_selected_indices())
+        click_date = date.today()
+        if len(self._selected_indices) > 1:
+            self._show_context_menu(event, click_date)
+            return
+        self.on_mark_sold(index, click_date)
+
+    def _show_context_menu(self, event, click_date: date):
+        menu = tk.Menu(self, tearoff=False)
+        actions = (
+            ("Définir la date de mise en ligne", "mise_en_ligne"),
+            ("Définir la date de publication", "publication"),
+            ("Définir la date de vente", "vente"),
+            ("Déclarer les articles comme vendu", "vendu"),
+        )
+        for label, action in actions:
+            menu.add_command(
+                label=label,
+                command=lambda act=action: self.on_bulk_action(self.get_selected_indices(), act, click_date),
+            )
+        menu.tk_popup(event.x_root, event.y_root)
 
     @staticmethod
     def _first_non_empty(row: dict, keys: tuple[str, ...]):
@@ -1055,7 +1116,9 @@ class StockTableView(TableView):
     def __init__(self, master, table, *, workflow: WorkflowCoordinator | None = None, on_table_changed=None):
         self.workflow = workflow
         super().__init__(master, table, on_table_changed=on_table_changed)
-        self.status_var.set("Cliquez sur une vignette pour modifier ou valider une vente.")
+        self.status_var.set(
+            "Sélectionnez une vignette (clic), double-clic pour détailler, clic droit pour actions rapides."
+        )
 
     def _create_table_widget(self, parent, headers: Sequence[str], rows: Sequence[dict]):
         return ScrollableTable(
@@ -1097,7 +1160,14 @@ class StockTableView(TableView):
         ).pack(side="left")
 
         parent.grid_rowconfigure(1, weight=1)
-        self.card_list = StockCardList(parent, self.table, self._open_card_details, self._handle_card_sale)
+        self.card_list = StockCardList(
+            parent,
+            self.table,
+            on_open_details=self._open_card_details,
+            on_mark_sold=self._handle_card_sale,
+            on_bulk_action=self._handle_bulk_card_action,
+            on_selection_change=self._on_card_selection_change,
+        )
         self.card_list.grid(row=1, column=0, sticky="nsew")
 
     def _delete_selected_rows(self):
@@ -1209,38 +1279,94 @@ class StockTableView(TableView):
 
         StockDetailDialog(self, row, on_save=_apply)
 
-    def _handle_card_sale(self, row_index: int):
-        if self.workflow is None:
-            self.status_var.set("Validation impossible : workflow indisponible")
-            return
+    def _on_card_selection_change(self, indices: Sequence[int]):
+        count = len(indices)
+        self.status_var.set(f"{count} vignette(s) sélectionnée(s)")
+
+    def _ensure_sale_requirements(self, row: dict) -> bool:
+        price = row.get(HEADERS["STOCK"].PRIX_VENTE)
+        package_size = row.get(HEADERS["STOCK"].TAILLE_COLIS) or row.get(HEADERS["STOCK"].TAILLE_COLIS_ALT)
+        if price in (None, ""):
+            return False
+        try:
+            float(price)
+        except (TypeError, ValueError):
+            return False
+        return package_size not in (None, "")
+
+    def _set_sale_columns(self, row: dict, value: str):
+        for key in self._SALE_COLUMNS:
+            row[key] = value
+
+    def _handle_card_sale(self, row_index: int, click_date: date):
         if not (0 <= row_index < len(self.table.rows)):
             return
         row = self.table.rows[row_index]
-        sku = str(row.get(HEADERS["STOCK"].SKU, "")).strip()
-        if not sku:
-            self.status_var.set("SKU manquant, impossible d'envoyer en Ventes")
-            return
-        prix = row.get(HEADERS["STOCK"].PRIX_VENTE) or 0
-        lot = row.get(HEADERS["STOCK"].LOT_ALT) or row.get(HEADERS["STOCK"].LOT) or ""
-        taille = row.get(HEADERS["STOCK"].TAILLE, "")
-        date_vente = row.get(HEADERS["STOCK"].DATE_VENTE) or row.get(HEADERS["STOCK"].DATE_VENTE_ALT) or ""
-        try:
-            self.workflow.register_sale(
-                SaleInput(
-                    sku=sku,
-                    prix_vente=float(prix) if prix not in (None, "") else 0.0,
-                    frais_colissage=0.0,
-                    date_vente=str(date_vente) if date_vente else None,
-                    lot=str(lot),
-                    taille=str(taille),
-                )
+        if not self._ensure_sale_requirements(row):
+            self.status_var.set(
+                "Impossible de déclarer la vente : prix de vente et taille du colis requis."
             )
-        except ValueError as exc:
-            self.status_var.set(str(exc))
             return
-        self.status_var.set(f"Article {sku} validé et envoyé vers Ventes")
+        date_text = format_display_date(click_date)
+        sale_value = f"Vendu le {date_text}"
+        self._set_sale_columns(row, sale_value)
+        self.status_var.set(f"Article {row_index + 1} marqué vendu le {date_text}")
         self.refresh()
         self._notify_data_changed()
+
+    def _apply_date_to_rows(self, indices: Sequence[int], columns: set[str], label: str, date_text: str):
+        updated = 0
+        for idx in indices:
+            if not (0 <= idx < len(self.table.rows)):
+                continue
+            row = self.table.rows[idx]
+            for key in columns:
+                row[key] = date_text
+            updated += 1
+        if updated:
+            self.status_var.set(f"{label} mise à jour pour {updated} article(s)")
+            self.refresh()
+            self._notify_data_changed()
+
+    def _handle_bulk_card_action(self, indices: Sequence[int], action: str, click_date: date):
+        if not indices:
+            self.status_var.set("Aucune vignette sélectionnée")
+            return
+        date_text = format_display_date(click_date)
+        if action == "mise_en_ligne":
+            self._apply_date_to_rows(indices, self._DATE_COLUMNS, "Date de mise en ligne", date_text)
+            return
+        if action == "publication":
+            self._apply_date_to_rows(indices, self._PUBLICATION_COLUMNS, "Date de publication", date_text)
+            return
+        if action == "vente":
+            self._apply_date_to_rows(indices, self._SALE_COLUMNS, "Date de vente", date_text)
+            return
+        if action == "vendu":
+            success = 0
+            failures = 0
+            sale_value = f"Vendu le {date_text}"
+            for idx in indices:
+                if not (0 <= idx < len(self.table.rows)):
+                    continue
+                row = self.table.rows[idx]
+                if not self._ensure_sale_requirements(row):
+                    failures += 1
+                    continue
+                self._set_sale_columns(row, sale_value)
+                success += 1
+            messages: list[str] = []
+            if success:
+                messages.append(f"Articles vendus mis à jour pour {success} vignette(s)")
+                self.refresh()
+                self._notify_data_changed()
+            if failures:
+                messages.append(
+                    f"{failures} vignette(s) non mises à jour : prix de vente et taille du colis requis"
+                )
+            if messages:
+                self.status_var.set(" ".join(messages))
+            return
 
     @staticmethod
     def _normalize_date_input(value: str | None) -> str | None:
