@@ -190,6 +190,8 @@ function onOpen(e) {
 
   registerBackfillMenu_(maintenance, SpreadsheetApp.getActive());
 
+  ensureStockSizeDropdowns();
+
   maintenance.addToUi();
 }
 
