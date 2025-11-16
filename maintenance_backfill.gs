@@ -660,7 +660,8 @@ function runBackfillMonthlyLedgers_(filter) {
       margeBrute: marge,
       coeffMarge: coeff,
       nbPieces: 1,
-      sku
+      sku,
+      sourceRowNumber: i + 2
     }, { updateExisting: true });
 
     if (result && result.inserted) {

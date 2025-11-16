@@ -22,7 +22,7 @@ function handleVentesReturn(e) {
   }
 
   const rowValues = sh.getRange(row, 1, 1, lastColumn).getValues()[0];
-  const sale = buildSaleRecordFromVentesRow_(rowValues, resolver);
+  const sale = buildSaleRecordFromVentesRow_(rowValues, resolver, row);
   if (!sale.dateVente) {
     clearReturnFlag_(range);
     ss.toast('Impossible de traiter le retour : date de vente introuvable.', 'Ventes', 8);
@@ -82,7 +82,7 @@ function clearReturnFlag_(range) {
   range.clearContent();
 }
 
-function buildSaleRecordFromVentesRow_(rowValues, resolver) {
+function buildSaleRecordFromVentesRow_(rowValues, resolver, rowNumber) {
   if (!rowValues || !resolver) return {};
   const colExact = resolver.colExact.bind(resolver);
   const colWhere = resolver.colWhere.bind(resolver);
@@ -125,7 +125,8 @@ function buildSaleRecordFromVentesRow_(rowValues, resolver) {
     coeffMarge: '',
     nbPieces: 1,
     lot,
-    taille
+    taille,
+    sourceRowNumber: Number.isFinite(rowNumber) ? rowNumber : undefined
   };
 }
 
@@ -684,6 +685,14 @@ function buildSaleDedupeKey_(sale) {
     parts.push(`PRICE:${roundCurrency_(priceValue)}`);
   }
 
+  if (Number.isFinite(sale.sourceRowNumber)) {
+    parts.push(`ROW:${sale.sourceRowNumber}`);
+  }
+
+  if (!parts.length && sale.sourceRowNumber) {
+    return `ROW:${sale.sourceRowNumber}`;
+  }
+
   return parts.join('|');
 }
 
@@ -834,7 +843,7 @@ function findLedgerRowByIdentifiers_(sheet, headersLen, sale, dedupeKey, allowUp
       if (ledgerRowMatchesSale_(sheet, headersLen, rowIndex, sale)) {
         return rowIndex;
       }
-      if (!allowUpdates) {
+      if (allowUpdates) {
         return rowIndex;
       }
     }
