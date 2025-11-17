@@ -5,39 +5,32 @@ from tkinter import messagebox
 from typing import Mapping
 
 from ..config import HEADERS
+from ..data.workbook_snapshot import snapshot_tables
 from ..datasources.sqlite_purchases import PurchaseDatabase, table_to_purchase_records, table_to_stock_records
-from ..datasources.workbook import TableData, WorkbookRepository
+from ..datasources.workbook import TableData
 from ..services.workflow import WorkflowCoordinator
 from ..ui.app import VintageErpApp
 
 
-# Ressources par défaut situées à la racine du dépôt (fichier Excel) ou dans python_app/data (SQLite)
-DEFAULT_WORKBOOK = Path(__file__).resolve().parent.parent.parent / "Prerelease 1.2.xlsx"
+# Base SQLite par défaut situées dans python_app/data
 DEFAULT_ACHATS_DB = Path(__file__).resolve().parent.parent / "data" / "achats.db"
 
 
 class AppController:
     """Bootstrapper responsible for wiring data sources, workflow and UI."""
 
-    def __init__(self, workbook_path: Path, achats_db_path: Path | None = None):
-        self.workbook_path = Path(workbook_path)
+    def __init__(self, achats_db_path: Path | None = None):
         self.custom_db_requested = achats_db_path is not None
         self.achats_db_path = Path(achats_db_path) if achats_db_path is not None else DEFAULT_ACHATS_DB
 
     def run(self) -> int:
-        try:
-            repository = WorkbookRepository(self.workbook_path)
-        except FileNotFoundError:
-            messagebox.showerror("Workbook introuvable", f"Impossible d'ouvrir {self.workbook_path!s}")
-            return 1
-
+        tables = snapshot_tables()
+        self._seed_default_database(tables)
         try:
             achats_table, stock_table = self._load_persisted_tables()
         except FileNotFoundError:
             messagebox.showerror("Base Achats introuvable", f"Impossible d'ouvrir {self.achats_db_path!s}")
             return 1
-
-        tables = repository.load_many("Achats", "Stock", "Ventes", "Compta 09-2025")
         self._apply_overrides(tables, achats_table, stock_table)
         self._normalize_tables(tables)
 
@@ -65,6 +58,24 @@ class AppController:
         elif self.custom_db_requested:
             raise FileNotFoundError(self.achats_db_path)
         return achats_table, stock_table
+
+    def _seed_default_database(self, tables: Mapping[str, TableData]) -> None:
+        """Ensure the packaged workbook data is present in the SQLite file."""
+
+        if self.achats_db_path is None:
+            return
+        if self.custom_db_requested and not self.achats_db_path.exists():
+            # Custom path must be provided by the user.
+            return
+        db = PurchaseDatabase(self.achats_db_path)
+        if self.achats_db_path.exists():
+            existing_achats = db.load_table()
+            existing_stock = db.load_stock_table()
+            if existing_achats.rows or existing_stock.rows:
+                return
+        purchases = table_to_purchase_records(tables.get("Achats"))
+        stock_records = table_to_stock_records(tables.get("Stock"))
+        db.replace_all(purchases, stock_records)
 
     def _apply_overrides(
         self,
