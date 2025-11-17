@@ -100,13 +100,34 @@ class VintageErpApp(ctk.CTk):
         except Exception as exc:  # pragma: no cover - UI safeguard
             messagebox.showerror("Rafraîchissement UI", f"Échec du rafraîchissement : {exc}")
             return
-        with performance_monitor.track("ui.refresh.widgets"):
+        table_row_counts = {
+            name: len(view.table.rows) if hasattr(view, "table") and hasattr(view.table, "rows") else None
+            for name, view in self.table_views.items()
+        }
+        with performance_monitor.track(
+            "ui.refresh.widgets",
+            metadata={
+                "tables": len(self.table_views),
+                "rows": sum(count or 0 for count in table_row_counts.values()),
+            },
+        ):
             if self.dashboard_view is not None:
-                self.dashboard_view.refresh(summary)
+                with performance_monitor.track("ui.refresh.dashboard"):
+                    self.dashboard_view.refresh(summary)
             if self.purchase_view is not None:
-                self.purchase_view.refresh()
-            for view in self.table_views.values():
-                view.refresh()
+                with performance_monitor.track(
+                    "ui.refresh.purchases",
+                    metadata={"rows": table_row_counts.get("Achats")},
+                ):
+                    self.purchase_view.refresh()
+            for name, view in self.table_views.items():
+                if view is self.purchase_view:
+                    continue
+                with performance_monitor.track(
+                    "ui.refresh.table_view",
+                    metadata={"sheet": name, "rows": table_row_counts.get(name)},
+                ):
+                    view.refresh()
 
     def _handle_close(self):
         try:
