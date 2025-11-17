@@ -468,9 +468,22 @@ class StockDetailDialog(ctk.CTkToplevel):
         return ""
 
     def _save(self):
+        self._show_refresh_loader()
         updates = {name: field.get().strip() for name, field in self._fields.items()}
         self.on_save(updates)
         self.destroy()
+
+    def _show_refresh_loader(self):
+        owner = self.winfo_toplevel()
+        show_dialog = getattr(owner, "_show_loading_dialog", None)
+        update_progress = getattr(owner, "_update_loading_progress", None)
+        try:
+            if callable(show_dialog):
+                show_dialog()
+                if callable(update_progress):
+                    update_progress(0.05)
+        except Exception:
+            pass
 
 
 class StockTableView(TableView):
