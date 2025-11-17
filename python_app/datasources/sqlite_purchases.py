@@ -151,6 +151,20 @@ _STOCK_COLUMN_TO_HEADER: Sequence[tuple[str, str]] = (
 
 STOCK_TABLE_HEADERS: Sequence[str] = tuple(header for _, header in _STOCK_COLUMN_TO_HEADER)
 
+_STOCK_ALIASES: Mapping[str, Sequence[str]] = {
+    HEADERS["STOCK"].LIBELLE: (HEADERS["STOCK"].LIBELLE_ALT,),
+    HEADERS["STOCK"].ARTICLE: (HEADERS["STOCK"].ARTICLE_ALT,),
+    HEADERS["STOCK"].TAILLE_COLIS: (HEADERS["STOCK"].TAILLE_COLIS_ALT,),
+    HEADERS["STOCK"].LOT: (HEADERS["STOCK"].LOT_ALT,),
+    HEADERS["STOCK"].MIS_EN_LIGNE: (HEADERS["STOCK"].MIS_EN_LIGNE_ALT,),
+    HEADERS["STOCK"].DATE_MISE_EN_LIGNE: (HEADERS["STOCK"].DATE_MISE_EN_LIGNE_ALT,),
+    HEADERS["STOCK"].PUBLIE: (HEADERS["STOCK"].PUBLIE_ALT,),
+    HEADERS["STOCK"].DATE_PUBLICATION: (HEADERS["STOCK"].DATE_PUBLICATION_ALT,),
+    HEADERS["STOCK"].VENDU: (HEADERS["STOCK"].VENDU_ALT,),
+    HEADERS["STOCK"].DATE_VENTE: (HEADERS["STOCK"].DATE_VENTE_ALT,),
+    HEADERS["STOCK"].VALIDER_SAISIE: (HEADERS["STOCK"].VALIDER_SAISIE_ALT,),
+}
+
 
 class PurchaseDatabase:
     """Simple helper around the SQLite file that stores Achats."""
@@ -382,6 +396,17 @@ def table_to_purchase_records(table: TableData) -> list[PurchaseRecord]:
     return records
 
 
+def _resolve_stock_value(row: Mapping[str, object], header: str):
+    """Return the value for ``header`` falling back to known aliases."""
+
+    aliases = _STOCK_ALIASES.get(header, ())
+    for candidate in (header, *aliases):
+        value = row.get(candidate)
+        if value not in (None, ""):
+            return value
+    return row.get(header)
+
+
 def table_to_stock_records(table: TableData | None) -> list[StockRecord]:
     """Convert a :class:`TableData` Stock table to structured records."""
 
@@ -391,7 +416,7 @@ def table_to_stock_records(table: TableData | None) -> list[StockRecord]:
     for row in table.rows:
         payload: dict[str, object] = {}
         for column, header in _STOCK_COLUMN_TO_HEADER:
-            payload[column] = row.get(header)
+            payload[column] = _resolve_stock_value(row, header)
         records.append(StockRecord.from_mapping(payload))
     return records
 
