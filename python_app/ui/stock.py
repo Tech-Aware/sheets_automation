@@ -700,9 +700,6 @@ class StockTableView(TableView):
         refresh_views = getattr(self.winfo_toplevel(), "refresh_views", None)
         if callable(refresh_views):
             refresh_views(prepare_only=True)
-            # Force immediate rendering so the loading bar appears before any
-            # synchronous work blocks the UI thread.
-            self.update_idletasks()
         self.status_var.set("Enregistrement des détails en cours...")
         self._save_detail(row_indices, updates, notify=False)
         if callable(refresh_views):
