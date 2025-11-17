@@ -362,7 +362,7 @@ class StockDetailDialog(ctk.CTkToplevel):
             self.transient(owner)
         self.grab_set()
         self.lift()
-        self.focus()
+        self._focus_if_exists()
         self.row = row
         self._fields: dict[str, ctk.CTkEntry | ctk.CTkOptionMenu | DatePickerEntry] = {}
         form = ctk.CTkFrame(self)
@@ -431,6 +431,12 @@ class StockDetailDialog(ctk.CTkToplevel):
         )
         ctk.CTkButton(form, text="Enregistrer", command=self._save).pack(fill="x", pady=(12, 4))
 
+    def focus(self):  # pragma: no cover - UI glue
+        self._focus_if_exists()
+
+    def focus_set(self):  # pragma: no cover - UI glue
+        self._focus_if_exists()
+
     def _add_field(
         self,
         parent,
@@ -483,6 +489,13 @@ class StockDetailDialog(ctk.CTkToplevel):
                 if callable(update_progress):
                     update_progress(0.05)
         except Exception:
+            pass
+
+    def _focus_if_exists(self):  # pragma: no cover - UI glue
+        try:
+            if self.winfo_exists():
+                super().focus_set()
+        except tk.TclError:
             pass
 
 
