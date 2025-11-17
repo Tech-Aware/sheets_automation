@@ -5,6 +5,8 @@ import tkinter as tk
 from tkinter import ttk
 from typing import Callable, Iterable, Mapping, Sequence
 
+from ..utils.perf import performance_monitor
+
 
 class ScrollableTable(ttk.Frame):
     """Small helper that wraps a Treeview with scrollbars and inline editing."""
@@ -87,10 +89,12 @@ class ScrollableTable(ttk.Frame):
         self.tree.bind("<Configure>", self._reposition_editor)
 
     def refresh(self, rows: Iterable[dict]):
-        for child in self.tree.get_children():
-            self.tree.delete(child)
-        self._item_to_row_index.clear()
-        self._insert_rows(rows)
+        rows_list = list(rows)
+        with performance_monitor.track("ui.table.refresh", metadata={"rows": len(rows_list)}):
+            for child in self.tree.get_children():
+                self.tree.delete(child)
+            self._item_to_row_index.clear()
+            self._insert_rows(rows_list)
 
     def get_selected_indices(self) -> list[int]:
         indices: list[int] = []
@@ -104,19 +108,20 @@ class ScrollableTable(ttk.Frame):
     # Inline editing helpers
     # ------------------------------------------------------------------
     def _insert_rows(self, rows: Iterable[dict]):
-        for idx, row in enumerate(rows):
-            values: list[str] = []
-            for header in self._headers:
-                raw_value = row.get(header, "")
-                base_value = self.value_formatter(header, raw_value) if self.value_formatter is not None else raw_value
-                values.append(self._render_display_value(header, base_value))
-            item = self.tree.insert(
-                "",
-                tk.END,
-                values=values,
-                tags=("even" if idx % 2 == 0 else "odd",),
-            )
-            self._item_to_row_index[item] = idx
+        with performance_monitor.track("ui.table.insert_rows"):
+            for idx, row in enumerate(rows):
+                values: list[str] = []
+                for header in self._headers:
+                    raw_value = row.get(header, "")
+                    base_value = self.value_formatter(header, raw_value) if self.value_formatter is not None else raw_value
+                    values.append(self._render_display_value(header, base_value))
+                item = self.tree.insert(
+                    "",
+                    tk.END,
+                    values=values,
+                    tags=("even" if idx % 2 == 0 else "odd",),
+                )
+                self._item_to_row_index[item] = idx
 
     def _handle_double_click(self, event):
         item = self.tree.identify_row(event.y)

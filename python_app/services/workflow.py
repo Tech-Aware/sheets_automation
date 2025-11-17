@@ -6,6 +6,7 @@ from datetime import date
 import math
 import re
 import unicodedata
+from threading import RLock
 from sys import version_info
 from typing import Mapping, Optional, Sequence
 
@@ -13,6 +14,7 @@ from ..config import HEADERS, MONTH_NAMES_FR
 from ..datasources.workbook import TableData
 from ..services.summaries import InventoryCache
 from ..utils.datefmt import format_display_date, parse_date_value
+from ..utils.perf import performance_monitor
 
 
 # ``slots`` support for :func:`dataclasses.dataclass` only arrived in Python 3.10.
@@ -69,6 +71,7 @@ class WorkflowCoordinator:
         self.stock = stock
         self.ventes = ventes
         self.compta = compta
+        self._lock = RLock()
         self._achats_header_map = self._build_header_map(self.achats.headers)
         self._stock_header_map = self._build_header_map(self.stock.headers)
         self._purchase_by_id: dict[str, dict] = {}
@@ -78,221 +81,237 @@ class WorkflowCoordinator:
         self._max_purchase_id = 0
         self._max_sale_id = 0
         self._inventory_cache = InventoryCache.from_tables(self.stock.rows, self.ventes.rows, self.achats.rows)
-        self._rebuild_indexes()
+        with self._lock:
+            self._rebuild_indexes()
 
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
     def create_purchase(self, data: PurchaseInput) -> dict:
-        purchase_id = str(self._next_purchase_id())
-        achat_date = self._parse_date_string(data.date_achat) or self._today_date()
-        livraison_date = self._parse_date_string(data.date_livraison) or achat_date
-        mois_label, mois_num = self._month_info(achat_date)
+        with self._lock, performance_monitor.track("workflow.create_purchase"):
+            purchase_id = str(self._next_purchase_id())
+            achat_date = self._parse_date_string(data.date_achat) or self._today_date()
+            livraison_date = self._parse_date_string(data.date_livraison) or achat_date
+            mois_label, mois_num = self._month_info(achat_date)
 
-        qty_received = data.quantite_recue if data.quantite_recue is not None else data.quantite
-        if qty_received is None or qty_received <= 0:
-            qty_received = data.quantite_commandee if data.quantite_commandee else data.quantite
-        qty_received = qty_received or 0
-        qty_ordered = data.quantite_commandee if data.quantite_commandee is not None else qty_received
+            qty_received = data.quantite_recue if data.quantite_recue is not None else data.quantite
+            if qty_received is None or qty_received <= 0:
+                qty_received = data.quantite_commandee if data.quantite_commandee else data.quantite
+            qty_received = qty_received or 0
+            qty_ordered = data.quantite_commandee if data.quantite_commandee is not None else qty_received
 
-        prix_achat = data.prix_achat_total
-        if prix_achat is None:
-            prix_achat = round((data.prix_unitaire or 0) * qty_received, 2)
-        prix_unitaire_brut = round(prix_achat / qty_received, 2) if qty_received else round(data.prix_unitaire, 2)
-        total_ttc = round(prix_achat + data.frais_colissage + data.frais_lavage, 2)
-        prix_unitaire_ttc = round(total_ttc / qty_received, 2) if qty_received else total_ttc
-        delai = (livraison_date - achat_date).days if achat_date and livraison_date else ""
-        reference = self._normalize_reference(data.reference) or self._generate_reference(data.article, data.marque, data.genre)
+            prix_achat = data.prix_achat_total
+            if prix_achat is None:
+                prix_achat = round((data.prix_unitaire or 0) * qty_received, 2)
+            prix_unitaire_brut = round(prix_achat / qty_received, 2) if qty_received else round(data.prix_unitaire, 2)
+            total_ttc = round(prix_achat + data.frais_colissage + data.frais_lavage, 2)
+            prix_unitaire_ttc = round(total_ttc / qty_received, 2) if qty_received else total_ttc
+            delai = (livraison_date - achat_date).days if achat_date and livraison_date else ""
+            reference = self._normalize_reference(data.reference) or self._generate_reference(
+                data.article, data.marque, data.genre
+            )
 
-        row: dict = {}
-        self._set_purchase_value(row, HEADERS["ACHATS"].ID, purchase_id)
-        self._set_purchase_value(row, HEADERS["ACHATS"].ARTICLE, data.article)
-        self._set_purchase_value(row, HEADERS["ACHATS"].MARQUE, data.marque)
-        self._set_purchase_value(row, HEADERS["ACHATS"].REFERENCE, reference)
-        self._set_purchase_value(row, HEADERS["ACHATS"].GENRE_DATA, data.genre)
-        self._set_purchase_value(row, HEADERS["ACHATS"].GENRE_LEGACY, data.genre)
-        self._set_purchase_value(row, HEADERS["ACHATS"].DATE_ACHAT, self._format_date(achat_date))
-        self._set_purchase_value(row, HEADERS["ACHATS"].GRADE, data.grade)
-        self._set_purchase_value(row, HEADERS["ACHATS"].FOURNISSEUR, data.fournisseur)
-        self._set_purchase_value(row, HEADERS["ACHATS"].MOIS, mois_label)
-        self._set_purchase_value(row, HEADERS["ACHATS"].MOIS_NUM, mois_num)
-        self._set_purchase_value(row, HEADERS["ACHATS"].DATE_LIVRAISON, self._format_date(livraison_date))
-        self._set_purchase_value(row, HEADERS["ACHATS"].DELAI_LIVRAISON, delai)
-        self._set_purchase_value(row, HEADERS["ACHATS"].QUANTITE_COMMANDEE, qty_ordered)
-        self._set_purchase_value(row, HEADERS["ACHATS"].QUANTITE_RECUE, qty_received)
-        self._set_purchase_value(row, HEADERS["ACHATS"].PRIX_ACHAT_SHIP, round(prix_achat, 2))
-        self._set_purchase_value(row, HEADERS["ACHATS"].PRIX_UNITAIRE_BRUT, prix_unitaire_brut)
-        self._set_purchase_value(row, HEADERS["ACHATS"].FRAIS_LAVAGE, round(data.frais_lavage, 2))
-        self._set_purchase_value(row, HEADERS["ACHATS"].FRAIS_COLISSAGE, round(data.frais_colissage, 2))
-        self._set_purchase_value(row, HEADERS["ACHATS"].TOTAL_TTC, total_ttc)
-        self._set_purchase_value(row, HEADERS["ACHATS"].PRIX_UNITAIRE_TTC, prix_unitaire_ttc)
-        self._set_purchase_value(row, HEADERS["ACHATS"].TRACKING, data.tracking)
-        self._set_purchase_value(row, HEADERS["ACHATS"].PRET_STOCK_COMBINED, "")
-        self._set_purchase_value(row, HEADERS["ACHATS"].DATE_MISE_EN_STOCK, "")
-        self.achats.rows.append(row)
-        self._index_purchase(row)
-        self._inventory_cache.on_purchase_added(row)
-        return row
+            row: dict = {}
+            self._set_purchase_value(row, HEADERS["ACHATS"].ID, purchase_id)
+            self._set_purchase_value(row, HEADERS["ACHATS"].ARTICLE, data.article)
+            self._set_purchase_value(row, HEADERS["ACHATS"].MARQUE, data.marque)
+            self._set_purchase_value(row, HEADERS["ACHATS"].REFERENCE, reference)
+            self._set_purchase_value(row, HEADERS["ACHATS"].GENRE_DATA, data.genre)
+            self._set_purchase_value(row, HEADERS["ACHATS"].GENRE_LEGACY, data.genre)
+            self._set_purchase_value(row, HEADERS["ACHATS"].DATE_ACHAT, self._format_date(achat_date))
+            self._set_purchase_value(row, HEADERS["ACHATS"].GRADE, data.grade)
+            self._set_purchase_value(row, HEADERS["ACHATS"].FOURNISSEUR, data.fournisseur)
+            self._set_purchase_value(row, HEADERS["ACHATS"].MOIS, mois_label)
+            self._set_purchase_value(row, HEADERS["ACHATS"].MOIS_NUM, mois_num)
+            self._set_purchase_value(row, HEADERS["ACHATS"].DATE_LIVRAISON, self._format_date(livraison_date))
+            self._set_purchase_value(row, HEADERS["ACHATS"].DELAI_LIVRAISON, delai)
+            self._set_purchase_value(row, HEADERS["ACHATS"].QUANTITE_COMMANDEE, qty_ordered)
+            self._set_purchase_value(row, HEADERS["ACHATS"].QUANTITE_RECUE, qty_received)
+            self._set_purchase_value(row, HEADERS["ACHATS"].PRIX_ACHAT_SHIP, round(prix_achat, 2))
+            self._set_purchase_value(row, HEADERS["ACHATS"].PRIX_UNITAIRE_BRUT, prix_unitaire_brut)
+            self._set_purchase_value(row, HEADERS["ACHATS"].FRAIS_LAVAGE, round(data.frais_lavage, 2))
+            self._set_purchase_value(row, HEADERS["ACHATS"].FRAIS_COLISSAGE, round(data.frais_colissage, 2))
+            self._set_purchase_value(row, HEADERS["ACHATS"].TOTAL_TTC, total_ttc)
+            self._set_purchase_value(row, HEADERS["ACHATS"].PRIX_UNITAIRE_TTC, prix_unitaire_ttc)
+            self._set_purchase_value(row, HEADERS["ACHATS"].TRACKING, data.tracking)
+            self._set_purchase_value(row, HEADERS["ACHATS"].PRET_STOCK_COMBINED, "")
+            self._set_purchase_value(row, HEADERS["ACHATS"].DATE_MISE_EN_STOCK, "")
+            self.achats.rows.append(row)
+            self._index_purchase(row)
+            self._inventory_cache.on_purchase_added(row)
+            return row
 
     def delete_purchases(self, row_indices: Sequence[int]) -> tuple[int, int]:
         """Remove Achats rows by index and drop matching stock entries."""
 
         if not row_indices:
             return 0, 0
-        removed_purchase_ids: list[str] = []
-        removed = 0
-        for idx in sorted(set(row_indices), reverse=True):
-            if idx < 0 or idx >= len(self.achats.rows):
-                continue
-            row = self.achats.rows.pop(idx)
-            removed += 1
-            purchase_id = self._get_purchase_value(row, HEADERS["ACHATS"].ID)
-            if purchase_id not in (None, ""):
-                removed_purchase_ids.append(str(purchase_id).strip())
-            self._purchase_by_id.pop(self._normalize_id_key(purchase_id), None)
-            self._inventory_cache.on_purchase_removed(row)
-        stock_removed = self._remove_stock_rows(removed_purchase_ids)
-        return removed, stock_removed
+        with self._lock, performance_monitor.track(
+            "workflow.delete_purchases", metadata={"count": len(row_indices)}
+        ):
+            removed_purchase_ids: list[str] = []
+            removed = 0
+            for idx in sorted(set(row_indices), reverse=True):
+                if idx < 0 or idx >= len(self.achats.rows):
+                    continue
+                row = self.achats.rows.pop(idx)
+                removed += 1
+                purchase_id = self._get_purchase_value(row, HEADERS["ACHATS"].ID)
+                if purchase_id not in (None, ""):
+                    removed_purchase_ids.append(str(purchase_id).strip())
+                self._purchase_by_id.pop(self._normalize_id_key(purchase_id), None)
+                self._inventory_cache.on_purchase_removed(row)
+            stock_removed = self._remove_stock_rows(removed_purchase_ids)
+            return removed, stock_removed
 
     def transfer_to_stock(self, data: StockInput) -> dict:
-        purchase = self._purchase_by_id.get(self._normalize_id_key(data.purchase_id))
-        if purchase is None:
-            raise ValueError(f"Achat {data.purchase_id} introuvable")
-        stock_id_value = self._get_purchase_value(purchase, HEADERS["ACHATS"].ID) or data.purchase_id
-        stock_id = str(stock_id_value)
-        date_stock = self._today()
-        article = self._get_purchase_value(purchase, HEADERS["ACHATS"].ARTICLE) or self._get_purchase_value(
-            purchase, HEADERS["ACHATS"].ARTICLE_ALT
-        )
-        marque = self._get_purchase_value(purchase, HEADERS["ACHATS"].MARQUE) or ""
-        libelle = " ".join(part for part in (article, marque) if part).strip()
-        row: dict = {}
-        self._set_stock_value(row, HEADERS["STOCK"].ID, stock_id)
-        self._set_stock_value(row, HEADERS["STOCK"].SKU, data.sku)
-        self._set_stock_value(row, HEADERS["STOCK"].LIBELLE, libelle)
-        self._set_stock_value(row, HEADERS["STOCK"].ARTICLE, libelle)
-        self._set_stock_value(row, HEADERS["STOCK"].MARQUE, marque)
-        self._set_stock_value(row, HEADERS["STOCK"].PRIX_VENTE, round(data.prix_vente, 2))
-        self._set_stock_value(row, HEADERS["STOCK"].LOT, data.lot)
-        self._set_stock_value(row, HEADERS["STOCK"].TAILLE, data.taille)
-        self._set_stock_value(row, HEADERS["STOCK"].DATE_LIVRAISON, self._get_purchase_value(purchase, HEADERS["ACHATS"].DATE_LIVRAISON))
-        self._set_stock_value(row, HEADERS["STOCK"].DATE_MISE_EN_STOCK, date_stock)
-        self.stock.rows.append(row)
-        self._index_stock_row(row)
-        self._inventory_cache.on_stock_added(row)
-        return row
+        with self._lock, performance_monitor.track("workflow.transfer_to_stock"):
+            purchase = self._purchase_by_id.get(self._normalize_id_key(data.purchase_id))
+            if purchase is None:
+                raise ValueError(f"Achat {data.purchase_id} introuvable")
+            stock_id_value = self._get_purchase_value(purchase, HEADERS["ACHATS"].ID) or data.purchase_id
+            stock_id = str(stock_id_value)
+            date_stock = self._today()
+            article = self._get_purchase_value(purchase, HEADERS["ACHATS"].ARTICLE) or self._get_purchase_value(
+                purchase, HEADERS["ACHATS"].ARTICLE_ALT
+            )
+            marque = self._get_purchase_value(purchase, HEADERS["ACHATS"].MARQUE) or ""
+            libelle = " ".join(part for part in (article, marque) if part).strip()
+            row: dict = {}
+            self._set_stock_value(row, HEADERS["STOCK"].ID, stock_id)
+            self._set_stock_value(row, HEADERS["STOCK"].SKU, data.sku)
+            self._set_stock_value(row, HEADERS["STOCK"].LIBELLE, libelle)
+            self._set_stock_value(row, HEADERS["STOCK"].ARTICLE, libelle)
+            self._set_stock_value(row, HEADERS["STOCK"].MARQUE, marque)
+            self._set_stock_value(row, HEADERS["STOCK"].PRIX_VENTE, round(data.prix_vente, 2))
+            self._set_stock_value(row, HEADERS["STOCK"].LOT, data.lot)
+            self._set_stock_value(row, HEADERS["STOCK"].TAILLE, data.taille)
+            self._set_stock_value(
+                row,
+                HEADERS["STOCK"].DATE_LIVRAISON,
+                self._get_purchase_value(purchase, HEADERS["ACHATS"].DATE_LIVRAISON),
+            )
+            self._set_stock_value(row, HEADERS["STOCK"].DATE_MISE_EN_STOCK, date_stock)
+            self.stock.rows.append(row)
+            self._index_stock_row(row)
+            self._inventory_cache.on_stock_added(row)
+            return row
 
     def register_sale(self, data: SaleInput) -> dict:
-        stock_row = self._stock_by_sku.get(self._normalize_sku_key(data.sku))
-        if stock_row is None:
-            raise ValueError(f"Article {data.sku} introuvable dans le stock")
-        sale_date_value = self._parse_date_string(data.date_vente) or self._today_date()
-        sale_date = self._format_date(sale_date_value)
-        was_sold = self._is_stock_sold(stock_row)
-        stock_row[self._stock_column(HEADERS["STOCK"].VENDU_ALT)] = sale_date
-        stock_row[self._stock_column(HEADERS["STOCK"].DATE_VENTE_ALT)] = sale_date
-        stock_row[self._stock_column(HEADERS["STOCK"].PRIX_VENTE)] = round(data.prix_vente, 2)
-        sale_id = str(self._next_sale_id())
-        libelle = self._get_stock_value(stock_row, HEADERS["STOCK"].LIBELLE) or self._get_stock_value(
-            stock_row, HEADERS["STOCK"].ARTICLE
-        )
-        sale_row = {
-            HEADERS["VENTES"].ID: sale_id,
-            HEADERS["VENTES"].DATE_VENTE: sale_date,
-            HEADERS["VENTES"].ARTICLE: libelle,
-            HEADERS["VENTES"].SKU: data.sku,
-            HEADERS["VENTES"].PRIX_VENTE: round(data.prix_vente, 2),
-            HEADERS["VENTES"].FRAIS_COLISSAGE: round(data.frais_colissage, 2),
-            HEADERS["VENTES"].TAILLE: data.taille or self._get_stock_value(stock_row, HEADERS["STOCK"].TAILLE),
-            HEADERS["VENTES"].LOT: data.lot or self._get_stock_value(stock_row, HEADERS["STOCK"].LOT),
-        }
-        self.ventes.rows.append(sale_row)
-        self._sales_by_sku[self._normalize_sku_key(data.sku)] = sale_row
-        self._inventory_cache.on_stock_sold(
-            stock_row,
-            sale_price=data.prix_vente,
-            frais=data.frais_colissage,
-            was_sold=was_sold,
-        )
-        ledger_row = self._build_compta_row(sale_row)
-        if ledger_row:
-            self.compta.rows.append(ledger_row)
-        return sale_row
+        with self._lock, performance_monitor.track("workflow.register_sale"):
+            stock_row = self._stock_by_sku.get(self._normalize_sku_key(data.sku))
+            if stock_row is None:
+                raise ValueError(f"Article {data.sku} introuvable dans le stock")
+            sale_date_value = self._parse_date_string(data.date_vente) or self._today_date()
+            sale_date = self._format_date(sale_date_value)
+            was_sold = self._is_stock_sold(stock_row)
+            stock_row[self._stock_column(HEADERS["STOCK"].VENDU_ALT)] = sale_date
+            stock_row[self._stock_column(HEADERS["STOCK"].DATE_VENTE_ALT)] = sale_date
+            stock_row[self._stock_column(HEADERS["STOCK"].PRIX_VENTE)] = round(data.prix_vente, 2)
+            sale_id = str(self._next_sale_id())
+            libelle = self._get_stock_value(stock_row, HEADERS["STOCK"].LIBELLE) or self._get_stock_value(
+                stock_row, HEADERS["STOCK"].ARTICLE
+            )
+            sale_row = {
+                HEADERS["VENTES"].ID: sale_id,
+                HEADERS["VENTES"].DATE_VENTE: sale_date,
+                HEADERS["VENTES"].ARTICLE: libelle,
+                HEADERS["VENTES"].SKU: data.sku,
+                HEADERS["VENTES"].PRIX_VENTE: round(data.prix_vente, 2),
+                HEADERS["VENTES"].FRAIS_COLISSAGE: round(data.frais_colissage, 2),
+                HEADERS["VENTES"].TAILLE: data.taille or self._get_stock_value(stock_row, HEADERS["STOCK"].TAILLE),
+                HEADERS["VENTES"].LOT: data.lot or self._get_stock_value(stock_row, HEADERS["STOCK"].LOT),
+            }
+            self.ventes.rows.append(sale_row)
+            self._sales_by_sku[self._normalize_sku_key(data.sku)] = sale_row
+            self._inventory_cache.on_stock_sold(
+                stock_row,
+                sale_price=data.prix_vente,
+                frais=data.frais_colissage,
+                was_sold=was_sold,
+            )
+            ledger_row = self._build_compta_row(sale_row)
+            if ledger_row:
+                self.compta.rows.append(ledger_row)
+            return sale_row
 
     def register_return(self, sku: str, note: str) -> dict:
-        sale_row = self._sales_by_sku.get(self._normalize_sku_key(sku))
-        if sale_row is None:
-            raise ValueError(f"Aucune vente trouvée pour le SKU {sku}")
-        sale_row[HEADERS["VENTES"].RETOUR] = note or "Retour client"
-        stock_row = self._stock_by_sku.get(self._normalize_sku_key(sku))
-        if stock_row is not None:
-            was_sold = self._is_stock_sold(stock_row)
-            stock_row[self._stock_column(HEADERS["STOCK"].VENDU_ALT)] = ""
-            stock_row[self._stock_column(HEADERS["STOCK"].DATE_VENTE_ALT)] = ""
-            self._inventory_cache.on_stock_return(stock_row, was_sold=was_sold)
-        return sale_row
+        with self._lock, performance_monitor.track("workflow.register_return"):
+            sale_row = self._sales_by_sku.get(self._normalize_sku_key(sku))
+            if sale_row is None:
+                raise ValueError(f"Aucune vente trouvée pour le SKU {sku}")
+            sale_row[HEADERS["VENTES"].RETOUR] = note or "Retour client"
+            stock_row = self._stock_by_sku.get(self._normalize_sku_key(sku))
+            if stock_row is not None:
+                was_sold = self._is_stock_sold(stock_row)
+                stock_row[self._stock_column(HEADERS["STOCK"].VENDU_ALT)] = ""
+                stock_row[self._stock_column(HEADERS["STOCK"].DATE_VENTE_ALT)] = ""
+                self._inventory_cache.on_stock_return(stock_row, was_sold=was_sold)
+            return sale_row
 
     def build_sku_base(self, article: str, marque: str, genre: str = "") -> str:
         return self._generate_reference(article, marque, genre)
 
     def inventory_snapshot(self) -> "InventorySnapshot":
-        return self._inventory_cache.snapshot()
+        with self._lock:
+            return self._inventory_cache.snapshot()
 
     def prepare_stock_from_purchase(self, purchase_id: str, ready_date: str | None = None) -> list[dict]:
-        purchase = self._purchase_by_id.get(self._normalize_id_key(purchase_id))
-        if purchase is None:
-            raise ValueError(f"Achat {purchase_id} introuvable")
-        already_ready = self._get_purchase_value(purchase, HEADERS["ACHATS"].PRET_STOCK_COMBINED)
-        if isinstance(already_ready, str):
-            already_ready = already_ready.strip()
-        if already_ready:
-            raise ValueError("Cette commande a déjà été validée pour la mise en stock")
-        qty = self._safe_int(
-            self._get_purchase_value(purchase, HEADERS["ACHATS"].QUANTITE_RECUE)
-            or self._get_purchase_value(purchase, HEADERS["ACHATS"].QUANTITE_RECUE_ALT)
-        )
-        if qty <= 0:
-            raise ValueError("La quantité reçue est manquante pour cette commande")
-        base = self._normalize_reference(self._get_purchase_value(purchase, HEADERS["ACHATS"].REFERENCE))
-        article = self._get_purchase_value(purchase, HEADERS["ACHATS"].ARTICLE) or ""
-        marque = self._get_purchase_value(purchase, HEADERS["ACHATS"].MARQUE) or ""
-        if not base:
-            base = self._generate_reference(article, marque, genre)
-            self._set_purchase_value(purchase, HEADERS["ACHATS"].REFERENCE, base)
-        ready_value = self._parse_date_string(ready_date)
-        ready_stamp = self._format_date(ready_value or self._today_date())
-        self._set_purchase_value(purchase, HEADERS["ACHATS"].PRET_STOCK_COMBINED, ready_stamp)
-        self._set_purchase_value(purchase, HEADERS["ACHATS"].DATE_MISE_EN_STOCK, ready_stamp)
-        livraison_raw = self._get_purchase_value(purchase, HEADERS["ACHATS"].DATE_LIVRAISON)
-        livraison_date = self._parse_date_string(livraison_raw) or self._today_date()
-        livraison_str = self._format_date(livraison_date)
-        genre = self._get_purchase_value(purchase, HEADERS["ACHATS"].GENRE_DATA) or self._get_purchase_value(
-            purchase, HEADERS["ACHATS"].GENRE_LEGACY)
-        libelle = " ".join(part for part in (article, marque, genre) if part).strip()
-        next_suffix = self._next_sku_suffix(base)
-        purchase_id_value = self._get_purchase_value(purchase, HEADERS["ACHATS"].ID) or purchase_id
-        stock_id = str(purchase_id_value)
-        created: list[dict] = []
-        for idx in range(qty):
-            stock_row: dict = {}
-            suffix = next_suffix + idx + 1
-            sku = f"{base}-{suffix}"
-            self._set_stock_value(stock_row, HEADERS["STOCK"].ID, stock_id)
-            self._set_stock_value(stock_row, HEADERS["STOCK"].SKU, sku)
-            self._set_stock_value(stock_row, HEADERS["STOCK"].LIBELLE, libelle)
-            self._set_stock_value(stock_row, HEADERS["STOCK"].ARTICLE, libelle)
-            self._set_stock_value(stock_row, HEADERS["STOCK"].MARQUE, marque)
-            self._set_stock_value(stock_row, HEADERS["STOCK"].REFERENCE, base)
-            self._set_stock_value(stock_row, HEADERS["STOCK"].PRIX_VENTE, 0.0)
-            self._set_stock_value(stock_row, HEADERS["STOCK"].LOT, "")
-            self._set_stock_value(stock_row, HEADERS["STOCK"].TAILLE, "")
-            self._set_stock_value(stock_row, HEADERS["STOCK"].DATE_LIVRAISON, livraison_str)
-            self._set_stock_value(stock_row, HEADERS["STOCK"].DATE_MISE_EN_STOCK, ready_stamp)
-            self.stock.rows.append(stock_row)
-            self._index_stock_row(stock_row, base=base, suffix=next_suffix + idx + 1)
-            self._inventory_cache.on_stock_added(stock_row)
-            created.append(stock_row)
-        return created
+        with self._lock, performance_monitor.track("workflow.prepare_stock_from_purchase"):
+            purchase = self._purchase_by_id.get(self._normalize_id_key(purchase_id))
+            if purchase is None:
+                raise ValueError(f"Achat {purchase_id} introuvable")
+            already_ready = self._get_purchase_value(purchase, HEADERS["ACHATS"].PRET_STOCK_COMBINED)
+            if isinstance(already_ready, str):
+                already_ready = already_ready.strip()
+            if already_ready:
+                raise ValueError("Cette commande a déjà été validée pour la mise en stock")
+            qty = self._safe_int(
+                self._get_purchase_value(purchase, HEADERS["ACHATS"].QUANTITE_RECUE)
+                or self._get_purchase_value(purchase, HEADERS["ACHATS"].QUANTITE_RECUE_ALT)
+            )
+            if qty <= 0:
+                raise ValueError("La quantité reçue est manquante pour cette commande")
+            base = self._normalize_reference(self._get_purchase_value(purchase, HEADERS["ACHATS"].REFERENCE))
+            article = self._get_purchase_value(purchase, HEADERS["ACHATS"].ARTICLE) or ""
+            marque = self._get_purchase_value(purchase, HEADERS["ACHATS"].MARQUE) or ""
+            if not base:
+                base = self._generate_reference(article, marque, genre)
+                self._set_purchase_value(purchase, HEADERS["ACHATS"].REFERENCE, base)
+            ready_value = self._parse_date_string(ready_date)
+            ready_stamp = self._format_date(ready_value or self._today_date())
+            self._set_purchase_value(purchase, HEADERS["ACHATS"].PRET_STOCK_COMBINED, ready_stamp)
+            self._set_purchase_value(purchase, HEADERS["ACHATS"].DATE_MISE_EN_STOCK, ready_stamp)
+            livraison_raw = self._get_purchase_value(purchase, HEADERS["ACHATS"].DATE_LIVRAISON)
+            livraison_date = self._parse_date_string(livraison_raw) or self._today_date()
+            livraison_str = self._format_date(livraison_date)
+            genre = self._get_purchase_value(purchase, HEADERS["ACHATS"].GENRE_DATA) or self._get_purchase_value(
+                purchase, HEADERS["ACHATS"].GENRE_LEGACY)
+            libelle = " ".join(part for part in (article, marque, genre) if part).strip()
+            next_suffix = self._next_sku_suffix(base)
+            purchase_id_value = self._get_purchase_value(purchase, HEADERS["ACHATS"].ID) or purchase_id
+            stock_id = str(purchase_id_value)
+            created: list[dict] = []
+            for idx in range(qty):
+                stock_row: dict = {}
+                suffix = next_suffix + idx + 1
+                sku = f"{base}-{suffix}"
+                self._set_stock_value(stock_row, HEADERS["STOCK"].ID, stock_id)
+                self._set_stock_value(stock_row, HEADERS["STOCK"].SKU, sku)
+                self._set_stock_value(stock_row, HEADERS["STOCK"].LIBELLE, libelle)
+                self._set_stock_value(stock_row, HEADERS["STOCK"].ARTICLE, libelle)
+                self._set_stock_value(stock_row, HEADERS["STOCK"].MARQUE, marque)
+                self._set_stock_value(stock_row, HEADERS["STOCK"].REFERENCE, base)
+                self._set_stock_value(stock_row, HEADERS["STOCK"].PRIX_VENTE, 0.0)
+                self._set_stock_value(stock_row, HEADERS["STOCK"].LOT, "")
+                self._set_stock_value(stock_row, HEADERS["STOCK"].TAILLE, "")
+                self._set_stock_value(stock_row, HEADERS["STOCK"].DATE_LIVRAISON, livraison_str)
+                self._set_stock_value(stock_row, HEADERS["STOCK"].DATE_MISE_EN_STOCK, ready_stamp)
+                self.stock.rows.append(stock_row)
+                self._index_stock_row(stock_row, base=base, suffix=next_suffix + idx + 1)
+                self._inventory_cache.on_stock_added(stock_row)
+                created.append(stock_row)
+            return created
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -338,7 +357,15 @@ class WorkflowCoordinator:
         return None
 
     def rebuild_indexes(self) -> None:
-        self._rebuild_indexes()
+        with self._lock, performance_monitor.track(
+            "workflow.rebuild_indexes",
+            metadata={
+                "achats": len(self.achats.rows),
+                "stock": len(self.stock.rows),
+                "ventes": len(self.ventes.rows),
+            },
+        ):
+            self._rebuild_indexes()
 
     def _today(self) -> str:
         return self._format_date(self._today_date())

@@ -11,6 +11,7 @@ from ..services.workflow import PurchaseInput, WorkflowCoordinator
 from ..ui.tables import ScrollableTable
 from ..ui.widgets import DatePickerEntry
 from ..utils.datefmt import format_display_date, parse_date_value
+from ..utils.perf import performance_monitor
 
 
 class PurchasesView(ctk.CTkFrame):
@@ -99,17 +100,18 @@ class PurchasesView(ctk.CTkFrame):
         return entry
 
     def _build_summary_rows(self):
-        summary_rows = []
-        for row in self.table.rows:
-            summary: dict[str, str] = {}
-            for header in self.SUMMARY_HEADERS:
-                value = row.get(header, "")
-                if header == HEADERS["ACHATS"].TOTAL_TTC and isinstance(value, (int, float)):
-                    summary[header] = f"{value:.2f}"
-                else:
-                    summary[header] = value if value is not None else ""
-            summary_rows.append(summary)
-        return summary_rows
+        with performance_monitor.track("ui.purchases.build_summary", metadata={"rows": len(self.table.rows)}):
+            summary_rows = []
+            for row in self.table.rows:
+                summary: dict[str, str] = {}
+                for header in self.SUMMARY_HEADERS:
+                    value = row.get(header, "")
+                    if header == HEADERS["ACHATS"].TOTAL_TTC and isinstance(value, (int, float)):
+                        summary[header] = f"{value:.2f}"
+                    else:
+                        summary[header] = value if value is not None else ""
+                summary_rows.append(summary)
+            return summary_rows
 
     def _open_add_dialog(self):
         if self.add_dialog is not None and self.add_dialog.winfo_exists():
@@ -255,7 +257,8 @@ class PurchasesView(ctk.CTkFrame):
 
     def refresh(self):
         if self.table_widget is not None:
-            self.table_widget.refresh(self._build_summary_rows())
+            with performance_monitor.track("ui.purchases.refresh_table"):
+                self.table_widget.refresh(self._build_summary_rows())
 
     def _log(self, message: str):
         self.log_var.set(message)

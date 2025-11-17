@@ -8,6 +8,7 @@ from ..config import HEADERS
 from ..services.workflow import PurchaseInput, SaleInput, StockInput, WorkflowCoordinator
 from ..ui.widgets import DatePickerEntry
 from ..utils.datefmt import format_display_date
+from ..utils.perf import performance_monitor
 
 
 class WorkflowView(ctk.CTkFrame):
@@ -72,90 +73,94 @@ class WorkflowView(ctk.CTkFrame):
     # Actions
     # ------------------------------------------------------------------
     def _handle_add_purchase(self):
-        try:
-            data = PurchaseInput(
-                article=self.purchase_article.get().strip(),
-                marque=self.purchase_marque.get().strip(),
-                reference=self.purchase_reference.get().strip(),
-                quantite=int(self.purchase_quantite.get() or "0"),
-                prix_unitaire=float(self.purchase_prix.get() or "0"),
-                frais_colissage=float(self.purchase_frais.get() or "0"),
-            )
-        except ValueError:
-            self._log("Valeurs numériques invalides pour l'achat")
-            return
-        if not data.article or not data.marque:
-            self._log("Article et marque sont obligatoires")
-            return
-        row = self.coordinator.create_purchase(data)
-        self._log(f"Achat {row.get(HEADERS['ACHATS'].ID)} ajouté")
-        self.refresh_callback()
+        with performance_monitor.track("ui.workflow.add_purchase"):
+            try:
+                data = PurchaseInput(
+                    article=self.purchase_article.get().strip(),
+                    marque=self.purchase_marque.get().strip(),
+                    reference=self.purchase_reference.get().strip(),
+                    quantite=int(self.purchase_quantite.get() or "0"),
+                    prix_unitaire=float(self.purchase_prix.get() or "0"),
+                    frais_colissage=float(self.purchase_frais.get() or "0"),
+                )
+            except ValueError:
+                self._log("Valeurs numériques invalides pour l'achat")
+                return
+            if not data.article or not data.marque:
+                self._log("Article et marque sont obligatoires")
+                return
+            row = self.coordinator.create_purchase(data)
+            self._log(f"Achat {row.get(HEADERS['ACHATS'].ID)} ajouté")
+            self.refresh_callback()
 
     def _handle_stock_transfer(self):
-        try:
-            prix = float(self.stock_prix.get() or "0")
-        except ValueError:
-            self._log("Prix de vente invalide")
-            return
-        purchase_id = self.stock_purchase_id.get().strip()
-        sku = self.stock_sku.get().strip()
-        if not purchase_id or not sku:
-            self._log("L'ID achat et le SKU sont obligatoires")
-            return
-        data = StockInput(
-            purchase_id=purchase_id,
-            sku=sku,
-            prix_vente=prix,
-            lot=self.stock_lot.get().strip(),
-            taille=self.stock_taille.get().strip(),
-        )
-        try:
-            row = self.coordinator.transfer_to_stock(data)
-        except ValueError as exc:
-            self._log(str(exc))
-            return
-        self._log(f"SKU {row.get(HEADERS['STOCK'].SKU)} créé dans le stock")
-        self.refresh_callback()
+        with performance_monitor.track("ui.workflow.transfer_to_stock"):
+            try:
+                prix = float(self.stock_prix.get() or "0")
+            except ValueError:
+                self._log("Prix de vente invalide")
+                return
+            purchase_id = self.stock_purchase_id.get().strip()
+            sku = self.stock_sku.get().strip()
+            if not purchase_id or not sku:
+                self._log("L'ID achat et le SKU sont obligatoires")
+                return
+            data = StockInput(
+                purchase_id=purchase_id,
+                sku=sku,
+                prix_vente=prix,
+                lot=self.stock_lot.get().strip(),
+                taille=self.stock_taille.get().strip(),
+            )
+            try:
+                row = self.coordinator.transfer_to_stock(data)
+            except ValueError as exc:
+                self._log(str(exc))
+                return
+            self._log(f"SKU {row.get(HEADERS['STOCK'].SKU)} créé dans le stock")
+            self.refresh_callback()
 
     def _handle_sale(self):
-        try:
-            prix = float(self.sale_prix.get() or "0")
-            frais = float(self.sale_frais.get() or "0")
-        except ValueError:
-            self._log("Montants invalides pour la vente")
-            return
-        sku = self.sale_sku.get().strip()
-        if not sku:
-            self._log("Le SKU est obligatoire pour enregistrer une vente")
-            return
-        data = SaleInput(
-            sku=sku,
-            prix_vente=prix,
-            frais_colissage=frais,
-            date_vente=self.sale_date.get().strip() or None,
-            lot=self.sale_lot.get().strip(),
-            taille=self.sale_taille.get().strip(),
-        )
-        try:
-            row = self.coordinator.register_sale(data)
-        except ValueError as exc:
-            self._log(str(exc))
-            return
-        self._log(f"Vente {row.get(HEADERS['VENTES'].ID)} envoyée vers Ventes/Compta")
-        self.refresh_callback()
+        with performance_monitor.track("ui.workflow.register_sale"):
+            try:
+                prix = float(self.sale_prix.get() or "0")
+                frais = float(self.sale_frais.get() or "0")
+            except ValueError:
+                self._log("Montants invalides pour la vente")
+                return
+            sku = self.sale_sku.get().strip()
+            if not sku:
+                self._log("Le SKU est obligatoire pour enregistrer une vente")
+                return
+            data = SaleInput(
+                sku=sku,
+                prix_vente=prix,
+                frais_colissage=frais,
+                date_vente=self.sale_date.get().strip() or None,
+                lot=self.sale_lot.get().strip(),
+                taille=self.sale_taille.get().strip(),
+            )
+            try:
+                row = self.coordinator.register_sale(data)
+            except ValueError as exc:
+                self._log(str(exc))
+                return
+            self._log(f"Vente {row.get(HEADERS['VENTES'].ID)} envoyée vers Ventes/Compta")
+            self.refresh_callback()
 
     def _handle_return(self):
-        sku = self.return_sku.get().strip()
-        if not sku:
-            self._log("Le SKU est obligatoire pour un retour")
-            return
-        try:
-            row = self.coordinator.register_return(sku, self.return_note.get().strip())
-        except ValueError as exc:
-            self._log(str(exc))
-            return
-        self._log(f"Retour enregistré pour le SKU {row.get(HEADERS['VENTES'].SKU)}")
-        self.refresh_callback()
+        with performance_monitor.track("ui.workflow.register_return"):
+            sku = self.return_sku.get().strip()
+            if not sku:
+                self._log("Le SKU est obligatoire pour un retour")
+                return
+            try:
+                row = self.coordinator.register_return(sku, self.return_note.get().strip())
+            except ValueError as exc:
+                self._log(str(exc))
+                return
+            self._log(f"Retour enregistré pour le SKU {row.get(HEADERS['VENTES'].SKU)}")
+            self.refresh_callback()
 
     # ------------------------------------------------------------------
     # UI helpers
