@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from concurrent.futures import Future, ThreadPoolExecutor
 from datetime import date
+import time
 import math
 from pathlib import Path
 import tkinter as tk
@@ -539,6 +541,13 @@ class StockTableView(TableView):
         self.workflow = workflow
         self.search_var: tk.StringVar | None = None
         self.search_entry: ctk.CTkEntry | None = None
+        self.progress_window: ctk.CTkToplevel | None = None
+        self._progress_after_id: str | None = None
+        self._progress_bar: ctk.CTkProgressBar | None = None
+        self._progress_container: ctk.CTkFrame | None = None
+        self._progress_start_time: float | None = None
+        self._progress_duration_ms: int = 9000
+        self._save_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="stock-save")
         super().__init__(master, table, on_table_changed=on_table_changed)
         self.status_var.set(
             "Sélectionnez une vignette (clic), double-clic pour détailler, clic droit pour actions rapides."
@@ -673,6 +682,7 @@ class StockTableView(TableView):
         self.detail_panel.grid(row=0, column=0, sticky="nsew")
 
     def _clear_detail_panel(self):
+        self._focus_safe_widget()
         if hasattr(self, "detail_panel") and self.detail_panel is not None:
             try:
                 self.detail_panel.destroy()
@@ -681,6 +691,121 @@ class StockTableView(TableView):
             self.detail_panel = None
         if hasattr(self, "detail_placeholder"):
             self.detail_placeholder.grid(row=0, column=0, sticky="nsew", padx=(4, 0), pady=(0, 4))
+
+    def _show_save_progress(self, duration_ms: int = 9000):
+        self._cancel_progress_animation()
+        self._progress_after_id = None
+        self._progress_duration_ms = duration_ms
+
+        if self.progress_window is None or not self.progress_window.winfo_exists():
+            self.progress_window = ctk.CTkToplevel(self)
+            self.progress_window.title("Enregistrement")
+            self.progress_window.resizable(False, False)
+            self.progress_window.transient(self.winfo_toplevel())
+            self.progress_window.geometry("320x120")
+
+            self._progress_container = ctk.CTkFrame(self.progress_window)
+            self._progress_container.pack(fill="both", expand=True, padx=16, pady=16)
+
+            ctk.CTkLabel(self._progress_container, text="Enregistrement des détails...").pack(
+                anchor="w", pady=(0, 8)
+            )
+            self._progress_bar = ctk.CTkProgressBar(self._progress_container, mode="determinate")
+            self._progress_bar.pack(fill="x")
+        else:
+            self.progress_window.deiconify()
+            self.progress_window.lift()
+            if self._progress_bar is None or not self._progress_bar.winfo_exists():
+                if self._progress_container is not None and self._progress_container.winfo_exists():
+                    for child in self._progress_container.winfo_children():
+                        child.destroy()
+                else:
+                    self._progress_container = ctk.CTkFrame(self.progress_window)
+                    self._progress_container.pack(fill="both", expand=True, padx=16, pady=16)
+                ctk.CTkLabel(self._progress_container, text="Enregistrement des détails...").pack(
+                    anchor="w", pady=(0, 8)
+                )
+                self._progress_bar = ctk.CTkProgressBar(self._progress_container, mode="determinate")
+                self._progress_bar.pack(fill="x")
+
+        self.progress_window.deiconify()
+        self.progress_window.lift()
+
+        if self._progress_container is not None and self._progress_container.winfo_exists():
+            self._progress_container.update_idletasks()
+            self.progress_window.update_idletasks()
+            try:
+                self.progress_window.update()
+            except Exception:
+                pass
+
+        if self._progress_bar is not None:
+            self._progress_bar.set(0)
+            self._progress_bar.update_idletasks()
+
+        self._progress_start_time = time.perf_counter()
+
+        def close_window():
+            self._close_progress_window()
+
+        def update_progress():
+            if (
+                self.progress_window is None
+                or not self.progress_window.winfo_exists()
+                or self._progress_bar is None
+                or not self._progress_bar.winfo_exists()
+            ):
+                return
+            elapsed = (time.perf_counter() - (self._progress_start_time or time.perf_counter())) * 1000
+            self._progress_bar.set(min(elapsed / duration_ms, 1))
+            if elapsed < duration_ms:
+                self._progress_after_id = self.progress_window.after(50, update_progress)
+            else:
+                self._progress_after_id = None
+                close_window()
+
+        self.progress_window.protocol("WM_DELETE_WINDOW", close_window)
+        self._progress_after_id = self.progress_window.after(50, update_progress)
+
+    def _cancel_progress_animation(self):
+        if self._progress_after_id and self.progress_window is not None:
+            try:
+                if self.progress_window.winfo_exists():
+                    self.progress_window.after_cancel(self._progress_after_id)
+            except Exception:
+                pass
+        self._progress_after_id = None
+
+    def _close_progress_window(self):
+        self._cancel_progress_animation()
+        self._progress_start_time = None
+        try:
+            self._focus_safe_widget()
+            if self.progress_window is not None and self.progress_window.winfo_exists():
+                self.progress_window.withdraw()
+        except Exception:
+            pass
+
+    def _run_after_progress(self, callback):
+        duration = self._progress_duration_ms or 0
+        start_time = self._progress_start_time
+        if start_time is None:
+            self.after(0, callback)
+            return
+        elapsed = int((time.perf_counter() - start_time) * 1000)
+        remaining = max(duration - elapsed, 0)
+        self.after(remaining, callback)
+
+    def _focus_safe_widget(self):
+        """Prevent Tk from restoring focus to destroyed editors."""
+
+        try:
+            if getattr(self, "table_widget", None) is not None:
+                self.table_widget.focus_set()
+                return
+            self.focus_set()
+        except Exception:
+            pass
 
     def _save_detail(self, row_indices: Sequence[int], updates: Mapping[str, str]):
         if not row_indices:
@@ -691,11 +816,55 @@ class StockTableView(TableView):
         )
         if not confirm:
             return
+        self._show_save_progress()
+        future = self._save_executor.submit(self._run_detail_save, list(row_indices), dict(updates))
+        future.add_done_callback(
+            lambda fut: self.after(0, self._finish_detail_save, fut, len(row_indices))
+        )
+
+    def _run_detail_save(self, row_indices: Sequence[int], updates: Mapping[str, str]):
         for row_index in row_indices:
             self._apply_detail_updates(row_index, updates)
-        self._notify_data_changed()
-        self._clear_detail_panel()
-        self.status_var.set(f"Détails enregistrés pour {len(row_indices)} article(s)")
+
+    def _finish_detail_save(self, future: Future, count: int):
+        try:
+            future.result()
+        except Exception as exc:  # pragma: no cover - UI safeguard
+            self._close_progress_window()
+            messagebox.showerror("Enregistrement", f"Échec de l'enregistrement des détails : {exc}")
+            self.status_var.set("Échec de l'enregistrement des détails")
+            return
+
+        def close_progress():
+            self._close_progress_window()
+
+        def finalize():
+            def apply_final_state():
+                close_progress()
+                self._clear_detail_panel()
+                self.status_var.set(f"Détails enregistrés pour {count} article(s)")
+
+            self._run_after_progress(apply_final_state)
+
+        def trigger_refresh():
+            if self.on_table_changed is not None:
+                try:
+                    self.on_table_changed(on_complete=finalize)
+                    return
+                except TypeError:
+                    self.on_table_changed()
+            else:
+                self.refresh()
+            finalize()
+
+        self.after(0, trigger_refresh)
+
+    def destroy(self):
+        try:
+            self._save_executor.shutdown(wait=False)
+        except Exception:
+            pass
+        super().destroy()
 
     def _apply_detail_updates(self, row_index: int, updates: Mapping[str, str]):
         for name, value in updates.items():
