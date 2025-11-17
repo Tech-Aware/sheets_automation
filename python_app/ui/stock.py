@@ -544,6 +544,7 @@ class StockTableView(TableView):
         self.progress_window: ctk.CTkToplevel | None = None
         self._progress_after_id: str | None = None
         self._progress_bar: ctk.CTkProgressBar | None = None
+        self._progress_container: ctk.CTkFrame | None = None
         self._save_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="stock-save")
         super().__init__(master, table, on_table_changed=on_table_changed)
         self.status_var.set(
@@ -688,7 +689,7 @@ class StockTableView(TableView):
         if hasattr(self, "detail_placeholder"):
             self.detail_placeholder.grid(row=0, column=0, sticky="nsew", padx=(4, 0), pady=(0, 4))
 
-    def _show_save_progress(self, duration_ms: int = 5000):
+    def _show_save_progress(self, duration_ms: int = 9000):
         self._cancel_progress_animation()
 
         if self.progress_window is None or not self.progress_window.winfo_exists():
@@ -698,21 +699,32 @@ class StockTableView(TableView):
             self.progress_window.transient(self.winfo_toplevel())
             self.progress_window.geometry("320x120")
 
-            container = ctk.CTkFrame(self.progress_window)
-            container.pack(fill="both", expand=True, padx=16, pady=16)
+            self._progress_container = ctk.CTkFrame(self.progress_window)
+            self._progress_container.pack(fill="both", expand=True, padx=16, pady=16)
 
-            ctk.CTkLabel(container, text="Enregistrement des détails...").pack(anchor="w", pady=(0, 8))
-            self._progress_bar = ctk.CTkProgressBar(container, mode="determinate")
+            ctk.CTkLabel(self._progress_container, text="Enregistrement des détails...").pack(
+                anchor="w", pady=(0, 8)
+            )
+            self._progress_bar = ctk.CTkProgressBar(self._progress_container, mode="determinate")
             self._progress_bar.pack(fill="x")
         else:
             self.progress_window.deiconify()
             self.progress_window.lift()
             if self._progress_bar is None or not self._progress_bar.winfo_exists():
-                container = ctk.CTkFrame(self.progress_window)
-                container.pack(fill="both", expand=True, padx=16, pady=16)
-                ctk.CTkLabel(container, text="Enregistrement des détails...").pack(anchor="w", pady=(0, 8))
-                self._progress_bar = ctk.CTkProgressBar(container, mode="determinate")
+                if self._progress_container is not None and self._progress_container.winfo_exists():
+                    for child in self._progress_container.winfo_children():
+                        child.destroy()
+                else:
+                    self._progress_container = ctk.CTkFrame(self.progress_window)
+                    self._progress_container.pack(fill="both", expand=True, padx=16, pady=16)
+                ctk.CTkLabel(self._progress_container, text="Enregistrement des détails...").pack(
+                    anchor="w", pady=(0, 8)
+                )
+                self._progress_bar = ctk.CTkProgressBar(self._progress_container, mode="determinate")
                 self._progress_bar.pack(fill="x")
+
+        if self._progress_container is not None and self._progress_container.winfo_exists():
+            self._progress_container.update_idletasks()
 
         if self._progress_bar is not None:
             self._progress_bar.set(0)
