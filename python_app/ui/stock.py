@@ -364,7 +364,7 @@ class StockDetailDialog(ctk.CTkToplevel):
         self.lift()
         self.focus()
         self.row = row
-        self._fields: dict[str, ctk.CTkEntry | DatePickerEntry] = {}
+        self._fields: dict[str, ctk.CTkEntry | ctk.CTkOptionMenu | DatePickerEntry] = {}
         form = ctk.CTkFrame(self)
         form.pack(fill="both", expand=True, padx=12, pady=12)
         self._add_field(
@@ -414,6 +414,7 @@ class StockDetailDialog(ctk.CTkToplevel):
             "taille",
             "Taille",
             row.get(HEADERS["STOCK"].TAILLE, ""),
+            choices=StockTableView.SIZE_CHOICES,
         )
         self._add_field(
             form,
@@ -426,16 +427,35 @@ class StockDetailDialog(ctk.CTkToplevel):
             "lot",
             "Lot",
             row.get(HEADERS["STOCK"].LOT_ALT) or row.get(HEADERS["STOCK"].LOT, ""),
+            choices=StockTableView.LOT_CHOICES,
         )
         ctk.CTkButton(form, text="Enregistrer", command=self._save).pack(fill="x", pady=(12, 4))
 
-    def _add_field(self, parent, key: str, label: str, value, *, date_picker: bool = False):
+    def _add_field(
+        self,
+        parent,
+        key: str,
+        label: str,
+        value,
+        *,
+        date_picker: bool = False,
+        choices: Sequence[str] | None = None,
+    ):
         row = ctk.CTkFrame(parent)
         row.pack(fill="x", pady=4)
         ctk.CTkLabel(row, text=label, width=160, anchor="w").pack(side="left")
-        entry = DatePickerEntry(row) if date_picker else ctk.CTkEntry(row)
-        if value not in (None, ""):
-            entry.insert(0, str(value))
+        if choices:
+            available_values = ["", *choices]
+            if value not in (None, "", *choices):
+                available_values.insert(1, str(value))
+            var = tk.StringVar(value=str(value or ""))
+            entry: ctk.CTkOptionMenu | ctk.CTkEntry | DatePickerEntry = ctk.CTkOptionMenu(
+                row, values=available_values, variable=var
+            )
+        else:
+            entry = DatePickerEntry(row) if date_picker else ctk.CTkEntry(row)
+            if value not in (None, ""):
+                entry.insert(0, str(value))
         entry.pack(side="left", fill="x", expand=True, padx=(8, 0))
         self._fields[key] = entry
 
