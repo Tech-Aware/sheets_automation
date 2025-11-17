@@ -436,12 +436,6 @@ class StockDetailPanel(ctk.CTkFrame):
         )
         self._add_field(
             form,
-            "taille_colis",
-            "Taille du colis",
-            self.row.get(HEADERS["STOCK"].TAILLE_COLIS) or self.row.get(HEADERS["STOCK"].TAILLE_COLIS_ALT, ""),
-        )
-        self._add_field(
-            form,
             "lot",
             "Lot",
             self.row.get(HEADERS["STOCK"].LOT_ALT) or self.row.get(HEADERS["STOCK"].LOT, ""),
@@ -878,8 +872,6 @@ class StockTableView(TableView):
                 self.table.rows[row_index][HEADERS["STOCK"].PRIX_VENTE] = value
             elif name == "taille":
                 self.table.rows[row_index][HEADERS["STOCK"].TAILLE] = value
-            elif name == "taille_colis":
-                self.table.rows[row_index][HEADERS["STOCK"].TAILLE_COLIS_ALT] = value
             elif name == "lot":
                 self.table.rows[row_index][HEADERS["STOCK"].LOT_ALT] = value
 
