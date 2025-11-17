@@ -853,6 +853,7 @@ class StockOptionsView(ctk.CTkFrame):
         )
         if not path:
             return
+        self.refresh_callback(prepare_only=True)
         try:
             repository = WorkbookRepository(path)
             sheet_name = self._resolve_stock_sheet(repository)
@@ -860,6 +861,7 @@ class StockOptionsView(ctk.CTkFrame):
                 raise ValueError("Ce classeur ne contient aucun onglet exploitable.")
             source_table = repository.load_table(sheet_name)
         except Exception as exc:  # pragma: no cover - UI guard
+            self.refresh_callback(cancel_only=True)
             messagebox.showerror("Import du stock", f"Impossible de lire le fichier sélectionné : {exc}")
             return
         added = merge_stock_table(self.table, source_table)
@@ -868,6 +870,7 @@ class StockOptionsView(ctk.CTkFrame):
             self.status_var.set(f"{added} article(s) importé(s) depuis {filename}.")
             self.refresh_callback()
         else:
+            self.refresh_callback(cancel_only=True)
             self.status_var.set(f"Aucun nouvel article à importer depuis {filename}.")
 
     @staticmethod

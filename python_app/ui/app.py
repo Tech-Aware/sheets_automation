@@ -80,9 +80,22 @@ class VintageErpApp(ctk.CTk):
         stock_options_tab = self.tabview.add("Options")
         StockOptionsView(stock_options_tab, self.tables["Stock"], self.refresh_views)
 
-    def refresh_views(self):
-        """Schedule a UI refresh while coalescing rapid successive calls."""
+    def refresh_views(self, *, prepare_only: bool = False, cancel_only: bool = False):
+        """Schedule a UI refresh while coalescing rapid successive calls.
 
+        ``prepare_only`` allows callers to display the loading dialog before
+        entering a potentially heavy workflow, ensuring the user sees feedback
+        as soon as the process starts. ``cancel_only`` is a safeguard to close
+        the dialog when a prepare step fails before the actual refresh begins.
+        """
+
+        if cancel_only:
+            self._close_loading_dialog()
+            return
+        if prepare_only:
+            self._show_loading_dialog()
+            self._update_loading_progress(0.02)
+            return
         if self._pending_refresh is not None and not self._pending_refresh.done():
             return
         self._show_loading_dialog()

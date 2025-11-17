@@ -89,6 +89,7 @@ class WorkflowView(ctk.CTkFrame):
             if not data.article or not data.marque:
                 self._log("Article et marque sont obligatoires")
                 return
+            self.refresh_callback(prepare_only=True)
             row = self.coordinator.create_purchase(data)
             self._log(f"Achat {row.get(HEADERS['ACHATS'].ID)} ajouté")
             self.refresh_callback()
@@ -112,9 +113,11 @@ class WorkflowView(ctk.CTkFrame):
                 lot=self.stock_lot.get().strip(),
                 taille=self.stock_taille.get().strip(),
             )
+            self.refresh_callback(prepare_only=True)
             try:
                 row = self.coordinator.transfer_to_stock(data)
             except ValueError as exc:
+                self.refresh_callback(cancel_only=True)
                 self._log(str(exc))
                 return
             self._log(f"SKU {row.get(HEADERS['STOCK'].SKU)} créé dans le stock")
@@ -140,9 +143,11 @@ class WorkflowView(ctk.CTkFrame):
                 lot=self.sale_lot.get().strip(),
                 taille=self.sale_taille.get().strip(),
             )
+            self.refresh_callback(prepare_only=True)
             try:
                 row = self.coordinator.register_sale(data)
             except ValueError as exc:
+                self.refresh_callback(cancel_only=True)
                 self._log(str(exc))
                 return
             self._log(f"Vente {row.get(HEADERS['VENTES'].ID)} envoyée vers Ventes/Compta")
@@ -154,9 +159,11 @@ class WorkflowView(ctk.CTkFrame):
             if not sku:
                 self._log("Le SKU est obligatoire pour un retour")
                 return
+            self.refresh_callback(prepare_only=True)
             try:
                 row = self.coordinator.register_return(sku, self.return_note.get().strip())
             except ValueError as exc:
+                self.refresh_callback(cancel_only=True)
                 self._log(str(exc))
                 return
             self._log(f"Retour enregistré pour le SKU {row.get(HEADERS['VENTES'].SKU)}")
