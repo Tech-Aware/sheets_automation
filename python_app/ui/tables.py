@@ -89,12 +89,12 @@ class ScrollableTable(ttk.Frame):
         self.tree.bind("<Configure>", self._reposition_editor)
 
     def refresh(self, rows: Iterable[dict]):
-        rows_list = list(rows)
-        with performance_monitor.track("ui.table.refresh", metadata={"rows": len(rows_list)}):
+        rows_sequence = rows if isinstance(rows, Sequence) else list(rows)
+        with performance_monitor.track("ui.table.refresh", metadata={"rows": len(rows_sequence)}):
             for child in self.tree.get_children():
                 self.tree.delete(child)
             self._item_to_row_index.clear()
-            self._insert_rows(rows_list)
+            self._insert_rows(rows_sequence)
 
     def get_selected_indices(self) -> list[int]:
         indices: list[int] = []
@@ -108,8 +108,9 @@ class ScrollableTable(ttk.Frame):
     # Inline editing helpers
     # ------------------------------------------------------------------
     def _insert_rows(self, rows: Iterable[dict]):
-        with performance_monitor.track("ui.table.insert_rows"):
-            for idx, row in enumerate(rows):
+        rows_sequence = rows if isinstance(rows, Sequence) else list(rows)
+        with performance_monitor.track("ui.table.insert_rows", metadata={"rows": len(rows_sequence)}):
+            for idx, row in enumerate(rows_sequence):
                 values: list[str] = []
                 for header in self._headers:
                     raw_value = row.get(header, "")
