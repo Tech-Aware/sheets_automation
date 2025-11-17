@@ -38,6 +38,7 @@ class VintageErpApp(ctk.CTk):
         self.table_views: dict[str, TableView] = {}
         self.purchase_view: PurchasesView | None = None
         self.dashboard_view: DashboardView | None = None
+        self._refresh_job: str | None = None
         self._build_tabs()
         self.protocol("WM_DELETE_WINDOW", self._handle_close)
 
@@ -75,6 +76,14 @@ class VintageErpApp(ctk.CTk):
         StockOptionsView(stock_options_tab, self.tables["Stock"], self.refresh_views)
 
     def refresh_views(self):
+        """Schedule a UI refresh while coalescing rapid successive calls."""
+
+        if self._refresh_job is not None:
+            return
+        self._refresh_job = self.after_idle(self._perform_refresh)
+
+    def _perform_refresh(self):
+        self._refresh_job = None
         self.workflow.rebuild_indexes()
         summary = self.workflow.inventory_snapshot()
         if self.dashboard_view is not None:
@@ -86,6 +95,9 @@ class VintageErpApp(ctk.CTk):
 
     def _handle_close(self):
         try:
+            if self._refresh_job is not None:
+                self.after_cancel(self._refresh_job)
+                self._refresh_job = None
             self._persist_tables()
         except Exception as exc:  # pragma: no cover - UI safeguard
             messagebox.showerror("Sauvegarde des données", f"Échec de l'enregistrement des données : {exc}")
