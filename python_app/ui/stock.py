@@ -163,28 +163,15 @@ class StockCardList(ctk.CTkFrame):
 
     def _show_context_menu(self, event, click_date: date):
         menu = tk.Menu(self, tearoff=False)
-        single_selection = len(self._selected_indices) == 1
         menu.add_command(
             label="Ajouter des détails",
-            state="normal" if single_selection else "disabled",
-            command=(
-                lambda: self.on_open_details(next(iter(self._selected_indices)))
-                if single_selection
-                else None
-            ),
+            command=lambda: self.on_open_details(self.get_selected_indices()),
         )
         menu.add_separator()
-        actions = (
-            ("Définir la date de mise en ligne", "mise_en_ligne"),
-            ("Définir la date de publication", "publication"),
-            ("Définir la date de vente", "vente"),
-            ("Déclarer les articles comme vendu", "vendu"),
+        menu.add_command(
+            label="Déclarer les articles comme vendu",
+            command=lambda: self.on_bulk_action(self.get_selected_indices(), "vendu", click_date),
         )
-        for label, action in actions:
-            menu.add_command(
-                label=label,
-                command=lambda act=action: self.on_bulk_action(self.get_selected_indices(), act, click_date),
-            )
         menu.tk_popup(event.x_root, event.y_root)
 
     def _apply_card_style(self, index: int, selected: bool):
@@ -424,6 +411,12 @@ class StockDetailDialog(ctk.CTkToplevel):
         )
         self._add_field(
             form,
+            "taille",
+            "Taille",
+            row.get(HEADERS["STOCK"].TAILLE, ""),
+        )
+        self._add_field(
+            form,
             "taille_colis",
             "Taille du colis",
             row.get(HEADERS["STOCK"].TAILLE_COLIS) or row.get(HEADERS["STOCK"].TAILLE_COLIS_ALT, ""),
@@ -594,13 +587,25 @@ class StockTableView(TableView):
             return
         self._open_detail_dialog(row_index)
 
-    def _open_detail_dialog(self, row_index: int):
-        if not (0 <= row_index < len(self.table.rows)):
+    def _open_detail_dialog(self, row_indices: int | Sequence[int]):
+        indices = [row_indices] if isinstance(row_indices, int) else list(row_indices)
+        valid_indices = [idx for idx in indices if 0 <= idx < len(self.table.rows)]
+        if not valid_indices:
             return
-        dialog = StockDetailDialog(self, self.table.rows[row_index], on_save=lambda updates: self._save_detail(row_index, updates))
+        primary_index = valid_indices[0]
+        dialog = StockDetailDialog(
+            self,
+            self.table.rows[primary_index],
+            on_save=lambda updates: self._save_detail(valid_indices, updates),
+        )
         dialog.focus()
 
-    def _save_detail(self, row_index: int, updates: Mapping[str, str]):
+    def _save_detail(self, row_indices: Sequence[int], updates: Mapping[str, str]):
+        for row_index in row_indices:
+            self._apply_detail_updates(row_index, updates)
+        self._notify_data_changed()
+
+    def _apply_detail_updates(self, row_index: int, updates: Mapping[str, str]):
         for name, value in updates.items():
             if name == "date_mise_en_ligne":
                 self._apply_date(row_index, value, self._DATE_COLUMNS, HEADERS["STOCK"].DATE_MISE_EN_LIGNE)
@@ -610,11 +615,12 @@ class StockTableView(TableView):
                 self._apply_date(row_index, value, self._SALE_COLUMNS, HEADERS["STOCK"].DATE_VENTE)
             elif name == "prix_vente":
                 self.table.rows[row_index][HEADERS["STOCK"].PRIX_VENTE] = value
+            elif name == "taille":
+                self.table.rows[row_index][HEADERS["STOCK"].TAILLE] = value
             elif name == "taille_colis":
                 self.table.rows[row_index][HEADERS["STOCK"].TAILLE_COLIS_ALT] = value
             elif name == "lot":
                 self.table.rows[row_index][HEADERS["STOCK"].LOT_ALT] = value
-        self._notify_data_changed()
 
     def _apply_date(self, row_index: int, value: str, columns: set[str], primary_key: str):
         if not (0 <= row_index < len(self.table.rows)):
