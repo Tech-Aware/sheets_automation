@@ -694,7 +694,7 @@ class StockTableView(TableView):
 
     def _show_save_progress(self, duration_ms: int = 9000):
         self._cancel_progress_animation()
-        self._progress_start_time = time.perf_counter()
+        self._progress_after_id = None
         self._progress_duration_ms = duration_ms
 
         if self.progress_window is None or not self.progress_window.winfo_exists():
@@ -741,6 +741,9 @@ class StockTableView(TableView):
 
         if self._progress_bar is not None:
             self._progress_bar.set(0)
+            self._progress_bar.update_idletasks()
+
+        self._progress_start_time = time.perf_counter()
 
         def close_window():
             self._close_progress_window()
@@ -762,10 +765,7 @@ class StockTableView(TableView):
                 close_window()
 
         self.progress_window.protocol("WM_DELETE_WINDOW", close_window)
-        update_progress()
-        if self._progress_after_id is None:
-            # Ensure continued animation if it didn't complete immediately.
-            self._progress_after_id = self.progress_window.after(50, update_progress)
+        self._progress_after_id = self.progress_window.after(50, update_progress)
 
     def _cancel_progress_animation(self):
         if self._progress_after_id and self.progress_window is not None:
