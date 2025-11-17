@@ -931,7 +931,8 @@ class StockTableView(TableView):
             self.status_var.set("Aucun article supprimé")
 
     def _ensure_sale_requirements(self, row: Mapping) -> bool:
-        return bool(row.get(HEADERS["STOCK"].PRIX_VENTE) and row.get(HEADERS["STOCK"].TAILLE_COLIS_ALT))
+        size_value = row.get(HEADERS["STOCK"].TAILLE) or row.get(HEADERS["STOCK"].TAILLE_COLIS_ALT)
+        return bool(row.get(HEADERS["STOCK"].PRIX_VENTE) and size_value)
 
     def _handle_card_sale(self, row_index: int, click_date: date):
         if not (0 <= row_index < len(self.table.rows)):
@@ -939,7 +940,7 @@ class StockTableView(TableView):
         row = self.table.rows[row_index]
         if not self._ensure_sale_requirements(row):
             self.status_var.set(
-                "Impossible de déclarer la vente : prix de vente et taille du colis requis."
+                "Impossible de déclarer la vente : prix de vente et taille requis."
             )
             return
         date_text = format_display_date(click_date)
@@ -994,7 +995,7 @@ class StockTableView(TableView):
                 self._notify_data_changed()
             if failures:
                 messages.append(
-                    f"{failures} vignette(s) non mises à jour : prix de vente et taille du colis requis"
+                    f"{failures} vignette(s) non mises à jour : prix de vente et taille requis"
                 )
             if messages:
                 self.status_var.set(" ".join(messages))
