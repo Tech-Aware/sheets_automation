@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import date
+import math
 from pathlib import Path
 import tkinter as tk
 from tkinter import filedialog, messagebox
@@ -196,7 +197,7 @@ class StockCardList(ctk.CTkFrame):
     def _build_metadata_lines(self, row: Mapping) -> list[str]:
         details: list[str] = []
 
-        size_value = row.get(HEADERS["STOCK"].TAILLE)
+        size_value = self._display_value(row.get(HEADERS["STOCK"].TAILLE))
         if size_value:
             details.append(f"Taille : {size_value}")
 
@@ -224,8 +225,10 @@ class StockCardList(ctk.CTkFrame):
         if publication_date:
             details.append(f"Publié le {publication_date}")
 
-        lot_value = row.get(HEADERS["STOCK"].LOT_ALT) or row.get(HEADERS["STOCK"].LOT)
-        if lot_value not in (None, ""):
+        lot_value = self._display_value(row.get(HEADERS["STOCK"].LOT_ALT)) or self._display_value(
+            row.get(HEADERS["STOCK"].LOT)
+        )
+        if lot_value:
             details.append(f"Lot {lot_value}")
 
         return [" | ".join(details)] if details else []
@@ -234,9 +237,20 @@ class StockCardList(ctk.CTkFrame):
     def _first_non_empty(row: Mapping, keys: Sequence[str]) -> str:
         for key in keys:
             value = row.get(key)
-            if value not in (None, ""):
-                return str(value)
+            display_value = StockCardList._display_value(value)
+            if display_value:
+                return display_value
         return ""
+
+    @staticmethod
+    def _display_value(value) -> str:
+        if value is None:
+            return ""
+        if isinstance(value, str):
+            return value.strip()
+        if isinstance(value, float) and math.isnan(value):
+            return ""
+        return str(value)
 
     def _handle_right_click_sale(self, idx: int, date_label: str):
         date_text = format_display_date(date.today())
