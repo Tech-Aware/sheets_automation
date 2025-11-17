@@ -205,7 +205,9 @@ class WorkflowCoordinator:
             sale_date_value = self._parse_date_string(data.date_vente) or self._today_date()
             sale_date = self._format_date(sale_date_value)
             was_sold = self._is_stock_sold(stock_row)
+            stock_row[self._stock_column(HEADERS["STOCK"].VENDU)] = sale_date
             stock_row[self._stock_column(HEADERS["STOCK"].VENDU_ALT)] = sale_date
+            stock_row[self._stock_column(HEADERS["STOCK"].DATE_VENTE)] = sale_date
             stock_row[self._stock_column(HEADERS["STOCK"].DATE_VENTE_ALT)] = sale_date
             stock_row[self._stock_column(HEADERS["STOCK"].PRIX_VENTE)] = round(data.prix_vente, 2)
             sale_id = str(self._next_sale_id())
@@ -244,7 +246,9 @@ class WorkflowCoordinator:
             stock_row = self._stock_by_sku.get(self._normalize_sku_key(sku))
             if stock_row is not None:
                 was_sold = self._is_stock_sold(stock_row)
+                stock_row[self._stock_column(HEADERS["STOCK"].VENDU)] = ""
                 stock_row[self._stock_column(HEADERS["STOCK"].VENDU_ALT)] = ""
+                stock_row[self._stock_column(HEADERS["STOCK"].DATE_VENTE)] = ""
                 stock_row[self._stock_column(HEADERS["STOCK"].DATE_VENTE_ALT)] = ""
                 self._inventory_cache.on_stock_return(stock_row, was_sold=was_sold)
             return sale_row

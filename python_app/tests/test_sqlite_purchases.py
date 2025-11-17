@@ -65,6 +65,52 @@ def test_purchase_database_persists_stock_rows(tmp_path):
     assert loaded_stock.rows[0][HEADERS["STOCK"].PRIX_VENTE] == 42.0
 
 
+def test_table_to_stock_records_uses_sale_aliases():
+    stock_headers = [HEADERS["STOCK"].SKU, HEADERS["STOCK"].VENDU_ALT, HEADERS["STOCK"].DATE_VENTE_ALT]
+    stock_rows = [
+        {
+            HEADERS["STOCK"].SKU: "SKU-ALIAS",
+            HEADERS["STOCK"].VENDU_ALT: "04/01/2024",
+            HEADERS["STOCK"].DATE_VENTE_ALT: "04/01/2024",
+        }
+    ]
+    stock_table = TableData(headers=stock_headers, rows=stock_rows)
+
+    records = table_to_stock_records(stock_table)
+
+    assert records[0].vendu == "04/01/2024"
+    assert records[0].date_vente == "04/01/2024"
+
+
+def test_purchase_database_populates_stock_aliases(tmp_path):
+    db_path = tmp_path / "achats.db"
+    db = PurchaseDatabase(db_path)
+    stock_headers = [
+        HEADERS["STOCK"].ID,
+        HEADERS["STOCK"].SKU,
+        HEADERS["STOCK"].VENDU,
+        HEADERS["STOCK"].DATE_VENTE,
+    ]
+    stock_rows = [
+        {
+            HEADERS["STOCK"].ID: "1",
+            HEADERS["STOCK"].SKU: "SKU-ALIAS-LOAD",
+            HEADERS["STOCK"].VENDU: "05/01/2024",
+            HEADERS["STOCK"].DATE_VENTE: "05/01/2024",
+        }
+    ]
+    stock_table = TableData(headers=stock_headers, rows=stock_rows)
+
+    db.replace_all([], table_to_stock_records(stock_table))
+
+    loaded = db.load_stock_table()
+    row = loaded.rows[0]
+
+    assert row[HEADERS["STOCK"].VENDU] == "05/01/2024"
+    assert row[HEADERS["STOCK"].VENDU_ALT] == "05/01/2024"
+    assert row[HEADERS["STOCK"].DATE_VENTE_ALT] == "05/01/2024"
+
+
 def test_purchase_database_round_trip_preserves_achats_rows(tmp_path):
     db_path = tmp_path / "achats.db"
     db = PurchaseDatabase(db_path)
