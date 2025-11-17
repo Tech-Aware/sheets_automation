@@ -680,6 +680,7 @@ class StockTableView(TableView):
         self.detail_panel.grid(row=0, column=0, sticky="nsew")
 
     def _clear_detail_panel(self):
+        self._focus_safe_widget()
         if hasattr(self, "detail_panel") and self.detail_panel is not None:
             try:
                 self.detail_panel.destroy()
@@ -765,6 +766,17 @@ class StockTableView(TableView):
                 pass
         self._progress_after_id = None
 
+    def _focus_safe_widget(self):
+        """Prevent Tk from restoring focus to destroyed editors."""
+
+        try:
+            if getattr(self, "table_widget", None) is not None:
+                self.table_widget.focus_set()
+                return
+            self.focus_set()
+        except Exception:
+            pass
+
     def _save_detail(self, row_indices: Sequence[int], updates: Mapping[str, str]):
         if not row_indices:
             return
@@ -796,6 +808,7 @@ class StockTableView(TableView):
             return
 
         def close_progress():
+            self._focus_safe_widget()
             self._cancel_progress_animation()
             if self.progress_window is not None and self.progress_window.winfo_exists():
                 self.progress_window.withdraw()
