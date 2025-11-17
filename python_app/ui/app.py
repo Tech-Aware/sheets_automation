@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
-from typing import Mapping
+from typing import Callable, Mapping
 from tkinter import messagebox
 
 import customtkinter as ctk
@@ -44,6 +44,7 @@ class VintageErpApp(ctk.CTk):
         self._refresh_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="ui-worker")
         self._pending_refresh: Future | None = None
         self._loading_dialog: LoadingDialog | None = None
+        self._refresh_callbacks: list[Callable[[], None]] = []
         self._build_tabs()
         self.protocol("WM_DELETE_WINDOW", self._handle_close)
 
@@ -80,7 +81,13 @@ class VintageErpApp(ctk.CTk):
         stock_options_tab = self.tabview.add("Options")
         StockOptionsView(stock_options_tab, self.tables["Stock"], self.refresh_views)
 
-    def refresh_views(self, *, prepare_only: bool = False, cancel_only: bool = False):
+    def refresh_views(
+        self,
+        *,
+        prepare_only: bool = False,
+        cancel_only: bool = False,
+        on_complete: Callable[[], None] | None = None,
+    ):
         """Schedule a UI refresh while coalescing rapid successive calls.
 
         ``prepare_only`` allows callers to display the loading dialog before
@@ -90,8 +97,11 @@ class VintageErpApp(ctk.CTk):
         """
 
         if cancel_only:
+            self._refresh_callbacks.clear()
             self._close_loading_dialog()
             return
+        if on_complete is not None:
+            self._refresh_callbacks.append(on_complete)
         if prepare_only:
             self._show_loading_dialog()
             self._update_loading_progress(0.02)
@@ -165,6 +175,7 @@ class VintageErpApp(ctk.CTk):
                 progress_cursor += 1
                 self._update_loading_progress(progress_base + progress_step * progress_cursor)
         self._update_loading_progress(1.0)
+        self._run_refresh_callbacks()
         self.after(300, self._close_loading_dialog)
 
     def _handle_close(self):
@@ -213,3 +224,11 @@ class VintageErpApp(ctk.CTk):
                 self._loading_dialog.close()
             finally:
                 self._loading_dialog = None
+
+    def _run_refresh_callbacks(self):
+        callbacks, self._refresh_callbacks = self._refresh_callbacks, []
+        for callback in callbacks:
+            try:
+                callback()
+            except Exception:
+                continue

@@ -474,22 +474,8 @@ class StockDetailDialog(ctk.CTkToplevel):
         return ""
 
     def _save(self):
-        self._show_refresh_loader()
         updates = {name: field.get().strip() for name, field in self._fields.items()}
-        self.on_save(updates)
-        self.destroy()
-
-    def _show_refresh_loader(self):
-        owner = self.winfo_toplevel()
-        show_dialog = getattr(owner, "_show_loading_dialog", None)
-        update_progress = getattr(owner, "_update_loading_progress", None)
-        try:
-            if callable(show_dialog):
-                show_dialog()
-                if callable(update_progress):
-                    update_progress(0.05)
-        except Exception:
-            pass
+        self.on_save(updates, self)
 
     def _focus_if_exists(self):  # pragma: no cover - UI glue
         try:
@@ -642,14 +628,32 @@ class StockTableView(TableView):
         dialog = StockDetailDialog(
             self,
             self.table.rows[primary_index],
-            on_save=lambda updates: self._save_detail(valid_indices, updates),
+            on_save=lambda updates, dlg=dialog: self._save_detail_with_loader(valid_indices, updates, dlg),
         )
         dialog.focus()
 
-    def _save_detail(self, row_indices: Sequence[int], updates: Mapping[str, str]):
+    def _save_detail(self, row_indices: Sequence[int], updates: Mapping[str, str], *, notify: bool = True):
         for row_index in row_indices:
             self._apply_detail_updates(row_index, updates)
-        self._notify_data_changed()
+        if notify:
+            self._notify_data_changed()
+
+    def _save_detail_with_loader(self, row_indices: Sequence[int], updates: Mapping[str, str], dialog: StockDetailDialog):
+        refresh_views = getattr(self.winfo_toplevel(), "refresh_views", None)
+        if callable(refresh_views):
+            refresh_views(prepare_only=True)
+        self._save_detail(row_indices, updates, notify=False)
+        if callable(refresh_views):
+            refresh_views(on_complete=lambda: self._close_detail_dialog(dialog))
+        else:
+            self._close_detail_dialog(dialog)
+
+    @staticmethod
+    def _close_detail_dialog(dialog: StockDetailDialog):
+        try:
+            dialog.destroy()
+        except Exception:
+            pass
 
     def _apply_detail_updates(self, row_index: int, updates: Mapping[str, str]):
         for name, value in updates.items():
