@@ -199,6 +199,7 @@ class PurchasesView(ctk.CTkFrame):
             date_livraison=date_livraison or None,
             tracking=tracking,
         )
+        self.refresh_callback(prepare_only=True)
         row = self.workflow.create_purchase(data)
         message = f"Commande {row.get(HEADERS['ACHATS'].ID)} ajoutée"
         self._log(message)
@@ -244,9 +245,11 @@ class PurchasesView(ctk.CTkFrame):
             ready_date_raw = format_display_date(date.today())
         ready_value = parse_date_value(ready_date_raw)
         ready_stamp = format_display_date(ready_value) if ready_value else (ready_date_raw or None)
+        self.refresh_callback(prepare_only=True)
         try:
             created = self.workflow.prepare_stock_from_purchase(purchase_id, ready_stamp)
         except ValueError as exc:
+            self.refresh_callback(cancel_only=True)
             self._log(str(exc))
             return
         self._log(f"{len(created)} SKU créés pour l'achat {purchase_id}")
