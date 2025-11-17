@@ -11,6 +11,7 @@ from ..datasources.sqlite_purchases import PurchaseDatabase, table_to_purchase_r
 from ..datasources.workbook import TableData
 from ..services.workflow import WorkflowCoordinator
 from ..utils.perf import format_report, performance_monitor
+from .loading import LoadingDialog
 from .calendar import CalendarView
 from .dashboard import DashboardView
 from .purchases import PurchasesView
@@ -42,6 +43,7 @@ class VintageErpApp(ctk.CTk):
         self.dashboard_view: DashboardView | None = None
         self._refresh_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="ui-worker")
         self._pending_refresh: Future | None = None
+        self._loading_dialog: LoadingDialog | None = None
         self._build_tabs()
         self.protocol("WM_DELETE_WINDOW", self._handle_close)
 
@@ -83,6 +85,8 @@ class VintageErpApp(ctk.CTk):
 
         if self._pending_refresh is not None and not self._pending_refresh.done():
             return
+        self._show_loading_dialog()
+        self._update_loading_progress(0.05)
         self._pending_refresh = self._refresh_executor.submit(self._compute_refresh_payload)
         self._pending_refresh.add_done_callback(lambda fut: self.after(0, self._apply_refresh, fut))
 
@@ -99,11 +103,24 @@ class VintageErpApp(ctk.CTk):
             summary = future.result()
         except Exception as exc:  # pragma: no cover - UI safeguard
             messagebox.showerror("Rafraîchissement UI", f"Échec du rafraîchissement : {exc}")
+            self._close_loading_dialog()
             return
+        self._update_loading_progress(0.45)
         table_row_counts = {
             name: len(view.table.rows) if hasattr(view, "table") and hasattr(view.table, "rows") else None
             for name, view in self.table_views.items()
         }
+        total_steps = sum(
+            step is not None
+            for step in (
+                self.dashboard_view,
+                self.purchase_view,
+                *[view for view in self.table_views.values() if view is not self.purchase_view],
+            )
+        )
+        progress_cursor = 0
+        progress_base = 0.45
+        progress_step = 0.55 / max(total_steps, 1)
         with performance_monitor.track(
             "ui.refresh.widgets",
             metadata={
@@ -114,12 +131,16 @@ class VintageErpApp(ctk.CTk):
             if self.dashboard_view is not None:
                 with performance_monitor.track("ui.refresh.dashboard"):
                     self.dashboard_view.refresh(summary)
+                progress_cursor += 1
+                self._update_loading_progress(progress_base + progress_step * progress_cursor)
             if self.purchase_view is not None:
                 with performance_monitor.track(
                     "ui.refresh.purchases",
                     metadata={"rows": table_row_counts.get("Achats")},
                 ):
                     self.purchase_view.refresh()
+                progress_cursor += 1
+                self._update_loading_progress(progress_base + progress_step * progress_cursor)
             for name, view in self.table_views.items():
                 if view is self.purchase_view:
                     continue
@@ -128,6 +149,10 @@ class VintageErpApp(ctk.CTk):
                     metadata={"sheet": name, "rows": table_row_counts.get(name)},
                 ):
                     view.refresh()
+                progress_cursor += 1
+                self._update_loading_progress(progress_base + progress_step * progress_cursor)
+        self._update_loading_progress(1.0)
+        self.after(300, self._close_loading_dialog)
 
     def _handle_close(self):
         try:
@@ -141,6 +166,7 @@ class VintageErpApp(ctk.CTk):
         except Exception as exc:  # pragma: no cover - UI safeguard
             messagebox.showerror("Sauvegarde des données", f"Échec de l'enregistrement des données : {exc}")
             return
+        self._close_loading_dialog()
         self.destroy()
 
     def _persist_tables(self):
@@ -149,3 +175,28 @@ class VintageErpApp(ctk.CTk):
         records = table_to_purchase_records(self.tables.get("Achats"))
         stock_records = table_to_stock_records(self.tables.get("Stock"))
         PurchaseDatabase(self.achats_db_path).replace_all(records, stock_records)
+
+    def _show_loading_dialog(self):
+        if self._loading_dialog is not None:
+            try:
+                self._loading_dialog.focus()
+                return
+            except Exception:
+                self._loading_dialog = None
+        dialog = LoadingDialog(self, message="Patientez pendant le chargement de vos données")
+        dialog.grab_set()
+        self._loading_dialog = dialog
+
+    def _update_loading_progress(self, value: float):
+        if self._loading_dialog is not None:
+            try:
+                self._loading_dialog.update_progress(value)
+            except Exception:
+                self._loading_dialog = None
+
+    def _close_loading_dialog(self):
+        if self._loading_dialog is not None:
+            try:
+                self._loading_dialog.close()
+            finally:
+                self._loading_dialog = None
