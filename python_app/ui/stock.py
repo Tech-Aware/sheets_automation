@@ -348,31 +348,47 @@ class StockSummaryPanel(ctk.CTkFrame):
         }
 
 
-class StockDetailDialog(ctk.CTkToplevel):
-    """Lightweight popup used to enrich a stock item."""
-
-    def __init__(self, master, row: dict, *, on_save):
-        super().__init__(master)
-        self.on_save = on_save
-        self.title("Détails de l'article")
-        self.geometry("420x360")
-        self.resizable(False, False)
-        owner = master.winfo_toplevel() if hasattr(master, "winfo_toplevel") else None
-        if owner is not None:
-            self.transient(owner)
-        self.grab_set()
-        self.lift()
-        self._focus_if_exists()
+class StockDetailPanel(ctk.CTkFrame):
+    def __init__(self, master, row: dict, *, on_save, on_cancel, selection_label: str):
+        super().__init__(master, fg_color="transparent")
         self.row = row
+        self.on_save = on_save
+        self.on_cancel = on_cancel
         self._fields: dict[str, ctk.CTkEntry | ctk.CTkOptionMenu | DatePickerEntry] = {}
-        form = ctk.CTkFrame(self)
-        form.pack(fill="both", expand=True, padx=12, pady=12)
+        self._build(selection_label)
+
+    def _build(self, selection_label: str):
+        self.grid_rowconfigure(1, weight=1)
+        self.grid_columnconfigure(0, weight=1)
+
+        header = ctk.CTkFrame(self, fg_color="transparent")
+        header.grid(row=0, column=0, sticky="ew", pady=(4, 8))
+        header.grid_columnconfigure(0, weight=1)
+        ctk.CTkLabel(
+            header,
+            text="Détails de l'article",
+            font=ctk.CTkFont(weight="bold", size=16),
+            anchor="w",
+        ).grid(row=0, column=0, sticky="w")
+        ctk.CTkLabel(header, text=selection_label, text_color="#475569").grid(row=0, column=1, sticky="e")
+
+        form = ctk.CTkScrollableFrame(self, fg_color="transparent")
+        form.grid(row=1, column=0, sticky="nsew", padx=(2, 0))
+        ctk.CTkLabel(
+            form,
+            text=(
+                "Ajuste les détails pour l'article sélectionné. Les mises à jour"
+                " seront appliquées aussi à toute autre sélection."
+            ),
+            justify="left",
+            anchor="w",
+        ).pack(fill="x", pady=(0, 6))
         self._add_field(
             form,
             "date_mise_en_ligne",
             "Date de mise en ligne",
             self._initial_date(
-                row,
+                self.row,
                 StockTableView._DATE_COLUMNS,
                 HEADERS["STOCK"].DATE_MISE_EN_LIGNE,
                 HEADERS["STOCK"].MIS_EN_LIGNE,
@@ -384,7 +400,7 @@ class StockDetailDialog(ctk.CTkToplevel):
             "date_publication",
             "Date de publication",
             self._initial_date(
-                row,
+                self.row,
                 StockTableView._PUBLICATION_COLUMNS,
                 HEADERS["STOCK"].DATE_PUBLICATION,
                 HEADERS["STOCK"].PUBLIE,
@@ -396,7 +412,7 @@ class StockDetailDialog(ctk.CTkToplevel):
             "date_vente",
             "Date de vente",
             self._initial_date(
-                row,
+                self.row,
                 StockTableView._SALE_COLUMNS,
                 HEADERS["STOCK"].DATE_VENTE,
                 HEADERS["STOCK"].VENDU,
@@ -407,35 +423,36 @@ class StockDetailDialog(ctk.CTkToplevel):
             form,
             "prix_vente",
             "Prix de vente",
-            row.get(HEADERS["STOCK"].PRIX_VENTE, ""),
+            self.row.get(HEADERS["STOCK"].PRIX_VENTE, ""),
         )
         self._add_field(
             form,
             "taille",
             "Taille",
-            row.get(HEADERS["STOCK"].TAILLE, ""),
+            self.row.get(HEADERS["STOCK"].TAILLE, ""),
             choices=StockTableView.SIZE_CHOICES,
         )
         self._add_field(
             form,
             "taille_colis",
             "Taille du colis",
-            row.get(HEADERS["STOCK"].TAILLE_COLIS) or row.get(HEADERS["STOCK"].TAILLE_COLIS_ALT, ""),
+            self.row.get(HEADERS["STOCK"].TAILLE_COLIS) or self.row.get(HEADERS["STOCK"].TAILLE_COLIS_ALT, ""),
         )
         self._add_field(
             form,
             "lot",
             "Lot",
-            row.get(HEADERS["STOCK"].LOT_ALT) or row.get(HEADERS["STOCK"].LOT, ""),
+            self.row.get(HEADERS["STOCK"].LOT_ALT) or self.row.get(HEADERS["STOCK"].LOT, ""),
             choices=StockTableView.LOT_CHOICES,
         )
-        ctk.CTkButton(form, text="Enregistrer", command=self._save).pack(fill="x", pady=(12, 4))
 
-    def focus(self):  # pragma: no cover - UI glue
-        self._focus_if_exists()
-
-    def focus_set(self):  # pragma: no cover - UI glue
-        self._focus_if_exists()
+        actions = ctk.CTkFrame(self, fg_color="transparent")
+        actions.grid(row=2, column=0, sticky="ew", pady=(8, 0))
+        actions.grid_columnconfigure((0, 1), weight=1)
+        ctk.CTkButton(actions, text="Annuler", fg_color="#e2e8f0", text_color="#0f172a", command=self.on_cancel).grid(
+            row=0, column=0, sticky="ew", padx=(0, 8)
+        )
+        ctk.CTkButton(actions, text="Enregistrer", command=self._save).grid(row=0, column=1, sticky="ew")
 
     def _add_field(
         self,
@@ -447,7 +464,7 @@ class StockDetailDialog(ctk.CTkToplevel):
         date_picker: bool = False,
         choices: Sequence[str] | None = None,
     ):
-        row = ctk.CTkFrame(parent)
+        row = ctk.CTkFrame(parent, fg_color="transparent")
         row.pack(fill="x", pady=4)
         ctk.CTkLabel(row, text=label, width=160, anchor="w").pack(side="left")
         if choices:
@@ -475,14 +492,7 @@ class StockDetailDialog(ctk.CTkToplevel):
 
     def _save(self):
         updates = {name: field.get().strip() for name, field in self._fields.items()}
-        self.on_save(updates, self)
-
-    def _focus_if_exists(self):  # pragma: no cover - UI glue
-        try:
-            if self.winfo_exists():
-                super().focus_set()
-        except tk.TclError:
-            pass
+        self.on_save(updates)
 
 
 class StockTableView(TableView):
@@ -571,6 +581,8 @@ class StockTableView(TableView):
         parent.grid_columnconfigure(0, weight=3, uniform="stock")
         parent.grid_columnconfigure(1, weight=2, uniform="stock")
         parent.grid_rowconfigure(0, weight=0)
+        parent.grid_rowconfigure(1, weight=1)
+        parent.grid_rowconfigure(2, weight=0)
         self.table_frame.grid_configure(columnspan=2, sticky="nsew")
         ctk.CTkButton(
             self.actions_frame,
@@ -589,7 +601,6 @@ class StockTableView(TableView):
             side="left", padx=(8, 0)
         )
 
-        parent.grid_rowconfigure(1, weight=1)
         self.card_list = StockCardList(
             parent,
             self.table,
@@ -598,10 +609,26 @@ class StockTableView(TableView):
             on_bulk_action=self._handle_bulk_card_action,
             on_selection_change=self._handle_card_selection_change,
         )
-        self.card_list.grid(row=1, column=0, sticky="nsew", padx=(0, 8))
+        self.card_list.grid(row=1, column=0, rowspan=2, sticky="nsew", padx=(0, 8))
+
+        self.detail_container = ctk.CTkFrame(parent, fg_color="transparent")
+        self.detail_container.grid(row=1, column=1, sticky="nsew", padx=(8, 0))
+        self.detail_container.grid_rowconfigure(0, weight=1)
+        self.detail_container.grid_columnconfigure(0, weight=1)
+        self.detail_placeholder = ctk.CTkLabel(
+            self.detail_container,
+            text=(
+                "Sélectionnez une vignette et cliquez sur \"Ajouter des détails\""
+                " pour modifier les informations ici."
+            ),
+            anchor="center",
+            justify="center",
+            text_color="#475569",
+        )
+        self.detail_placeholder.grid(row=0, column=0, sticky="nsew", padx=(4, 0), pady=(0, 4))
 
         self.summary_panel = StockSummaryPanel(parent, self.table, on_refresh=self.refresh)
-        self.summary_panel.grid(row=1, column=1, sticky="nsew", padx=(8, 0))
+        self.summary_panel.grid(row=2, column=1, sticky="nsew", padx=(8, 0), pady=(6, 0))
 
     def _handle_card_selection_change(self, indices: Sequence[int]):
         if not self.table_widget:
@@ -625,17 +652,35 @@ class StockTableView(TableView):
         if not valid_indices:
             return
         primary_index = valid_indices[0]
-        dialog: StockDetailDialog | None = None
+        selection_label = f"{len(valid_indices)} article(s) sélectionné(s)"
+        self._show_detail_panel(self.table.rows[primary_index], valid_indices, selection_label)
 
-        def handle_save(updates, dlg: StockDetailDialog | None = None):
-            self._save_detail_with_loader(valid_indices, updates, dlg or dialog)
-
-        dialog = StockDetailDialog(
-            self,
-            self.table.rows[primary_index],
-            on_save=handle_save,
+    def _show_detail_panel(self, row: dict, row_indices: Sequence[int], selection_label: str):
+        if hasattr(self, "detail_panel") and self.detail_panel is not None:
+            try:
+                self.detail_panel.destroy()
+            except Exception:
+                pass
+        if hasattr(self, "detail_placeholder"):
+            self.detail_placeholder.grid_remove()
+        self.detail_panel = StockDetailPanel(
+            self.detail_container,
+            row,
+            on_save=lambda updates: self._save_detail_with_loader(row_indices, updates),
+            on_cancel=self._clear_detail_panel,
+            selection_label=selection_label,
         )
-        dialog.focus()
+        self.detail_panel.grid(row=0, column=0, sticky="nsew")
+
+    def _clear_detail_panel(self):
+        if hasattr(self, "detail_panel") and self.detail_panel is not None:
+            try:
+                self.detail_panel.destroy()
+            except Exception:
+                pass
+            self.detail_panel = None
+        if hasattr(self, "detail_placeholder"):
+            self.detail_placeholder.grid(row=0, column=0, sticky="nsew", padx=(4, 0), pady=(0, 4))
 
     def _save_detail(self, row_indices: Sequence[int], updates: Mapping[str, str], *, notify: bool = True):
         for row_index in row_indices:
@@ -643,22 +688,29 @@ class StockTableView(TableView):
         if notify:
             self._notify_data_changed()
 
-    def _save_detail_with_loader(self, row_indices: Sequence[int], updates: Mapping[str, str], dialog: StockDetailDialog):
+    def _save_detail_with_loader(self, row_indices: Sequence[int], updates: Mapping[str, str]):
+        if not row_indices:
+            return
+        confirm = messagebox.askyesno(
+            "Confirmer l'enregistrement",
+            f"Appliquer les détails à {len(row_indices)} article(s) ?",
+        )
+        if not confirm:
+            return
         refresh_views = getattr(self.winfo_toplevel(), "refresh_views", None)
         if callable(refresh_views):
             refresh_views(prepare_only=True)
+        self.status_var.set("Enregistrement des détails en cours...")
         self._save_detail(row_indices, updates, notify=False)
         if callable(refresh_views):
-            refresh_views(on_complete=lambda: self._close_detail_dialog(dialog))
+            refresh_views(on_complete=lambda: self._finish_detail_save(len(row_indices)))
         else:
-            self._close_detail_dialog(dialog)
+            self._finish_detail_save(len(row_indices))
 
-    @staticmethod
-    def _close_detail_dialog(dialog: StockDetailDialog):
-        try:
-            dialog.destroy()
-        except Exception:
-            pass
+    def _finish_detail_save(self, count: int):
+        self._notify_data_changed()
+        self._clear_detail_panel()
+        self.status_var.set(f"Détails enregistrés pour {count} article(s)")
 
     def _apply_detail_updates(self, row_index: int, updates: Mapping[str, str]):
         for name, value in updates.items():
