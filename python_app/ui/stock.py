@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from concurrent.futures import Future, ThreadPoolExecutor
 from datetime import date
 import time
 import math
@@ -543,6 +544,7 @@ class StockTableView(TableView):
         self.progress_window: ctk.CTkToplevel | None = None
         self._progress_after_id: str | None = None
         self._progress_bar: ctk.CTkProgressBar | None = None
+        self._save_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="stock-save")
         super().__init__(master, table, on_table_changed=on_table_changed)
         self.status_var.set(
             "Sélectionnez une vignette (clic), double-clic pour détailler, clic droit pour actions rapides."
@@ -761,11 +763,35 @@ class StockTableView(TableView):
         if not confirm:
             return
         self._show_save_progress()
+        future = self._save_executor.submit(self._run_detail_save, list(row_indices), dict(updates))
+        future.add_done_callback(
+            lambda fut: self.after(0, self._finish_detail_save, fut, len(row_indices))
+        )
+
+    def _run_detail_save(self, row_indices: Sequence[int], updates: Mapping[str, str]):
         for row_index in row_indices:
             self._apply_detail_updates(row_index, updates)
+
+    def _finish_detail_save(self, future: Future, count: int):
+        self._cancel_progress_animation()
+        if self.progress_window is not None and self.progress_window.winfo_exists():
+            self.progress_window.withdraw()
+        try:
+            future.result()
+        except Exception as exc:  # pragma: no cover - UI safeguard
+            messagebox.showerror("Enregistrement", f"Échec de l'enregistrement des détails : {exc}")
+            self.status_var.set("Échec de l'enregistrement des détails")
+            return
         self._notify_data_changed()
         self._clear_detail_panel()
-        self.status_var.set(f"Détails enregistrés pour {len(row_indices)} article(s)")
+        self.status_var.set(f"Détails enregistrés pour {count} article(s)")
+
+    def destroy(self):
+        try:
+            self._save_executor.shutdown(wait=False)
+        except Exception:
+            pass
+        super().destroy()
 
     def _apply_detail_updates(self, row_index: int, updates: Mapping[str, str]):
         for name, value in updates.items():
