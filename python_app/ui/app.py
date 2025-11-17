@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
 from typing import Mapping
 from tkinter import messagebox
@@ -9,6 +10,7 @@ import customtkinter as ctk
 from ..datasources.sqlite_purchases import PurchaseDatabase, table_to_purchase_records, table_to_stock_records
 from ..datasources.workbook import TableData
 from ..services.workflow import WorkflowCoordinator
+from ..utils.perf import format_report, performance_monitor
 from .calendar import CalendarView
 from .dashboard import DashboardView
 from .purchases import PurchasesView
@@ -38,7 +40,8 @@ class VintageErpApp(ctk.CTk):
         self.table_views: dict[str, TableView] = {}
         self.purchase_view: PurchasesView | None = None
         self.dashboard_view: DashboardView | None = None
-        self._refresh_job: str | None = None
+        self._refresh_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="ui-worker")
+        self._pending_refresh: Future | None = None
         self._build_tabs()
         self.protocol("WM_DELETE_WINDOW", self._handle_close)
 
@@ -78,27 +81,42 @@ class VintageErpApp(ctk.CTk):
     def refresh_views(self):
         """Schedule a UI refresh while coalescing rapid successive calls."""
 
-        if self._refresh_job is not None:
+        if self._pending_refresh is not None and not self._pending_refresh.done():
             return
-        self._refresh_job = self.after_idle(self._perform_refresh)
+        self._pending_refresh = self._refresh_executor.submit(self._compute_refresh_payload)
+        self._pending_refresh.add_done_callback(lambda fut: self.after(0, self._apply_refresh, fut))
 
-    def _perform_refresh(self):
-        self._refresh_job = None
-        self.workflow.rebuild_indexes()
-        summary = self.workflow.inventory_snapshot()
-        if self.dashboard_view is not None:
-            self.dashboard_view.refresh(summary)
-        if self.purchase_view is not None:
-            self.purchase_view.refresh()
-        for view in self.table_views.values():
-            view.refresh()
+    def _compute_refresh_payload(self):
+        with performance_monitor.track("ui.refresh.rebuild_indexes"):
+            self.workflow.rebuild_indexes()
+        with performance_monitor.track("ui.refresh.inventory_snapshot"):
+            summary = self.workflow.inventory_snapshot()
+        return summary
+
+    def _apply_refresh(self, future: Future):
+        self._pending_refresh = None
+        try:
+            summary = future.result()
+        except Exception as exc:  # pragma: no cover - UI safeguard
+            messagebox.showerror("Rafraîchissement UI", f"Échec du rafraîchissement : {exc}")
+            return
+        with performance_monitor.track("ui.refresh.widgets"):
+            if self.dashboard_view is not None:
+                self.dashboard_view.refresh(summary)
+            if self.purchase_view is not None:
+                self.purchase_view.refresh()
+            for view in self.table_views.values():
+                view.refresh()
 
     def _handle_close(self):
         try:
-            if self._refresh_job is not None:
-                self.after_cancel(self._refresh_job)
-                self._refresh_job = None
+            if self._pending_refresh is not None:
+                self._pending_refresh.cancel()
+            self._refresh_executor.shutdown(wait=False)
             self._persist_tables()
+            slowest = performance_monitor.slowest()
+            if slowest:
+                print(format_report(slowest))
         except Exception as exc:  # pragma: no cover - UI safeguard
             messagebox.showerror("Sauvegarde des données", f"Échec de l'enregistrement des données : {exc}")
             return
