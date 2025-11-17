@@ -666,7 +666,7 @@ class StockTableView(TableView):
         self.detail_panel = StockDetailPanel(
             self.detail_container,
             row,
-            on_save=lambda updates: self._save_detail_with_loader(row_indices, updates),
+            on_save=lambda updates: self._save_detail(row_indices, updates),
             on_cancel=self._clear_detail_panel,
             selection_label=selection_label,
         )
@@ -682,13 +682,7 @@ class StockTableView(TableView):
         if hasattr(self, "detail_placeholder"):
             self.detail_placeholder.grid(row=0, column=0, sticky="nsew", padx=(4, 0), pady=(0, 4))
 
-    def _save_detail(self, row_indices: Sequence[int], updates: Mapping[str, str], *, notify: bool = True):
-        for row_index in row_indices:
-            self._apply_detail_updates(row_index, updates)
-        if notify:
-            self._notify_data_changed()
-
-    def _save_detail_with_loader(self, row_indices: Sequence[int], updates: Mapping[str, str]):
+    def _save_detail(self, row_indices: Sequence[int], updates: Mapping[str, str]):
         if not row_indices:
             return
         confirm = messagebox.askyesno(
@@ -697,20 +691,11 @@ class StockTableView(TableView):
         )
         if not confirm:
             return
-        refresh_views = getattr(self.winfo_toplevel(), "refresh_views", None)
-        if callable(refresh_views):
-            refresh_views(prepare_only=True)
-        self.status_var.set("Enregistrement des détails en cours...")
-        self._save_detail(row_indices, updates, notify=False)
-        if callable(refresh_views):
-            refresh_views(on_complete=lambda: self._finish_detail_save(len(row_indices)))
-        else:
-            self._finish_detail_save(len(row_indices))
-
-    def _finish_detail_save(self, count: int):
+        for row_index in row_indices:
+            self._apply_detail_updates(row_index, updates)
         self._notify_data_changed()
         self._clear_detail_panel()
-        self.status_var.set(f"Détails enregistrés pour {count} article(s)")
+        self.status_var.set(f"Détails enregistrés pour {len(row_indices)} article(s)")
 
     def _apply_detail_updates(self, row_index: int, updates: Mapping[str, str]):
         for name, value in updates.items():
