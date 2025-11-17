@@ -773,18 +773,38 @@ class StockTableView(TableView):
             self._apply_detail_updates(row_index, updates)
 
     def _finish_detail_save(self, future: Future, count: int):
-        self._cancel_progress_animation()
-        if self.progress_window is not None and self.progress_window.winfo_exists():
-            self.progress_window.withdraw()
         try:
             future.result()
         except Exception as exc:  # pragma: no cover - UI safeguard
+            self._cancel_progress_animation()
+            if self.progress_window is not None and self.progress_window.winfo_exists():
+                self.progress_window.withdraw()
             messagebox.showerror("Enregistrement", f"Échec de l'enregistrement des détails : {exc}")
             self.status_var.set("Échec de l'enregistrement des détails")
             return
-        self._notify_data_changed()
-        self._clear_detail_panel()
-        self.status_var.set(f"Détails enregistrés pour {count} article(s)")
+
+        def close_progress():
+            self._cancel_progress_animation()
+            if self.progress_window is not None and self.progress_window.winfo_exists():
+                self.progress_window.withdraw()
+
+        def finalize():
+            close_progress()
+            self._clear_detail_panel()
+            self.status_var.set(f"Détails enregistrés pour {count} article(s)")
+
+        def trigger_refresh():
+            if self.on_table_changed is not None:
+                try:
+                    self.on_table_changed(on_complete=finalize)
+                    return
+                except TypeError:
+                    self.on_table_changed()
+            else:
+                self.refresh()
+            finalize()
+
+        self.after(0, trigger_refresh)
 
     def destroy(self):
         try:
