@@ -540,6 +540,9 @@ class StockTableView(TableView):
         self.workflow = workflow
         self.search_var: tk.StringVar | None = None
         self.search_entry: ctk.CTkEntry | None = None
+        self.progress_window: ctk.CTkToplevel | None = None
+        self._progress_after_id: str | None = None
+        self._progress_bar: ctk.CTkProgressBar | None = None
         super().__init__(master, table, on_table_changed=on_table_changed)
         self.status_var.set(
             "Sélectionnez une vignette (clic), double-clic pour détailler, clic droit pour actions rapides."
@@ -684,47 +687,69 @@ class StockTableView(TableView):
             self.detail_placeholder.grid(row=0, column=0, sticky="nsew", padx=(4, 0), pady=(0, 4))
 
     def _show_save_progress(self, duration_ms: int = 5000):
-        if hasattr(self, "progress_window") and self.progress_window is not None:
-            try:
-                self.progress_window.destroy()
-            except Exception:
-                pass
-        self.progress_window = ctk.CTkToplevel(self)
-        self.progress_window.title("Enregistrement")
-        self.progress_window.resizable(False, False)
-        self.progress_window.transient(self.winfo_toplevel())
-        self.progress_window.geometry("320x120")
+        self._cancel_progress_animation()
 
-        container = ctk.CTkFrame(self.progress_window)
-        container.pack(fill="both", expand=True, padx=16, pady=16)
+        if self.progress_window is None or not self.progress_window.winfo_exists():
+            self.progress_window = ctk.CTkToplevel(self)
+            self.progress_window.title("Enregistrement")
+            self.progress_window.resizable(False, False)
+            self.progress_window.transient(self.winfo_toplevel())
+            self.progress_window.geometry("320x120")
 
-        ctk.CTkLabel(container, text="Enregistrement des détails...").pack(anchor="w", pady=(0, 8))
-        progress = ctk.CTkProgressBar(container, mode="determinate")
-        progress.pack(fill="x")
-        progress.set(0)
+            container = ctk.CTkFrame(self.progress_window)
+            container.pack(fill="both", expand=True, padx=16, pady=16)
+
+            ctk.CTkLabel(container, text="Enregistrement des détails...").pack(anchor="w", pady=(0, 8))
+            self._progress_bar = ctk.CTkProgressBar(container, mode="determinate")
+            self._progress_bar.pack(fill="x")
+        else:
+            self.progress_window.deiconify()
+            self.progress_window.lift()
+            if self._progress_bar is None or not self._progress_bar.winfo_exists():
+                container = ctk.CTkFrame(self.progress_window)
+                container.pack(fill="both", expand=True, padx=16, pady=16)
+                ctk.CTkLabel(container, text="Enregistrement des détails...").pack(anchor="w", pady=(0, 8))
+                self._progress_bar = ctk.CTkProgressBar(container, mode="determinate")
+                self._progress_bar.pack(fill="x")
+
+        if self._progress_bar is not None:
+            self._progress_bar.set(0)
 
         start = time.perf_counter()
 
         def close_window():
+            self._cancel_progress_animation()
             if self.progress_window is None:
                 return
-            try:
-                self.progress_window.destroy()
-            finally:
-                self.progress_window = None
+            if self.progress_window.winfo_exists():
+                self.progress_window.withdraw()
 
         def update_progress():
-            if self.progress_window is None:
+            if (
+                self.progress_window is None
+                or not self.progress_window.winfo_exists()
+                or self._progress_bar is None
+                or not self._progress_bar.winfo_exists()
+            ):
                 return
             elapsed = (time.perf_counter() - start) * 1000
-            progress.set(min(elapsed / duration_ms, 1))
+            self._progress_bar.set(min(elapsed / duration_ms, 1))
             if elapsed < duration_ms:
-                self.progress_window.after(50, update_progress)
+                self._progress_after_id = self.progress_window.after(50, update_progress)
             else:
                 close_window()
 
         self.progress_window.protocol("WM_DELETE_WINDOW", close_window)
-        self.progress_window.after(0, update_progress)
+        self._progress_after_id = self.progress_window.after(0, update_progress)
+
+    def _cancel_progress_animation(self):
+        if self._progress_after_id and self.progress_window is not None:
+            try:
+                if self.progress_window.winfo_exists():
+                    self.progress_window.after_cancel(self._progress_after_id)
+            except Exception:
+                pass
+        self._progress_after_id = None
 
     def _save_detail(self, row_indices: Sequence[int], updates: Mapping[str, str]):
         if not row_indices:
