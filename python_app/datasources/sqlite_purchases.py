@@ -151,19 +151,38 @@ _STOCK_COLUMN_TO_HEADER: Sequence[tuple[str, str]] = (
 
 STOCK_TABLE_HEADERS: Sequence[str] = tuple(header for _, header in _STOCK_COLUMN_TO_HEADER)
 
-_STOCK_ALIASES: Mapping[str, Sequence[str]] = {
-    HEADERS["STOCK"].LIBELLE: (HEADERS["STOCK"].LIBELLE_ALT,),
-    HEADERS["STOCK"].ARTICLE: (HEADERS["STOCK"].ARTICLE_ALT,),
-    HEADERS["STOCK"].TAILLE_COLIS: (HEADERS["STOCK"].TAILLE_COLIS_ALT,),
-    HEADERS["STOCK"].LOT: (HEADERS["STOCK"].LOT_ALT,),
-    HEADERS["STOCK"].MIS_EN_LIGNE: (HEADERS["STOCK"].MIS_EN_LIGNE_ALT,),
-    HEADERS["STOCK"].DATE_MISE_EN_LIGNE: (HEADERS["STOCK"].DATE_MISE_EN_LIGNE_ALT,),
-    HEADERS["STOCK"].PUBLIE: (HEADERS["STOCK"].PUBLIE_ALT,),
-    HEADERS["STOCK"].DATE_PUBLICATION: (HEADERS["STOCK"].DATE_PUBLICATION_ALT,),
-    HEADERS["STOCK"].VENDU: (HEADERS["STOCK"].VENDU_ALT,),
-    HEADERS["STOCK"].DATE_VENTE: (HEADERS["STOCK"].DATE_VENTE_ALT,),
-    HEADERS["STOCK"].VALIDER_SAISIE: (HEADERS["STOCK"].VALIDER_SAISIE_ALT,),
-}
+_STOCK_ALIAS_PAIRS: Sequence[tuple[str, Sequence[str]]] = (
+    (HEADERS["STOCK"].LIBELLE, (HEADERS["STOCK"].LIBELLE_ALT,)),
+    (HEADERS["STOCK"].ARTICLE, (HEADERS["STOCK"].ARTICLE_ALT,)),
+    (HEADERS["STOCK"].TAILLE_COLIS, (HEADERS["STOCK"].TAILLE_COLIS_ALT,)),
+    (HEADERS["STOCK"].LOT, (HEADERS["STOCK"].LOT_ALT,)),
+    (HEADERS["STOCK"].MIS_EN_LIGNE, (HEADERS["STOCK"].MIS_EN_LIGNE_ALT,)),
+    (HEADERS["STOCK"].DATE_MISE_EN_LIGNE, (HEADERS["STOCK"].DATE_MISE_EN_LIGNE_ALT,)),
+    (HEADERS["STOCK"].PUBLIE, (HEADERS["STOCK"].PUBLIE_ALT,)),
+    (HEADERS["STOCK"].DATE_PUBLICATION, (HEADERS["STOCK"].DATE_PUBLICATION_ALT,)),
+    (
+        HEADERS["STOCK"].VENDU,
+        (HEADERS["STOCK"].VENDU_ALT, HEADERS["STOCK"].DATE_VENTE_ALT),
+    ),
+    (
+        HEADERS["STOCK"].DATE_VENTE,
+        (HEADERS["STOCK"].VENDU_ALT, HEADERS["STOCK"].DATE_VENTE_ALT),
+    ),
+    (HEADERS["STOCK"].VALIDER_SAISIE, (HEADERS["STOCK"].VALIDER_SAISIE_ALT,)),
+)
+
+
+def _build_alias_map(pairs: Sequence[tuple[str, Sequence[str]]]) -> Mapping[str, Sequence[str]]:
+    alias_map: dict[str, list[str]] = {}
+    for header, aliases in pairs:
+        existing = alias_map.setdefault(header, [])
+        for alias in aliases:
+            if alias not in existing:
+                existing.append(alias)
+    return {header: tuple(values) for header, values in alias_map.items()}
+
+
+_STOCK_ALIASES: Mapping[str, Sequence[str]] = _build_alias_map(_STOCK_ALIAS_PAIRS)
 
 
 class PurchaseDatabase:
@@ -330,6 +349,7 @@ class PurchaseDatabase:
             for column, header in _STOCK_COLUMN_TO_HEADER:
                 value = db_row[column]
                 row_dict[header] = value if value is not None else ""
+            _populate_stock_aliases(row_dict)
             table_rows.append(row_dict)
         return TableData(headers=STOCK_TABLE_HEADERS, rows=table_rows)
 
@@ -419,6 +439,16 @@ def table_to_stock_records(table: TableData | None) -> list[StockRecord]:
             payload[column] = _resolve_stock_value(row, header)
         records.append(StockRecord.from_mapping(payload))
     return records
+
+
+def _populate_stock_aliases(row: dict[str, object]) -> None:
+    """Ensure aliases mirror their primary columns for downstream consumers."""
+
+    for header, aliases in _STOCK_ALIASES.items():
+        value = row.get(header, "")
+        for alias in aliases:
+            if row.get(alias) in (None, ""):
+                row[alias] = value
 
 
 __all__ = [
