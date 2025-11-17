@@ -8,18 +8,11 @@ from pathlib import Path
 if __package__ is None or __package__ == "":  # pragma: no cover - convenience for direct execution
     sys.path.append(str(Path(__file__).resolve().parent.parent))
 
-from python_app.controllers.app_controller import DEFAULT_WORKBOOK, AppController
+from python_app.controllers.app_controller import AppController
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Vintage ERP UI")
-    parser.add_argument(
-        "workbook",
-        nargs="?",
-        default=DEFAULT_WORKBOOK,
-        type=Path,
-        help="Path to the Excel workbook (defaults to Prerelease 1.2.xlsx located at the repo root)",
-    )
     parser.add_argument(
         "--achats-db",
         type=Path,
@@ -34,7 +27,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
-    controller = AppController(Path(args.workbook), args.achats_db)
+    controller = AppController(args.achats_db)
     return controller.run()
 
 
