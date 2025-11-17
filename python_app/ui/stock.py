@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import date
+import time
 import math
 from pathlib import Path
 import tkinter as tk
@@ -682,6 +683,49 @@ class StockTableView(TableView):
         if hasattr(self, "detail_placeholder"):
             self.detail_placeholder.grid(row=0, column=0, sticky="nsew", padx=(4, 0), pady=(0, 4))
 
+    def _show_save_progress(self, duration_ms: int = 5000):
+        if hasattr(self, "progress_window") and self.progress_window is not None:
+            try:
+                self.progress_window.destroy()
+            except Exception:
+                pass
+        self.progress_window = ctk.CTkToplevel(self)
+        self.progress_window.title("Enregistrement")
+        self.progress_window.resizable(False, False)
+        self.progress_window.transient(self.winfo_toplevel())
+        self.progress_window.geometry("320x120")
+
+        container = ctk.CTkFrame(self.progress_window)
+        container.pack(fill="both", expand=True, padx=16, pady=16)
+
+        ctk.CTkLabel(container, text="Enregistrement des détails...").pack(anchor="w", pady=(0, 8))
+        progress = ctk.CTkProgressBar(container, mode="determinate")
+        progress.pack(fill="x")
+        progress.set(0)
+
+        start = time.perf_counter()
+
+        def close_window():
+            if self.progress_window is None:
+                return
+            try:
+                self.progress_window.destroy()
+            finally:
+                self.progress_window = None
+
+        def update_progress():
+            if self.progress_window is None:
+                return
+            elapsed = (time.perf_counter() - start) * 1000
+            progress.set(min(elapsed / duration_ms, 1))
+            if elapsed < duration_ms:
+                self.progress_window.after(50, update_progress)
+            else:
+                close_window()
+
+        self.progress_window.protocol("WM_DELETE_WINDOW", close_window)
+        self.progress_window.after(0, update_progress)
+
     def _save_detail(self, row_indices: Sequence[int], updates: Mapping[str, str]):
         if not row_indices:
             return
@@ -691,6 +735,7 @@ class StockTableView(TableView):
         )
         if not confirm:
             return
+        self._show_save_progress()
         for row_index in row_indices:
             self._apply_detail_updates(row_index, updates)
         self._notify_data_changed()
