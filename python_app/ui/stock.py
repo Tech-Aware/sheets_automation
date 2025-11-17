@@ -625,10 +625,15 @@ class StockTableView(TableView):
         if not valid_indices:
             return
         primary_index = valid_indices[0]
+        dialog: StockDetailDialog | None = None
+
+        def handle_save(updates, dlg: StockDetailDialog | None = None):
+            self._save_detail_with_loader(valid_indices, updates, dlg or dialog)
+
         dialog = StockDetailDialog(
             self,
             self.table.rows[primary_index],
-            on_save=lambda updates, dlg=dialog: self._save_detail_with_loader(valid_indices, updates, dlg),
+            on_save=handle_save,
         )
         dialog.focus()
 
