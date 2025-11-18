@@ -39,6 +39,10 @@ class StockCardList(ctk.CTkFrame):
     SELECTED_COLOR = "#bfdbfe"
     BORDER_COLOR = "#cbd5e1"
     BORDER_COLOR_SELECTED = "#60a5fa"
+    CARD_COLUMNS = 3
+    CARD_WIDTH = 260
+    CONTENT_PADDING = 8
+    CARD_TITLE_SIZE = 13
 
     def __init__(self, master, table, *, on_open_details, on_mark_sold, on_bulk_action, on_selection_change=None):
         super().__init__(master)
@@ -86,36 +90,50 @@ class StockCardList(ctk.CTkFrame):
         self._cards.clear()
         visible_indices = {idx for idx, _ in indexed_rows}
         self._selected_indices = {idx for idx in self._selected_indices if idx in visible_indices}
-        for idx, row in indexed_rows:
-            self._add_card(idx, row)
+        for column in range(self.CARD_COLUMNS):
+            self.container.grid_columnconfigure(column, weight=1, uniform="card")
+        for position, (idx, row) in enumerate(indexed_rows):
+            grid_row = position // self.CARD_COLUMNS
+            grid_col = position % self.CARD_COLUMNS
+            self._add_card(idx, row, grid_row, grid_col)
         self._update_selection_display()
 
     def get_selected_indices(self) -> list[int]:
         return sorted(self._selected_indices)
 
-    def _add_card(self, index: int, row: dict):
+    def _add_card(self, index: int, row: dict, grid_row: int, grid_col: int):
         sku = str(row.get(HEADERS["STOCK"].SKU, "")).strip()
         label = row.get(HEADERS["STOCK"].ARTICLE, "") or row.get(HEADERS["STOCK"].LIBELLE, "")
         status = "Vendu" if row.get(HEADERS["STOCK"].VENDU_ALT, "") else ""
         subtitle = f"{sku} – {label}" if label else sku
-        card = ctk.CTkFrame(self.container, height=76, fg_color=self.DEFAULT_COLOR, border_width=1)
-        card.grid_propagate(False)
-        card.pack(fill="x", padx=4, pady=2)
+        card = ctk.CTkFrame(
+            self.container,
+            width=self.CARD_WIDTH,
+            fg_color=self.DEFAULT_COLOR,
+            border_width=1,
+        )
+        card.grid(row=grid_row, column=grid_col, padx=6, pady=6, sticky="nsew")
         self._cards[index] = card
 
         text_frame = ctk.CTkFrame(card, fg_color="transparent")
-        text_frame.place(relx=0, rely=0, relwidth=1, relheight=1)
-        text_frame.grid_propagate(False)
+        text_frame.pack(fill="both", expand=True)
 
         content_frame = ctk.CTkFrame(text_frame, fg_color="transparent")
-        content_frame.pack(fill="both", expand=True, padx=10, pady=8)
+        content_frame.pack(
+            fill="both",
+            expand=True,
+            padx=self.CONTENT_PADDING,
+            pady=self.CONTENT_PADDING,
+        )
+
+        wrap_length = self.CARD_WIDTH - (self.CONTENT_PADDING * 2)
 
         title = ctk.CTkLabel(
             content_frame,
             text=subtitle or "(SKU manquant)",
             anchor="w",
-            font=ctk.CTkFont(weight="bold"),
-            wraplength=560,
+            font=ctk.CTkFont(size=self.CARD_TITLE_SIZE, weight="bold"),
+            wraplength=wrap_length,
             justify="left",
         )
         title.pack(fill="x")
@@ -126,7 +144,7 @@ class StockCardList(ctk.CTkFrame):
                 text=line,
                 anchor="w",
                 font=ctk.CTkFont(size=12),
-                wraplength=560,
+                wraplength=wrap_length,
                 justify="left",
             )
             lbl.pack(fill="x")
