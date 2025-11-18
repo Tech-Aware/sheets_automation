@@ -28,9 +28,6 @@ class TableData:
     headers: Sequence[str]
     rows: List[dict]
 
-    def head(self, count: int = 5) -> List[dict]:
-        return self.rows[:count]
-
 
 class WorkbookRepository:
     """Load the Excel workbook once and provide structured tables."""
