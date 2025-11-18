@@ -2,13 +2,13 @@
 from __future__ import annotations
 
 from dataclasses import MISSING, dataclass, fields
-import math
 from pathlib import Path
 import sqlite3
 from typing import Iterable, Mapping, Sequence
 
 from ..config import HEADERS
 from .workbook import TableData
+from ..utils.normalization import normalize_integer_value
 
 
 # ``slots=True`` is only supported on Python 3.10+.  The UI is often executed
@@ -373,34 +373,6 @@ class PurchaseDatabase:
             conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
 
 
-def _normalize_purchase_id(value) -> int | None:
-    """Convert any spreadsheet value to a clean integer ID."""
-
-    if value in (None, ""):
-        return None
-    if isinstance(value, bool):
-        return None
-    if isinstance(value, int):
-        return value
-    if isinstance(value, float):
-        if not math.isfinite(value) or not value.is_integer():
-            return None
-        return int(value)
-    text = str(value).strip()
-    if not text:
-        return None
-    try:
-        return int(text)
-    except (TypeError, ValueError):
-        try:
-            number = float(text)
-        except (TypeError, ValueError):
-            return None
-        if not number.is_integer():
-            return None
-        return int(number)
-
-
 def table_to_purchase_records(table: TableData) -> list[PurchaseRecord]:
     """Convert a :class:`TableData` Achats table to structured records."""
 
@@ -410,7 +382,7 @@ def table_to_purchase_records(table: TableData) -> list[PurchaseRecord]:
         for column, header in _COLUMN_TO_HEADER:
             value = row.get(header)
             if column == "id":
-                value = _normalize_purchase_id(value)
+                value = normalize_integer_value(value)
             payload[column] = value
         records.append(PurchaseRecord.from_mapping(payload))
     return records

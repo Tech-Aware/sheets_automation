@@ -10,6 +10,7 @@ from ..datasources.sqlite_purchases import PurchaseDatabase, table_to_purchase_r
 from ..datasources.workbook import TableData
 from ..services.workflow import WorkflowCoordinator
 from ..ui.app import VintageErpApp
+from ..utils.normalization import normalize_integer_value
 
 
 # Base SQLite par défaut situées dans python_app/data
@@ -141,31 +142,10 @@ def _ensure_purchase_ready_dates(table: TableData | None) -> None:
             row.setdefault(ready_header, "")
 
 
-def _normalize_integer_value(value) -> int | None:
-    if value in (None, "") or isinstance(value, bool):
-        return None
-    if isinstance(value, int):
-        return value
-    if isinstance(value, float):
-        if not value.is_integer():
-            return None
-        return int(value)
-    text = str(value).strip()
-    if not text:
-        return None
-    try:
-        number = float(text)
-    except ValueError:
-        return None
-    if not number.is_integer():
-        return None
-    return int(number)
-
-
 def _normalize_id_column(table: TableData | None, id_header: str) -> None:
     if table is None:
         return
     for row in table.rows:
-        normalized = _normalize_integer_value(row.get(id_header))
+        normalized = normalize_integer_value(row.get(id_header))
         if normalized is not None:
             row[id_header] = normalized
