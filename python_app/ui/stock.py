@@ -122,14 +122,16 @@ class StockCardList(ctk.CTkFrame):
         text_frame.grid_propagate(False)
 
         content_frame = ctk.CTkFrame(text_frame, fg_color="transparent")
-        content_frame.pack(fill="both", expand=True, padx=10, pady=8)
+        content_frame.pack(fill="both", expand=True, padx=8, pady=8)
+
+        wrap_length = self.CARD_WIDTH - 20
 
         title = ctk.CTkLabel(
             content_frame,
             text=subtitle or "(SKU manquant)",
             anchor="w",
             font=ctk.CTkFont(size=self.CARD_TITLE_SIZE, weight="bold"),
-            wraplength=self.CARD_WIDTH - 40,
+            wraplength=wrap_length,
             justify="left",
         )
         title.pack(fill="x")
@@ -140,7 +142,7 @@ class StockCardList(ctk.CTkFrame):
                 text=line,
                 anchor="w",
                 font=ctk.CTkFont(size=12),
-                wraplength=self.CARD_WIDTH - 40,
+                wraplength=wrap_length,
                 justify="left",
             )
             lbl.pack(fill="x")
