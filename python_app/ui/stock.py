@@ -42,6 +42,7 @@ class StockCardList(ctk.CTkFrame):
     CARD_COLUMNS = 3
     CARD_WIDTH = 260
     CARD_HEIGHT = 120
+    CARD_TITLE_SIZE = 13
 
     def __init__(self, master, table, *, on_open_details, on_mark_sold, on_bulk_action, on_selection_change=None):
         super().__init__(master)
@@ -127,7 +128,7 @@ class StockCardList(ctk.CTkFrame):
             content_frame,
             text=subtitle or "(SKU manquant)",
             anchor="w",
-            font=ctk.CTkFont(weight="bold"),
+            font=ctk.CTkFont(size=self.CARD_TITLE_SIZE, weight="bold"),
             wraplength=self.CARD_WIDTH - 40,
             justify="left",
         )
