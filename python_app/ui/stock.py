@@ -32,6 +32,39 @@ def _has_ready_date(value) -> bool:
     return True
 
 
+class VerticalScrollFrame(ctk.CTkFrame):
+    """Lightweight vertical scroll container using a Tk scrollbar to avoid CTk recursion."""
+
+    def __init__(self, master, *, height=None, fg_color="transparent"):
+        super().__init__(master, fg_color=fg_color)
+        self.canvas = tk.Canvas(self, highlightthickness=0, bg=self.cget("fg_color"))
+        if height is not None:
+            self.canvas.configure(height=height)
+        self.canvas.pack(side="left", fill="both", expand=True)
+
+        self.scrollbar = tk.Scrollbar(self, orient="vertical", command=self.canvas.yview)
+        self.scrollbar.pack(side="right", fill="y")
+        self.canvas.configure(yscrollcommand=self.scrollbar.set)
+
+        self.inner = ctk.CTkFrame(self.canvas, fg_color="transparent")
+        self.window = self.canvas.create_window((0, 0), window=self.inner, anchor="nw")
+
+        self.inner.bind("<Configure>", self._on_inner_configure)
+        self.canvas.bind("<Configure>", self._on_canvas_configure)
+
+        self.bind_all("<MouseWheel>", self._on_mousewheel)
+
+    def _on_inner_configure(self, _event):
+        self.canvas.configure(scrollregion=self.canvas.bbox("all"))
+
+    def _on_canvas_configure(self, event):
+        self.canvas.itemconfigure(self.window, width=event.width)
+
+    def _on_mousewheel(self, event):
+        if self.winfo_ismapped():
+            self.canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+
+
 class StockCardList(ctk.CTkFrame):
     """Compact list of stock items rendered as tappable rectangles."""
 
@@ -66,9 +99,10 @@ class StockCardList(ctk.CTkFrame):
             anchor="w",
             font=ctk.CTkFont(weight="bold"),
         ).pack(fill="x", padx=12, pady=(8, 4))
-        self.container = ctk.CTkScrollableFrame(self, height=240)
+        self.container = VerticalScrollFrame(self, height=240, fg_color="transparent")
         self.container.pack(fill="both", expand=True, padx=12, pady=(0, 12))
-        self.container.bind("<Configure>", self._on_container_resize)
+        self.container.canvas.bind("<Configure>", self._on_container_resize)
+        self.grid_host = self.container.inner
         self._card_content: dict[int, dict[str, ctk.CTkLabel | list[ctk.CTkLabel]]] = {}
         self._current_card_width = self._compute_card_width()
         self.refresh(self.table.rows)
@@ -92,14 +126,14 @@ class StockCardList(ctk.CTkFrame):
         return len(indexed_rows)
 
     def _render_cards(self, indexed_rows: Sequence[tuple[int, dict]]):
-        for child in self.container.winfo_children():
+        for child in self.grid_host.winfo_children():
             child.destroy()
         self._cards.clear()
         self._card_content.clear()
         visible_indices = {idx for idx, _ in indexed_rows}
         self._selected_indices = {idx for idx in self._selected_indices if idx in visible_indices}
         for column in range(self.CARD_COLUMNS):
-            self.container.grid_columnconfigure(column, weight=1, uniform="card")
+            self.grid_host.grid_columnconfigure(column, weight=1, uniform="card")
         for position, (idx, row) in enumerate(indexed_rows):
             grid_row = position // self.CARD_COLUMNS
             grid_col = position % self.CARD_COLUMNS
@@ -116,7 +150,7 @@ class StockCardList(ctk.CTkFrame):
         status = "Vendu" if row.get(HEADERS["STOCK"].VENDU_ALT, "") else ""
         subtitle = f"{sku} – {label}" if label else sku
         card = ctk.CTkFrame(
-            self.container,
+            self.grid_host,
             width=self._current_card_width,
             height=self.CARD_HEIGHT,
             fg_color=self.DEFAULT_COLOR,
@@ -171,7 +205,7 @@ class StockCardList(ctk.CTkFrame):
             self._bind_card_events(widget, index)
 
     def _compute_card_width(self) -> int:
-        available = max(self.container.winfo_width(), self.CARD_MIN_WIDTH * self.CARD_COLUMNS)
+        available = max(self.grid_host.winfo_width(), self.CARD_MIN_WIDTH * self.CARD_COLUMNS)
         column_width = max(self.CARD_MIN_WIDTH, min(self.CARD_MAX_WIDTH, (available // self.CARD_COLUMNS) - 16))
         return column_width
 
