@@ -41,7 +41,7 @@ class StockCardList(ctk.CTkFrame):
     BORDER_COLOR_SELECTED = "#60a5fa"
     CARD_COLUMNS = 3
     CARD_WIDTH = 260
-    CARD_HEIGHT = 120
+    CONTENT_PADDING = 8
     CARD_TITLE_SIZE = 13
 
     def __init__(self, master, table, *, on_open_details, on_mark_sold, on_bulk_action, on_selection_change=None):
@@ -109,22 +109,24 @@ class StockCardList(ctk.CTkFrame):
         card = ctk.CTkFrame(
             self.container,
             width=self.CARD_WIDTH,
-            height=self.CARD_HEIGHT,
             fg_color=self.DEFAULT_COLOR,
             border_width=1,
         )
-        card.grid_propagate(False)
         card.grid(row=grid_row, column=grid_col, padx=6, pady=6, sticky="nsew")
         self._cards[index] = card
 
         text_frame = ctk.CTkFrame(card, fg_color="transparent")
-        text_frame.place(relx=0, rely=0, relwidth=1, relheight=1)
-        text_frame.grid_propagate(False)
+        text_frame.pack(fill="both", expand=True)
 
         content_frame = ctk.CTkFrame(text_frame, fg_color="transparent")
-        content_frame.pack(fill="both", expand=True, padx=8, pady=8)
+        content_frame.pack(
+            fill="both",
+            expand=True,
+            padx=self.CONTENT_PADDING,
+            pady=self.CONTENT_PADDING,
+        )
 
-        wrap_length = self.CARD_WIDTH - 20
+        wrap_length = self.CARD_WIDTH - (self.CONTENT_PADDING * 2)
 
         title = ctk.CTkLabel(
             content_frame,
