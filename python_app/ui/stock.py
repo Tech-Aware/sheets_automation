@@ -37,7 +37,8 @@ class VerticalScrollFrame(ctk.CTkFrame):
 
     def __init__(self, master, *, height=None, fg_color="transparent"):
         super().__init__(master, fg_color=fg_color)
-        self.canvas = tk.Canvas(self, highlightthickness=0, bg=self.cget("fg_color"))
+        canvas_bg = self._resolve_canvas_color(fg_color)
+        self.canvas = tk.Canvas(self, highlightthickness=0, bg=canvas_bg)
         if height is not None:
             self.canvas.configure(height=height)
         self.canvas.pack(side="left", fill="both", expand=True)
@@ -51,8 +52,14 @@ class VerticalScrollFrame(ctk.CTkFrame):
 
         self.inner.bind("<Configure>", self._on_inner_configure)
         self.canvas.bind("<Configure>", self._on_canvas_configure)
+        self.canvas.bind("<MouseWheel>", self._on_mousewheel)
+        self.inner.bind("<MouseWheel>", self._on_mousewheel)
 
-        self.bind_all("<MouseWheel>", self._on_mousewheel)
+    def _resolve_canvas_color(self, fg_color: str | None):
+        if fg_color not in (None, "transparent"):
+            return ctk.ThemeManager.single_color(fg_color)
+        default_color = self._apply_appearance_mode(ctk.ThemeManager.theme["CTkFrame"]["fg_color"])
+        return default_color[0] if isinstance(default_color, tuple) else default_color
 
     def _on_inner_configure(self, _event):
         self.canvas.configure(scrollregion=self.canvas.bbox("all"))
