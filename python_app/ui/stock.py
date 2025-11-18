@@ -52,8 +52,8 @@ class VerticalScrollFrame(ctk.CTkFrame):
 
         self.inner.bind("<Configure>", self._on_inner_configure)
         self.canvas.bind("<Configure>", self._on_canvas_configure)
-        self.canvas.bind("<MouseWheel>", self._on_mousewheel)
-        self.inner.bind("<MouseWheel>", self._on_mousewheel)
+        self._bind_mousewheel(self.canvas)
+        self._bind_mousewheel(self.inner)
 
     def _resolve_canvas_color(self, fg_color: str | None):
         if fg_color not in (None, "transparent"):
@@ -61,15 +61,25 @@ class VerticalScrollFrame(ctk.CTkFrame):
         default_color = self._apply_appearance_mode(ctk.ThemeManager.theme["CTkFrame"]["fg_color"])
         return default_color[0] if isinstance(default_color, tuple) else default_color
 
+    def _bind_mousewheel(self, widget):
+        widget.bind("<MouseWheel>", self._on_mousewheel)
+        widget.bind("<Button-4>", lambda event: self._on_mousewheel(event, step=1))
+        widget.bind("<Button-5>", lambda event: self._on_mousewheel(event, step=-1))
+
     def _on_inner_configure(self, _event):
         self.canvas.configure(scrollregion=self.canvas.bbox("all"))
 
     def _on_canvas_configure(self, event):
         self.canvas.itemconfigure(self.window, width=event.width)
 
-    def _on_mousewheel(self, event):
-        if self.winfo_ismapped():
-            self.canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+    def _on_mousewheel(self, event, step: int | None = None):
+        if not self.winfo_ismapped():
+            return
+        if step is None:
+            if getattr(event, "delta", 0) == 0:
+                return
+            step = -1 if event.delta > 0 else 1
+        self.canvas.yview_scroll(step, "units")
 
 
 class StockCardList(ctk.CTkFrame):
