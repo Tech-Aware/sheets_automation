@@ -39,6 +39,14 @@ class StockCardList(ctk.CTkFrame):
     SELECTED_COLOR = "#bfdbfe"
     BORDER_COLOR = "#cbd5e1"
     BORDER_COLOR_SELECTED = "#60a5fa"
+    CARD_COLUMNS = 3
+    CARD_MIN_WIDTH = 200
+    CARD_MAX_WIDTH = 320
+    CARD_HEIGHT = 140
+    CONTENT_PADDING = 8
+    CARD_TITLE_SIZE = 13
+    TITLE_MIN_SIZE = 11
+    TEXT_AREA_HEIGHT = 100
 
     def __init__(self, master, table, *, on_open_details, on_mark_sold, on_bulk_action, on_selection_change=None):
         super().__init__(master)
@@ -60,6 +68,9 @@ class StockCardList(ctk.CTkFrame):
         ).pack(fill="x", padx=12, pady=(8, 4))
         self.container = ctk.CTkScrollableFrame(self, height=240)
         self.container.pack(fill="both", expand=True, padx=12, pady=(0, 12))
+        self.container.bind("<Configure>", self._on_container_resize)
+        self._card_content: dict[int, dict[str, ctk.CTkLabel | list[ctk.CTkLabel]]] = {}
+        self._current_card_width = self._compute_card_width()
         self.refresh(self.table.rows)
 
     def refresh(self, rows: Sequence[dict]):
@@ -84,38 +95,57 @@ class StockCardList(ctk.CTkFrame):
         for child in self.container.winfo_children():
             child.destroy()
         self._cards.clear()
+        self._card_content.clear()
         visible_indices = {idx for idx, _ in indexed_rows}
         self._selected_indices = {idx for idx in self._selected_indices if idx in visible_indices}
-        for idx, row in indexed_rows:
-            self._add_card(idx, row)
+        for column in range(self.CARD_COLUMNS):
+            self.container.grid_columnconfigure(column, weight=1, uniform="card")
+        for position, (idx, row) in enumerate(indexed_rows):
+            grid_row = position // self.CARD_COLUMNS
+            grid_col = position % self.CARD_COLUMNS
+            self._add_card(idx, row, grid_row, grid_col)
         self._update_selection_display()
+        self._apply_responsive_layout()
 
     def get_selected_indices(self) -> list[int]:
         return sorted(self._selected_indices)
 
-    def _add_card(self, index: int, row: dict):
+    def _add_card(self, index: int, row: dict, grid_row: int, grid_col: int):
         sku = str(row.get(HEADERS["STOCK"].SKU, "")).strip()
         label = row.get(HEADERS["STOCK"].ARTICLE, "") or row.get(HEADERS["STOCK"].LIBELLE, "")
         status = "Vendu" if row.get(HEADERS["STOCK"].VENDU_ALT, "") else ""
         subtitle = f"{sku} – {label}" if label else sku
-        card = ctk.CTkFrame(self.container, height=76, fg_color=self.DEFAULT_COLOR, border_width=1)
+        card = ctk.CTkFrame(
+            self.container,
+            width=self._current_card_width,
+            height=self.CARD_HEIGHT,
+            fg_color=self.DEFAULT_COLOR,
+            border_width=1,
+        )
+        card.grid(row=grid_row, column=grid_col, padx=6, pady=6, sticky="nsew")
         card.grid_propagate(False)
-        card.pack(fill="x", padx=4, pady=2)
         self._cards[index] = card
 
-        text_frame = ctk.CTkFrame(card, fg_color="transparent")
-        text_frame.place(relx=0, rely=0, relwidth=1, relheight=1)
-        text_frame.grid_propagate(False)
+        text_frame = ctk.CTkScrollableFrame(card, fg_color="transparent", height=self.TEXT_AREA_HEIGHT)
+        text_frame.pack(fill="both", expand=False)
+        text_frame.pack_propagate(False)
 
         content_frame = ctk.CTkFrame(text_frame, fg_color="transparent")
-        content_frame.pack(fill="both", expand=True, padx=10, pady=8)
+        content_frame.pack(
+            fill="both",
+            expand=True,
+            padx=self.CONTENT_PADDING,
+            pady=self.CONTENT_PADDING,
+        )
+
+        wrap_length = self._current_card_width - (self.CONTENT_PADDING * 2)
 
         title = ctk.CTkLabel(
             content_frame,
             text=subtitle or "(SKU manquant)",
             anchor="w",
-            font=ctk.CTkFont(weight="bold"),
-            wraplength=560,
+            font=ctk.CTkFont(size=self.CARD_TITLE_SIZE, weight="bold"),
+            wraplength=wrap_length,
             justify="left",
         )
         title.pack(fill="x")
@@ -126,7 +156,7 @@ class StockCardList(ctk.CTkFrame):
                 text=line,
                 anchor="w",
                 font=ctk.CTkFont(size=12),
-                wraplength=560,
+                wraplength=wrap_length,
                 justify="left",
             )
             lbl.pack(fill="x")
@@ -135,8 +165,43 @@ class StockCardList(ctk.CTkFrame):
         if status:
             ctk.CTkLabel(card, text=status, text_color="#0f5132").pack(side="right", padx=8)
 
+        self._card_content[index] = {"title": title, "metadata": metadata_labels}
+
         for widget in (card, text_frame, content_frame, title, *metadata_labels):
             self._bind_card_events(widget, index)
+
+    def _compute_card_width(self) -> int:
+        available = max(self.container.winfo_width(), self.CARD_MIN_WIDTH * self.CARD_COLUMNS)
+        column_width = max(self.CARD_MIN_WIDTH, min(self.CARD_MAX_WIDTH, (available // self.CARD_COLUMNS) - 16))
+        return column_width
+
+    def _apply_responsive_layout(self):
+        new_width = self._compute_card_width()
+        if new_width == self._current_card_width:
+            return
+        self._current_card_width = new_width
+        wrap_length = new_width - (self.CONTENT_PADDING * 2)
+        for idx, card in self._cards.items():
+            card.configure(width=new_width)
+            content = self._card_content.get(idx, {})
+            title: ctk.CTkLabel | None = content.get("title") if content else None
+            if title is not None:
+                title.configure(wraplength=wrap_length, font=self._scaled_title_font(title.cget("text"), wrap_length))
+            for lbl in content.get("metadata", []) or []:
+                lbl.configure(wraplength=wrap_length)
+
+    def _scaled_title_font(self, text: str, wrap_length: int) -> ctk.CTkFont:
+        font_size = self.CARD_TITLE_SIZE
+        font = ctk.CTkFont(size=font_size, weight="bold")
+        sample_width = max(font.measure(text), 1)
+        while sample_width > wrap_length * 3 and font_size > self.TITLE_MIN_SIZE:
+            font_size -= 1
+            font = ctk.CTkFont(size=font_size, weight="bold")
+            sample_width = font.measure(text)
+        return font
+
+    def _on_container_resize(self, _event):
+        self._apply_responsive_layout()
 
     def _bind_card_events(self, widget, index: int):
         widget.bind("<Button-1>", lambda _e, idx=index: self._toggle_selection(idx))
