@@ -126,7 +126,7 @@ class StockCardList(ctk.CTkFrame):
         card.grid_propagate(False)
         self._cards[index] = card
 
-        text_frame = ctk.CTkScrollableFrame(card, fg_color="transparent", height=self.TEXT_AREA_HEIGHT)
+        text_frame = ctk.CTkFrame(card, fg_color="transparent", height=self.TEXT_AREA_HEIGHT)
         text_frame.pack(fill="both", expand=False)
         text_frame.pack_propagate(False)
 
