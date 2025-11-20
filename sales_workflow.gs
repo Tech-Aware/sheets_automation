@@ -372,7 +372,7 @@ function exportValidatedSales_() {
       || checkboxValue === 'TRUE'
       || (typeof checkboxValue === 'string' && checkboxValue.trim().toLowerCase() === 'true');
     const alreadyExported = C_STAMPV && stampValues[i] && stampValues[i][0];
-    if (!isChecked || alreadyExported) {
+    if (alreadyExported) {
       continue;
     }
 
@@ -411,9 +411,11 @@ function exportValidatedSales_() {
     }
 
     const perItemFee = computePerItemShippingFee_(fraisColis, lotValue);
+    const willCheckBox = !isChecked;
     rowsToExport.push({
       rowNumber,
-      shipping: { size: tailleValue, lot: lotValue, fee: perItemFee }
+      shipping: { size: tailleValue, lot: lotValue, fee: perItemFee },
+      markCheckbox: willCheckBox
     });
   }
 
@@ -421,6 +423,10 @@ function exportValidatedSales_() {
 
   const exportedRows = [];
   rowsToExport.forEach(entry => {
+    if (entry.markCheckbox) {
+      stock.getRange(entry.rowNumber, C_VALIDE).setValue(true);
+    }
+
     const success = exportVente_(
       null,
       entry.rowNumber,
