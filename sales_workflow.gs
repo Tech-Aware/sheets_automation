@@ -340,6 +340,8 @@ function exportValidatedSales_() {
     }
   }
 
+  const columnHasCheckboxValidation = allValidations.some(row => isCheckboxValidation_(row && row[0]));
+
   const dataRowCount = Math.max(lastRow - 1, lastValidationRow);
   if (dataRowCount < 1) return;
 
@@ -359,11 +361,16 @@ function exportValidatedSales_() {
   for (let i = 0; i < dataValues.length; i++) {
     const rowNumber = i + 2;
     const validation = validations[i] && validations[i][0];
-    if (!isCheckboxValidation_(validation)) {
+    const hasCheckboxValidation = isCheckboxValidation_(validation)
+      || (!validation && columnHasCheckboxValidation);
+    if (!hasCheckboxValidation) {
       continue;
     }
 
-    const isChecked = dataValues[i][C_VALIDE - 1] === true || dataValues[i][C_VALIDE - 1] === 'TRUE';
+    const checkboxValue = dataValues[i][C_VALIDE - 1];
+    const isChecked = checkboxValue === true
+      || checkboxValue === 'TRUE'
+      || (typeof checkboxValue === 'string' && checkboxValue.trim().toLowerCase() === 'true');
     const alreadyExported = C_STAMPV && stampValues[i] && stampValues[i][0];
     if (!isChecked || alreadyExported) {
       continue;
