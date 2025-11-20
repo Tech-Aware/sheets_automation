@@ -1208,10 +1208,6 @@ function validateAllSales() {
       ventes.getRange(2, COL_DATE_VENTE, lastV - 1, 1).setNumberFormat('dd/MM/yyyy');
     }
 
-    readySales.forEach(entry => {
-      applyShippingFeeToAchats_(ss, entry.idValue, entry.perItemFee);
-    });
-
     readySales
       .map(entry => entry.rowIndex)
       .sort((a, b) => b - a)
