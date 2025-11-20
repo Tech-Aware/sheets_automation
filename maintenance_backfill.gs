@@ -1065,6 +1065,8 @@ function validateAllSales() {
     || ventesWhere(h => h.includes('prix') && h.includes('vente'));
   const COL_FRAIS_VENTE = ventesExact(HEADERS.VENTES.FRAIS_COLISSAGE)
     || ventesWhere(h => h.includes('frais') && h.includes('colis'));
+  const COL_COMPTA      = ventesExact(HEADERS.VENTES.COMPTABILISE)
+    || ventesWhere(h => h.toLowerCase().includes('compt'));
   const COL_TAILLE_VENTE = ventesExact(HEADERS.VENTES.TAILLE_COLIS)
     || ventesExact(HEADERS.VENTES.TAILLE)
     || ventesWhere(isShippingSizeHeader_);
@@ -1190,7 +1192,11 @@ function validateAllSales() {
       rowIndex,
       ventesRow: newRow,
       idValue,
-      perItemFee
+      perItemFee,
+      label,
+      sku,
+      prix,
+      dateVente
     });
   }
 
@@ -1200,6 +1206,31 @@ function validateAllSales() {
     const startV = Math.max(2, ventes.getLastRow() + 1);
     const rowsPayload = readySales.map(entry => entry.ventesRow);
     ventes.getRange(startV, 1, rowsPayload.length, widthVentes).setValues(rowsPayload);
+
+    readySales.forEach((entry, index) => {
+      const sale = {
+        id: entry.idValue,
+        sku: entry.sku,
+        libelle: entry.label,
+        dateVente: entry.dateVente,
+        prixVente: Number.isFinite(entry.prix) ? entry.prix : '',
+        nbPieces: 1
+      };
+
+      const achatsRecord = getAchatsRecordByIdOrSku_(ss, sale.id, sale.sku);
+      if (achatsRecord) {
+        if (Number.isFinite(achatsRecord.prixAchat)) {
+          sale.prixAchat = achatsRecord.prixAchat;
+        }
+        sale.dateReception = achatsRecord.dateReception;
+      }
+
+      copySaleToMonthlySheet_(ss, sale, { updateExisting: true });
+
+      if (COL_COMPTA) {
+        ventes.getRange(startV + index, COL_COMPTA).setValue(true);
+      }
+    });
 
     const lastV = ventes.getLastRow();
     if (lastV > 2 && COL_DATE_VENTE) {
