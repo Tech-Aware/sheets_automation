@@ -447,10 +447,6 @@ function exportVente_(e, row, C_ID, C_LABEL, C_SKU, C_PRIX, C_DVENTE, C_STAMPV, 
       ventes.getRange(2, COL_DATE_VENTE, lastV - 1, 1).setNumberFormat('dd/MM/yyyy');
     }
 
-  if (shipping && Number.isFinite(shipping.fee)) {
-    applyShippingFeeToAchats_(ss, idVal, shipping.fee);
-  }
-
   if (C_STAMPV) sh.getRange(row, C_STAMPV).setValue(new Date());
 
   sh.deleteRow(row);
