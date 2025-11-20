@@ -186,7 +186,8 @@ function registerStockActionsMenu_(ui) {
     .addItem('Valider toutes les saisies prêtes', 'validateAllSales')
     .addItem('Cocher "Mis en ligne" (sélection)', 'bulkSetStockStatusMisEnLigne')
     .addItem('Cocher "Publié" (sélection)', 'bulkSetStockStatusPublie')
-    .addItem('Cocher "Vendu" (sélection)', 'bulkSetStockStatusVendu');
+    .addItem('Cocher "Vendu" (sélection)', 'bulkSetStockStatusVendu')
+    .addItem('Cocher "Valider" (sélection)', 'bulkValidateStockSelection');
 
   stockMenu.addToUi();
 }

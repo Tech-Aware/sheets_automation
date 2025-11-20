@@ -451,6 +451,221 @@ function exportValidatedSales_() {
   });
 }
 
+function bulkValidateStockSelection() {
+  const ss = SpreadsheetApp.getActive();
+  const stock = ss.getActiveSheet();
+  if (!stock || stock.getName() !== 'Stock') {
+    ss.toast('Ouvre la feuille "Stock" et sélectionne les cases à valider.', 'Stock', 6);
+    return;
+  }
+
+  const lastRow = stock.getLastRow();
+  if (lastRow < 2) {
+    ss.toast('Aucune ligne à traiter dans "Stock".', 'Stock', 5);
+    return;
+  }
+
+  const headers = stock.getRange(1, 1, 1, stock.getLastColumn()).getValues()[0];
+  const resolver = makeHeaderResolver_(headers);
+  const colExact = resolver.colExact.bind(resolver);
+  const colWhere = resolver.colWhere.bind(resolver);
+
+  const C_ID = colExact(HEADERS.STOCK.ID);
+  const C_LABEL = colExact(HEADERS.STOCK.LIBELLE)
+    || colExact(HEADERS.STOCK.LIBELLE_ALT)
+    || colExact(HEADERS.STOCK.ARTICLE)
+    || colExact(HEADERS.STOCK.ARTICLE_ALT)
+    || colWhere(h => h.includes('libell'))
+    || colWhere(h => h.includes('article'))
+    || 2;
+  const C_SKU = colExact(HEADERS.STOCK.SKU)
+    || colExact(HEADERS.STOCK.REFERENCE)
+    || colWhere(h => h.includes('sku'));
+  const C_PRIX = colExact(HEADERS.STOCK.PRIX_VENTE)
+    || colWhere(h => h.includes('prix') && h.includes('vente'));
+  const C_TAILLE = colExact(HEADERS.STOCK.TAILLE_COLIS)
+    || colExact(HEADERS.STOCK.TAILLE_COLIS_ALT)
+    || colExact(HEADERS.STOCK.TAILLE)
+    || colWhere(isShippingSizeHeader_);
+  const tailleHeaderLabel = getHeaderLabel_(resolver, C_TAILLE, HEADERS.STOCK.TAILLE);
+  const C_LOT = colExact(HEADERS.STOCK.LOT) || colWhere(h => h.includes('lot'));
+  const combinedVendu = resolveCombinedVenduColumn_(resolver);
+  const legacyVendu = combinedVendu ? { checkboxCol: 0, dateCol: 0 } : resolveLegacyVenduColumns_(resolver);
+  const C_VENDU = combinedVendu || legacyVendu.checkboxCol || colExact(HEADERS.STOCK.VENDU_ALT);
+  const C_DVENTE = combinedVendu || legacyVendu.dateCol || colExact(HEADERS.STOCK.DATE_VENTE_ALT) || 10;
+  const C_STAMPV = colExact(HEADERS.STOCK.VENTE_EXPORTEE_LE) || colWhere(h => h.includes('exporte'));
+  const C_VALIDE = colExact(HEADERS.STOCK.VALIDER_SAISIE)
+    || colExact(HEADERS.STOCK.VALIDER_SAISIE_ALT)
+    || colWhere(h => h.includes('valider'));
+  const C_DMS = colExact(HEADERS.STOCK.DATE_MISE_EN_STOCK) || colWhere(h => h.includes('mise en stock'));
+  const combinedMis = resolveCombinedMisEnLigneColumn_(resolver);
+  const legacyMis = combinedMis ? { checkboxCol: 0, dateCol: 0 } : resolveLegacyMisEnLigneColumn_(resolver);
+  const C_DMIS = combinedMis || legacyMis.dateCol;
+  const combinedPub = resolveCombinedPublicationColumn_(resolver);
+  const legacyPub = combinedPub ? { checkboxCol: 0, dateCol: 0 } : resolveLegacyPublicationColumns_(resolver);
+  const C_DPUB = combinedPub || legacyPub.dateCol;
+
+  if (!C_VALIDE) {
+    ss.toast('Colonne "VALIDER" introuvable dans Stock.', 'Stock', 6);
+    return;
+  }
+  if (!C_VENDU || !C_DVENTE || !C_PRIX) {
+    ss.toast('Vérifie les en-têtes : VENDU, DATE DE VENTE et PRIX DE VENTE sont requis.', 'Stock', 6);
+    return;
+  }
+  if (!C_TAILLE) {
+    ss.toast('Colonne taille introuvable ("TAILLE" / "TAILLE DU COLIS").', 'Stock', 6);
+    return;
+  }
+
+  const selection = ss.getSelection();
+  const rangeList = selection ? selection.getActiveRangeList() : null;
+  let ranges = [];
+  if (rangeList) {
+    ranges = rangeList.getRanges();
+  } else if (selection && selection.getActiveRange()) {
+    ranges = [selection.getActiveRange()];
+  }
+
+  if (!ranges.length) {
+    ss.toast('Sélectionne les cases "VALIDER" à cocher.', 'Stock', 5);
+    return;
+  }
+
+  for (let i = 0; i < ranges.length; i++) {
+    const range = ranges[i];
+    if (!range) continue;
+    if (range.getNumColumns() !== 1 || range.getColumn() !== C_VALIDE) {
+      ss.toast('La sélection doit être limitée à la colonne "VALIDER".', 'Stock', 6);
+      return;
+    }
+  }
+
+  const validationsRange = stock.getRange(2, C_VALIDE, Math.max(1, stock.getMaxRows() - 1), 1);
+  const columnValidations = validationsRange.getDataValidations();
+  const columnHasCheckboxValidation = columnValidations.some(row => isCheckboxValidation_(row && row[0]));
+
+  const baseToDmsMap = buildBaseToStockDate_(ss);
+  const shippingLookup = buildShippingFeeLookup_(ss);
+  if (!shippingLookup) {
+    ss.toast('Impossible de calculer les frais de colissage : configure la feuille "Frais".', 'Stock', 6);
+    return;
+  }
+
+  const lastColumn = stock.getLastColumn();
+  const rowsToExport = [];
+
+  ranges.forEach(range => {
+    if (!range) return;
+    const numRows = range.getNumRows();
+    const startRow = range.getRow();
+
+    const blockValues = stock.getRange(startRow, 1, numRows, lastColumn).getValues();
+
+    for (let offset = 0; offset < numRows; offset++) {
+      const rowNumber = startRow + offset;
+      if (rowNumber <= 1) continue;
+
+      const validationIndex = rowNumber - 2;
+      const validation = validationIndex >= 0 && validationIndex < columnValidations.length
+        ? columnValidations[validationIndex][0]
+        : null;
+      const hasCheckboxValidation = isCheckboxValidation_(validation) || (!validation && columnHasCheckboxValidation);
+      if (!hasCheckboxValidation) {
+        continue;
+      }
+
+      const rowValues = blockValues[offset];
+      const alreadyExported = C_STAMPV && rowValues[C_STAMPV - 1];
+      if (alreadyExported) {
+        continue;
+      }
+
+      const vendu = C_VENDU ? isStatusActiveValue_(rowValues[C_VENDU - 1]) : false;
+      if (!vendu) {
+        continue;
+      }
+
+      const chronoCheck = enforceChronologicalDates_(stock, rowNumber, {
+        dms: C_DMS,
+        dmis: C_DMIS,
+        dpub: C_DPUB,
+        dvente: C_DVENTE
+      }, { requireAllDates: true });
+      if (!chronoCheck.ok) {
+        ss.toast(chronoCheck.message || 'Ordre chronologique des dates invalide.', 'Stock', 6);
+        continue;
+      }
+
+      if (!ensureValidPriceOrWarn_(stock, rowNumber, C_PRIX)) {
+        continue;
+      }
+
+      const tailleValue = String(rowValues[C_TAILLE - 1] || '').trim();
+      if (!tailleValue) {
+        ss.toast(`Indique la colonne ${tailleHeaderLabel} avant de valider.`, 'Stock', 6);
+        continue;
+      }
+
+      const lotValue = C_LOT ? String(rowValues[C_LOT - 1] || '').trim() : '';
+      const fraisColis = shippingLookup(tailleValue, lotValue);
+      if (!Number.isFinite(fraisColis)) {
+        const lotMessage = lotValue ? ` / lot ${lotValue}` : '';
+        ss.toast(`Frais de colissage introuvables pour la taille ${tailleValue}${lotMessage}.`, 'Stock', 6);
+        continue;
+      }
+
+      const perItemFee = computePerItemShippingFee_(fraisColis, lotValue);
+      const checkboxValue = rowValues[C_VALIDE - 1];
+      const willCheck = checkboxValue !== true && checkboxValue !== 'TRUE'
+        && !(typeof checkboxValue === 'string' && checkboxValue.trim().toLowerCase() === 'true');
+
+      rowsToExport.push({
+        rowNumber,
+        shipping: { size: tailleValue, lot: lotValue, fee: perItemFee },
+        markCheckbox: willCheck
+      });
+    }
+  });
+
+  if (!rowsToExport.length) {
+    ss.toast('Aucune ligne prête dans la sélection.', 'Stock', 5);
+    return;
+  }
+
+  const exportedRows = [];
+  rowsToExport.forEach(entry => {
+    if (entry.markCheckbox) {
+      stock.getRange(entry.rowNumber, C_VALIDE).setValue(true);
+    }
+
+    const success = exportVente_(
+      null,
+      entry.rowNumber,
+      C_ID,
+      C_LABEL,
+      C_SKU,
+      C_PRIX,
+      C_DVENTE,
+      C_STAMPV,
+      baseToDmsMap,
+      { shipping: entry.shipping, skipDelete: true }
+    );
+
+    if (success) {
+      exportedRows.push(entry.rowNumber);
+    }
+  });
+
+  if (!exportedRows.length) {
+    ss.toast('Aucune vente exportée depuis la sélection.', 'Stock', 5);
+    return;
+  }
+
+  exportedRows.sort((a, b) => b - a).forEach(rowNumber => stock.deleteRow(rowNumber));
+  ss.toast(`${exportedRows.length} ligne(s) ont été validées et déplacées.`, 'Stock', 5);
+}
+
 function exportVente_(e, row, C_ID, C_LABEL, C_SKU, C_PRIX, C_DVENTE, C_STAMPV, baseToDmsMap, options) {
   const ss = SpreadsheetApp.getActive();
   const sh = ss.getSheetByName("Stock");
