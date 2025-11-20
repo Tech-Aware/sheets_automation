@@ -273,7 +273,7 @@ function exportValidatedSales_() {
 
   const lastRow = stock.getLastRow();
   const lastColumn = stock.getLastColumn();
-  if (lastRow < 2 || lastColumn < 1) return;
+  if (lastColumn < 1) return;
 
   const headers = stock.getRange(1, 1, 1, lastColumn).getValues()[0];
   const resolver = makeHeaderResolver_(headers);
@@ -326,10 +326,27 @@ function exportValidatedSales_() {
     return;
   }
 
-  const dataRange = stock.getRange(2, 1, lastRow - 1, lastColumn);
+  const validationsRange = stock.getRange(2, C_VALIDE, Math.max(1, stock.getMaxRows() - 1), 1);
+  const allValidations = validationsRange.getDataValidations();
+  const validationValues = validationsRange.getValues();
+
+  let lastValidationRow = 0;
+  for (let i = allValidations.length - 1; i >= 0; i--) {
+    const validation = allValidations[i] && allValidations[i][0];
+    const val = validationValues[i] && validationValues[i][0];
+    if (isCheckboxValidation_(validation) || val === true || val === 'TRUE') {
+      lastValidationRow = i + 1; // +1 because rows start at index 1 below header
+      break;
+    }
+  }
+
+  const dataRowCount = Math.max(lastRow - 1, lastValidationRow);
+  if (dataRowCount < 1) return;
+
+  const dataRange = stock.getRange(2, 1, dataRowCount, lastColumn);
   const dataValues = dataRange.getValues();
-  const validations = stock.getRange(2, C_VALIDE, lastRow - 1, 1).getDataValidations();
-  const stampValues = C_STAMPV ? stock.getRange(2, C_STAMPV, lastRow - 1, 1).getValues() : [];
+  const validations = allValidations.slice(0, dataRowCount);
+  const stampValues = C_STAMPV ? stock.getRange(2, C_STAMPV, dataRowCount, 1).getValues() : [];
 
   const baseToDmsMap = buildBaseToStockDate_(ss);
   const shippingLookup = buildShippingFeeLookup_(ss);
