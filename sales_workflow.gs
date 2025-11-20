@@ -263,13 +263,172 @@ function restoreSaleToStock_(ss, sale) {
   return { success: true, row: targetRow };
 }
 
+function exportValidatedSales_() {
+  const ss = SpreadsheetApp.getActive();
+  const stock = ss.getSheetByName('Stock');
+  if (!stock) {
+    ss.toast('Feuille "Stock" introuvable.', 'Stock', 6);
+    return;
+  }
+
+  const lastRow = stock.getLastRow();
+  const lastColumn = stock.getLastColumn();
+  if (lastRow < 2 || lastColumn < 1) return;
+
+  const headers = stock.getRange(1, 1, 1, lastColumn).getValues()[0];
+  const resolver = makeHeaderResolver_(headers);
+  const colExact = resolver.colExact.bind(resolver);
+  const colWhere = resolver.colWhere.bind(resolver);
+
+  const C_ID = colExact(HEADERS.STOCK.ID);
+  const C_LABEL = colExact(HEADERS.STOCK.LIBELLE)
+    || colExact(HEADERS.STOCK.LIBELLE_ALT)
+    || colExact(HEADERS.STOCK.ARTICLE)
+    || colExact(HEADERS.STOCK.ARTICLE_ALT)
+    || colWhere(h => h.includes('libell'))
+    || colWhere(h => h.includes('article'))
+    || 2;
+  const C_SKU = colExact(HEADERS.STOCK.SKU) || colExact(HEADERS.STOCK.REFERENCE);
+  const C_PRIX = colExact(HEADERS.STOCK.PRIX_VENTE) || colWhere(h => h.includes('prix') && h.includes('vente'));
+  const C_TAILLE = colExact(HEADERS.STOCK.TAILLE_COLIS)
+    || colExact(HEADERS.STOCK.TAILLE_COLIS_ALT)
+    || colExact(HEADERS.STOCK.TAILLE)
+    || colWhere(isShippingSizeHeader_);
+  const tailleHeaderLabel = getHeaderLabel_(resolver, C_TAILLE, HEADERS.STOCK.TAILLE);
+  const C_LOT = colExact(HEADERS.STOCK.LOT) || colWhere(h => h.includes('lot'));
+  const C_DMS = colExact(HEADERS.STOCK.DATE_MISE_EN_STOCK);
+  const combinedMisCol = resolveCombinedMisEnLigneColumn_(resolver);
+  const legacyMisCols = combinedMisCol ? { checkboxCol: 0, dateCol: 0 } : resolveLegacyMisEnLigneColumn_(resolver);
+  const useCombinedMisCol = !!combinedMisCol;
+
+  const combinedPubCol = resolveCombinedPublicationColumn_(resolver);
+  const legacyPubCols = combinedPubCol ? { checkboxCol: 0, dateCol: 0 } : resolveLegacyPublicationColumns_(resolver);
+  const useCombinedPubCol = !!combinedPubCol;
+
+  const combinedVenduCol = resolveCombinedVenduColumn_(resolver);
+  const legacyVenduCols = combinedVenduCol ? { checkboxCol: 0, dateCol: 0 } : resolveLegacyVenduColumns_(resolver);
+  const useCombinedVenduCol = !!combinedVenduCol;
+
+  const C_MIS = useCombinedMisCol ? combinedMisCol : legacyMisCols.checkboxCol;
+  const C_DMIS = useCombinedMisCol ? combinedMisCol : legacyMisCols.dateCol;
+  const C_PUB = useCombinedPubCol ? combinedPubCol : legacyPubCols.checkboxCol;
+  const C_DPUB = useCombinedPubCol ? combinedPubCol : legacyPubCols.dateCol;
+  const C_VENDU = useCombinedVenduCol ? combinedVenduCol : legacyVenduCols.checkboxCol;
+  let C_DVENTE = useCombinedVenduCol ? combinedVenduCol : legacyVenduCols.dateCol;
+  if (!C_DVENTE) C_DVENTE = colExact(HEADERS.STOCK.DATE_VENTE_ALT) || 10;
+  const C_STAMPV = colExact(HEADERS.STOCK.VENTE_EXPORTEE_LE);
+  const C_VALIDE = colExact(HEADERS.STOCK.VALIDER_SAISIE)
+    || colExact(HEADERS.STOCK.VALIDER_SAISIE_ALT)
+    || colWhere(h => h.includes('valider'));
+
+  if (!C_VALIDE) {
+    ss.toast('Colonne "VALIDER" introuvable dans Stock.', 'Stock', 6);
+    return;
+  }
+
+  const dataRange = stock.getRange(2, 1, lastRow - 1, lastColumn);
+  const dataValues = dataRange.getValues();
+  const validations = stock.getRange(2, C_VALIDE, lastRow - 1, 1).getDataValidations();
+  const stampValues = C_STAMPV ? stock.getRange(2, C_STAMPV, lastRow - 1, 1).getValues() : [];
+
+  const baseToDmsMap = buildBaseToStockDate_(ss);
+  const shippingLookup = buildShippingFeeLookup_(ss);
+  if (!shippingLookup) {
+    ss.toast('Impossible de calculer les frais de colissage : configure la feuille "Frais".', 'Stock', 6);
+    return;
+  }
+
+  const rowsToExport = [];
+  for (let i = 0; i < dataValues.length; i++) {
+    const rowNumber = i + 2;
+    const validation = validations[i] && validations[i][0];
+    if (!isCheckboxValidation_(validation)) {
+      continue;
+    }
+
+    const isChecked = dataValues[i][C_VALIDE - 1] === true || dataValues[i][C_VALIDE - 1] === 'TRUE';
+    const alreadyExported = C_STAMPV && stampValues[i] && stampValues[i][0];
+    if (!isChecked || alreadyExported) {
+      continue;
+    }
+
+    const chronoCheck = enforceChronologicalDates_(stock, rowNumber, {
+      dms: C_DMS,
+      dmis: C_DMIS,
+      dpub: C_DPUB,
+      dvente: C_DVENTE
+    }, { requireAllDates: true });
+    if (!chronoCheck.ok) {
+      ss.toast(chronoCheck.message || 'Ordre chronologique des dates invalide.', 'Stock', 6);
+      continue;
+    }
+
+    if (!ensureValidPriceOrWarn_(stock, rowNumber, C_PRIX)) {
+      continue;
+    }
+
+    if (!C_TAILLE) {
+      ss.toast('Colonne taille introuvable ("TAILLE" / "TAILLE DU COLIS").', 'Stock', 6);
+      continue;
+    }
+
+    const tailleValue = String(dataValues[i][C_TAILLE - 1] || '').trim();
+    if (!tailleValue) {
+      ss.toast(`Indique la colonne ${tailleHeaderLabel} avant de valider.`, 'Stock', 6);
+      continue;
+    }
+
+    const lotValue = C_LOT ? String(dataValues[i][C_LOT - 1] || '').trim() : '';
+    const fraisColis = shippingLookup(tailleValue, lotValue);
+    if (!Number.isFinite(fraisColis)) {
+      const lotMessage = lotValue ? ` / lot ${lotValue}` : '';
+      ss.toast(`Frais de colissage introuvables pour la taille ${tailleValue}${lotMessage}.`, 'Stock', 6);
+      continue;
+    }
+
+    const perItemFee = computePerItemShippingFee_(fraisColis, lotValue);
+    rowsToExport.push({
+      rowNumber,
+      shipping: { size: tailleValue, lot: lotValue, fee: perItemFee }
+    });
+  }
+
+  if (!rowsToExport.length) return;
+
+  const exportedRows = [];
+  rowsToExport.forEach(entry => {
+    const success = exportVente_(
+      null,
+      entry.rowNumber,
+      C_ID,
+      C_LABEL,
+      C_SKU,
+      C_PRIX,
+      C_DVENTE,
+      C_STAMPV,
+      baseToDmsMap,
+      { shipping: entry.shipping, skipDelete: true }
+    );
+    if (success) {
+      exportedRows.push(entry.rowNumber);
+    }
+  });
+
+  if (!exportedRows.length) return;
+
+  exportedRows.sort((a, b) => b - a).forEach(rowNumber => {
+    stock.deleteRow(rowNumber);
+  });
+}
+
 function exportVente_(e, row, C_ID, C_LABEL, C_SKU, C_PRIX, C_DVENTE, C_STAMPV, baseToDmsMap, options) {
   const ss = SpreadsheetApp.getActive();
   const sh = ss.getSheetByName("Stock");
-  if (!sh) return;
+  if (!sh) return false;
 
   const opts = options || {};
   const shipping = opts.shipping || null;
+  const skipDelete = Boolean(opts.skipDelete);
 
   const ventes = ss.getSheetByName("Ventes") || ss.insertSheet("Ventes");
   if (ventes.getLastRow() === 0) {
@@ -325,7 +484,7 @@ function exportVente_(e, row, C_ID, C_LABEL, C_SKU, C_PRIX, C_DVENTE, C_STAMPV, 
 
   const dateCell = sh.getRange(row, C_DVENTE);
   const dateV = dateCell.getValue();
-  if (!(dateV instanceof Date) || isNaN(dateV)) return;
+  if (!(dateV instanceof Date) || isNaN(dateV)) return false;
 
   const idVal = C_ID ? sh.getRange(row, C_ID).getValue() : "";
   const label = C_LABEL ? sh.getRange(row, C_LABEL).getDisplayValue() : "";
@@ -357,7 +516,7 @@ function exportVente_(e, row, C_ID, C_LABEL, C_SKU, C_PRIX, C_DVENTE, C_STAMPV, 
   }, { requireAllDates: true });
   if (!chronoCheck.ok) {
     ss.toast(chronoCheck.message || 'Ordre chronologique des dates invalide.', 'Stock', 6);
-    return;
+    return false;
   }
 
   const dMiseLigne = C_DMIS ? sh.getRange(row, C_DMIS).getValue() : null;
@@ -453,7 +612,11 @@ function exportVente_(e, row, C_ID, C_LABEL, C_SKU, C_PRIX, C_DVENTE, C_STAMPV, 
 
   if (C_STAMPV) sh.getRange(row, C_STAMPV).setValue(new Date());
 
-  sh.deleteRow(row);
+  if (!skipDelete) {
+    sh.deleteRow(row);
+  }
+
+  return true;
 }
 
 function getAchatsRecordByIdOrSku_(ss, idVal, sku) {
@@ -1585,6 +1748,12 @@ function dateToDayKey_(date) {
   const m = date.getMonth() + 1;
   const d = date.getDate();
   return (y * 10000) + (m * 100) + d;
+}
+
+function isCheckboxValidation_(validation) {
+  if (!validation || typeof validation.getCriteriaType !== 'function') return false;
+  const criteria = validation.getCriteriaType();
+  return criteria === SpreadsheetApp.DataValidationCriteria.CHECKBOX;
 }
 
 function formatDateString_(date) {
