@@ -225,7 +225,8 @@ function restoreSaleToStock_(ss, sale) {
 
   setValue(C_ID, sale && sale.id !== undefined && sale.id !== null ? sale.id : '');
   setValue(C_SKU, sale && sale.sku !== undefined && sale.sku !== null ? sale.sku : '');
-  setValue(C_LABEL, sale && sale.libelle !== undefined && sale.libelle !== null ? sale.libelle : '');
+  const labelWithBadge = bumpReturnBadge_(sale && sale.libelle !== undefined && sale.libelle !== null ? sale.libelle : '');
+  setValue(C_LABEL, labelWithBadge);
 
   if (C_PRIX && sale) {
     const priceValue = valueToNumber_(sale.prixVente);
@@ -261,6 +262,29 @@ function restoreSaleToStock_(ss, sale) {
   stock.getRange(targetRow, 1, 1, lastColumn).setValues([rowValues]);
 
   return { success: true, row: targetRow };
+}
+
+function bumpReturnBadge_(label) {
+  if (label === null || label === undefined) return label;
+
+  const text = String(label);
+  if (text.trim() === '') return label;
+
+  const BADGES = ['🟢', '🟡', '🟠', '🔴'];
+  const match = text.match(/^\s*([🟢🟡🟠🔴])\s*(.*)$/);
+
+  if (!match) {
+    return `${BADGES[0]} ${text}`;
+  }
+
+  const currentBadge = match[1];
+  const rest = match[2] || '';
+  const badgeIndex = BADGES.indexOf(currentBadge);
+  const nextBadge = badgeIndex === -1
+    ? BADGES[0]
+    : BADGES[Math.min(badgeIndex + 1, BADGES.length - 1)];
+
+  return rest ? `${nextBadge} ${rest}` : nextBadge;
 }
 
 function exportVente_(e, row, C_ID, C_LABEL, C_SKU, C_PRIX, C_DVENTE, C_STAMPV, baseToDmsMap, options) {
