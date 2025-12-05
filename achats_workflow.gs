@@ -217,21 +217,7 @@ function handleAchats(e) {
         cell.clearDataValidations();
       }
 
-      let stamp = null;
-      if (COL_DLIV) {
-        const deliveryCell = sh.getRange(row, COL_DLIV);
-        const deliveryValue = deliveryCell.getValue();
-        const deliveryDate = getDateOrNull_(deliveryValue)
-          || getDateOrNull_(deliveryCell.getDisplayValue());
-        if (deliveryDate) {
-          stamp = addDays_(deliveryDate, 1);
-        }
-      }
-
-      if (!stamp) {
-        stamp = parsedValue || new Date();
-      }
-
+      const stamp = new Date();
       cell.setValue(stamp);
       cell.setNumberFormat('dd/MM/yyyy');
       shouldSync = true;
