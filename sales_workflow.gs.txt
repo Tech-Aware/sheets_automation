@@ -16,6 +16,8 @@ function handleVentesReturn(e) {
     || resolver.colWhere(header => header.includes('retour'));
   if (!colReturn || range.getColumn() !== colReturn) return;
 
+  logDebug_('handleVentesReturn', { ligne: row, colonne: range.getColumn(), valeur: newValue });
+
   const newValue = e.value !== undefined ? e.value : range.getValue();
   if (!isReturnFlagActive_(newValue)) {
     return;
@@ -27,6 +29,7 @@ function handleVentesReturn(e) {
   if (!sale.dateVente) {
     clearReturnFlag_(range);
     ss.toast('Impossible de traiter le retour : date de vente introuvable.', 'Ventes', 8);
+    logDebug_('handleVentesReturn', { ligne: row, statut: 'arrêt', raison: 'date de vente manquante' });
     return;
   }
 
@@ -40,6 +43,7 @@ function handleVentesReturn(e) {
       'Ventes',
       10
     );
+    logDebug_('handleVentesReturn', { ligne: row, statut: 'arrêt', raison: 'ID manquant' });
     return;
   }
 
@@ -59,6 +63,7 @@ function handleVentesReturn(e) {
     if (!ledgerResult || !ledgerResult.removed) {
       clearReturnFlag_(range);
       ss.toast(`Impossible de retirer ${labelForToast} du journal mensuel.`, 'Ventes', 8);
+      logDebug_('handleVentesReturn', { ligne: row, statut: 'arrêt', raison: 'journal non retiré', ledgerResult });
       return;
     }
 
@@ -68,11 +73,13 @@ function handleVentesReturn(e) {
       copySaleToMonthlySheet_(ss, sale, { updateExisting: true });
       clearReturnFlag_(range);
       ss.toast(stockResult.message || `Impossible de recréer ${labelForToast} dans Stock.`, 'Ventes', 8);
+      logDebug_('handleVentesReturn', { ligne: row, statut: 'arrêt', raison: 'restoreStock échec', stockResult });
       return;
     }
 
     sh.deleteRow(row);
     ss.toast(`Retour traité pour ${labelForToast}.`, 'Ventes', 5);
+    logDebug_('handleVentesReturn', { ligne: row, statut: 'succès', cibleStock: stockResult.row });
   } catch (err) {
     clearReturnFlag_(range);
     const message = err && err.message ? err.message : err;
@@ -80,6 +87,7 @@ function handleVentesReturn(e) {
     if (typeof console !== 'undefined' && console.error) {
       console.error(err);
     }
+    logDebug_('handleVentesReturn', { ligne: row, statut: 'exception', erreur: message });
   }
 }
 
@@ -170,12 +178,14 @@ function restoreSaleToStock_(ss, sale) {
     return { success: false, message: 'Feuille "Stock" introuvable.' };
   }
 
+  const headerRow = getSheetHeaderRow_('Stock');
+  const dataStartRow = getSheetDataStartRow_('Stock');
   const lastColumn = stock.getLastColumn();
   if (!lastColumn) {
     return { success: false, message: 'La feuille "Stock" ne contient aucune colonne.' };
   }
 
-  const headers = stock.getRange(1, 1, 1, lastColumn).getValues()[0];
+  const headers = getSheetHeaders_(stock, 'Stock');
   const resolver = makeHeaderResolver_(headers);
   const colExact = resolver.colExact.bind(resolver);
   const colWhere = resolver.colWhere.bind(resolver);
@@ -221,6 +231,12 @@ function restoreSaleToStock_(ss, sale) {
   const C_DPUB = useCombinedPubCol ? combinedPubCol : legacyPubCols.dateCol;
   const C_VENDU = useCombinedVenduCol ? combinedVenduCol : legacyVenduCols.checkboxCol;
   const C_DVENTE = useCombinedVenduCol ? combinedVenduCol : legacyVenduCols.dateCol;
+
+  logDebug_('restoreSaleToStock_', {
+    id: sale && sale.id,
+    sku: sale && sale.sku,
+    cible: { C_ID, C_SKU, C_LABEL, C_PRIX, C_TAILLE, C_LOT, C_DMS, C_STAMPV, C_VALIDE, C_DMIS, C_DPUB, C_DVENTE }
+  });
 
   const rowValues = Array(lastColumn).fill('');
   const returnedAt = sale && sale.returnedAt instanceof Date && !isNaN(sale.returnedAt)
@@ -276,7 +292,7 @@ function restoreSaleToStock_(ss, sale) {
     setValue(C_DVENTE, '');
   }
 
-  const targetRow = Math.max(2, stock.getLastRow() + 1);
+  const targetRow = Math.max(dataStartRow, stock.getLastRow() + 1);
   stock.getRange(targetRow, 1, 1, lastColumn).setValues([rowValues]);
 
   return { success: true, row: targetRow };
@@ -391,7 +407,7 @@ function exportVente_(e, row, C_ID, C_LABEL, C_SKU, C_PRIX, C_DVENTE, C_STAMPV, 
     : null;
 
   // Colonnes chrono stock (pour calcul délais + check)
-  const headersS = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0];
+  const headersS = getSheetHeaders_(sh, 'Stock');
   const resolverS = makeHeaderResolver_(headersS);
 
   const C_DMS = resolverS.colExact(HEADERS.STOCK.DATE_MISE_EN_STOCK);
@@ -440,6 +456,15 @@ function exportVente_(e, row, C_ID, C_LABEL, C_SKU, C_PRIX, C_DVENTE, C_STAMPV, 
   const delaiML  = diffDays(dMiseLigne, dMiseStock);
   const delaiPub = diffDays(dPub, dMiseLigne);
   const delaiVte = diffDays(dateV, dPub);
+
+  logDebug_('exportVente_', {
+    ligneStock: row,
+    id: idVal,
+    sku,
+    dateVente: dateV,
+    delais: { delaiImm, delaiML, delaiPub, delaiVte },
+    colonnes: { C_DMS, C_DMIS, C_DPUB, C_DVENTE }
+  });
 
   const margeBrute = Number.isFinite(prix) && Number.isFinite(prixAchat) ? prix - prixAchat : '';
   const coeffMarge = Number.isFinite(prix) && Number.isFinite(prixAchat) && prixAchat !== 0

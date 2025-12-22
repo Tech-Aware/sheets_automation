@@ -5,8 +5,8 @@ function handleStock(e) {
   const turnedOff = (e.value === "FALSE") || (e.value === false);
   const CLEAR_ON_UNCHECK = false;
 
-  const HEADER_ROW = 6; // ✅ ta ligne d’en-tête
-  const DATA_START_ROW = HEADER_ROW + 1; // ✅ 7
+  const HEADER_ROW = getSheetHeaderRow_('Stock');
+  const DATA_START_ROW = getSheetDataStartRow_('Stock');
 
   // Ignore les edits au-dessus des données
   if (e.range.getRow() < DATA_START_ROW) return;
@@ -68,11 +68,13 @@ function handleStock(e) {
   const c = e.range.getColumn(), r = e.range.getRow();
   if (r === HEADER_ROW) return;
   
-  ss.toast(
-    `c=${c} | C_PUB=${C_PUB} | C_REPUB=${C_REPUB} | header(c)="${stockHeaders[c-1]}" | header(C_REPUB)="${stockHeaders[(C_REPUB||1)-1]}"`,
-    'DEBUG',
-    8
-  );
+  logDebug_('handleStock', {
+    ligne: r,
+    colonne: c,
+    enteteCourant: stockHeaders[c - 1],
+    enteteRepublie: C_REPUB ? stockHeaders[(C_REPUB || 1) - 1] : '',
+    ranges: { C_PUB, C_REPUB, C_VENDU, C_DVENTE }
+  });
 
   if (C_REPUB && c === C_REPUB) {
   if (!turnedOn) return;
@@ -81,12 +83,14 @@ function handleStock(e) {
   if (sold) {
     sh.getRange(r, C_REPUB).setValue(false);
     ss.toast('Impossible de republier un produit déjà vendu.', 'Stock', 5);
+    logDebug_('handleStock.republie', { ligne: r, statut: 'refusé', raison: 'déjà vendu' });
     return;
   }
 
   if (!C_LABEL) {
     sh.getRange(r, C_REPUB).setValue(false);
     ss.toast('Colonne LIBELLÉ introuvable (badge republication).', 'Stock', 6);
+    logDebug_('handleStock.republie', { ligne: r, statut: 'refusé', raison: 'libellé manquant' });
     return;
   }
 
@@ -95,6 +99,7 @@ function handleStock(e) {
   labelCell.setValue(bumpRepublishBadge_(currentLabel));
 
   sh.getRange(r, C_REPUB).setValue(false);
+  logDebug_('handleStock.republie', { ligne: r, statut: 'badge appliqué', ancienLibelle: currentLabel });
   return;
 }
 

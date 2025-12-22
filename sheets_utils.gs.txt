@@ -4,6 +4,30 @@ function escReg_(s){
   return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+function logDebug_(contexte, details) {
+  try {
+    const prefix = contexte ? `[${contexte}] ` : '';
+    const body = details === undefined || details === null
+      ? ''
+      : (typeof details === 'string' ? details : JSON.stringify(details));
+    const message = `${prefix}${body}`;
+    if (typeof console !== 'undefined' && console.log) {
+      console.log(message);
+    }
+    if (typeof Logger !== 'undefined' && Logger.log) {
+      Logger.log(message);
+    }
+  } catch (err) {
+    // Ne bloque jamais le workflow pour un log
+    try {
+      const fallback = `[logDebug_ error] ${err && err.message ? err.message : err}`;
+      if (typeof console !== 'undefined' && console.warn) {
+        console.warn(fallback);
+      }
+    } catch (_ignored) {}
+  }
+}
+
 function normText_(s) {
   return String(s || "")
     .toLowerCase()
@@ -28,6 +52,31 @@ function makeHeaderResolver_(headers) {
       return idx >= 0 ? idx + 1 : 0;
     }
   };
+}
+
+function getSheetHeaderRow_(sheetName) {
+  const layout = SHEET_LAYOUT && SHEET_LAYOUT[sheetName];
+  const headerRow = layout && Number(layout.HEADER_ROW);
+  return headerRow && headerRow > 0 ? headerRow : 1;
+}
+
+function getSheetDataStartRow_(sheetName) {
+  const layout = SHEET_LAYOUT && SHEET_LAYOUT[sheetName];
+  const dataRow = layout && Number(layout.DATA_START_ROW);
+  if (dataRow && dataRow > 0) {
+    return dataRow;
+  }
+  const headerRow = getSheetHeaderRow_(sheetName);
+  return headerRow + 1;
+}
+
+function getSheetHeaders_(sheet, explicitName) {
+  if (!sheet) return [];
+  const name = explicitName || (sheet.getName && sheet.getName());
+  const headerRow = getSheetHeaderRow_(name || '');
+  const lastCol = sheet.getLastColumn();
+  if (!lastCol) return [];
+  return sheet.getRange(headerRow, 1, 1, lastCol).getValues()[0];
 }
 
 function isShippingSizeHeader_(normalizedHeader) {
@@ -707,9 +756,10 @@ function buildBaseToStockDate_(ss) {
   if (!stock || !achats) return Object.create(null);
 
   const last = stock.getLastRow();
-  if (last < 2) return Object.create(null);
+  const dataStartRow = getSheetDataStartRow_('Stock');
+  if (last < dataStartRow) return Object.create(null);
 
-  const headers = stock.getRange(1, 1, 1, stock.getLastColumn()).getValues()[0];
+  const headers = getSheetHeaders_(stock, 'Stock');
   const resolver = makeHeaderResolver_(headers);
   const colExact = resolver.colExact.bind(resolver);
   const colWhere = resolver.colWhere.bind(resolver);
@@ -719,9 +769,9 @@ function buildBaseToStockDate_(ss) {
   const C_DMS = colExact(HEADERS.STOCK.DATE_MISE_EN_STOCK) || colWhere(h => h.includes('mise en stock'));
   if (!C_SKU || !C_REF || !C_DMS) return Object.create(null);
 
-  const skuValues = stock.getRange(2, C_SKU, last - 1, 1).getValues();
-  const refValues = stock.getRange(2, C_REF, last - 1, 1).getValues();
-  const dmsValues = stock.getRange(2, C_DMS, last - 1, 1).getValues();
+  const skuValues = stock.getRange(dataStartRow, C_SKU, last - dataStartRow + 1, 1).getValues();
+  const refValues = stock.getRange(dataStartRow, C_REF, last - dataStartRow + 1, 1).getValues();
+  const dmsValues = stock.getRange(dataStartRow, C_DMS, last - dataStartRow + 1, 1).getValues();
 
   const map = Object.create(null);
 

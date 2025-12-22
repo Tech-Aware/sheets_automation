@@ -105,6 +105,21 @@ const HEADERS = Object.freeze({
   })
 });
 
+const SHEET_LAYOUT = Object.freeze({
+  STOCK: Object.freeze({
+    HEADER_ROW: 6,
+    DATA_START_ROW: 7
+  }),
+  VENTES: Object.freeze({
+    HEADER_ROW: 1,
+    DATA_START_ROW: 2
+  }),
+  ACHATS: Object.freeze({
+    HEADER_ROW: 1,
+    DATA_START_ROW: 2
+  })
+});
+
 const DEFAULT_VENTES_HEADERS = Object.freeze([
   HEADERS.VENTES.ID,
   HEADERS.VENTES.DATE_VENTE,
