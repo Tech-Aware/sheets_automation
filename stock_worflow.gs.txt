@@ -5,8 +5,9 @@ function handleStock(e) {
   const turnedOff = (e.value === "FALSE") || (e.value === false);
   const CLEAR_ON_UNCHECK = false;
 
-  const HEADER_ROW = getSheetHeaderRow_('Stock');
-  const DATA_START_ROW = getSheetDataStartRow_('Stock');
+  const sheetName = sh && typeof sh.getName === 'function' ? sh.getName() : 'Stock';
+  const HEADER_ROW = getSheetHeaderRow_(sheetName);
+  const DATA_START_ROW = getSheetDataStartRow_(sheetName);
 
   // Ignore les edits au-dessus des données
   if (e.range.getRow() < DATA_START_ROW) {
@@ -15,13 +16,13 @@ function handleStock(e) {
       colonne: e.range.getColumn(),
       headerRow: HEADER_ROW,
       dataStartRow: DATA_START_ROW,
-      feuille: sh && sh.getName && sh.getName()
+      feuille: sheetName
     });
     return;
   }
 
   ss.toast(
-    `Stock • Ligne ${e.range.getRow()} • Colonne ${e.range.getColumn()} • DataStart ${DATA_START_ROW}`,
+    `${sheetName} • Ligne ${e.range.getRow()} • Colonne ${e.range.getColumn()} • DataStart ${DATA_START_ROW}`,
     'Diagnostic Stock',
     4
   );
