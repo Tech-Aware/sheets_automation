@@ -375,8 +375,12 @@ function restoreSaleToStock_(ss, sale) {
   setValue(C_LABEL, labelWithBadge);
 
   // Livraisons depuis Achats
+  // Exigence : dans Stock, la colonne LIVRAISON doit refléter la date de mise en stock d’Achats
   const C_LIVRAISON = colExact(HEADERS.STOCK.DATE_LIVRAISON) || colExact(HEADERS.STOCK.DATE_LIVRAISON_ALT2) || colWhere(h => h.includes('livraison'));
-  if (C_LIVRAISON && achatInfo && achatInfo.livraison instanceof Date && !isNaN(achatInfo.livraison)) {
+  if (C_LIVRAISON && achatInfo && achatInfo.dms instanceof Date && !isNaN(achatInfo.dms)) {
+    setValue(C_LIVRAISON, achatInfo.dms);
+  } else if (C_LIVRAISON && achatInfo && achatInfo.livraison instanceof Date && !isNaN(achatInfo.livraison)) {
+    // fallback: si pas de DMS Achats, on garde la date de livraison Achats
     setValue(C_LIVRAISON, achatInfo.livraison);
   }
 
@@ -391,12 +395,8 @@ function restoreSaleToStock_(ss, sale) {
   setValue(C_LOT, sale && sale.lot !== undefined && sale.lot !== null ? sale.lot : '');
 
   if (C_DMS) {
-    // si Achats a une date de mise en stock, on la réplique, sinon la date du retour
-    if (achatInfo && achatInfo.dms instanceof Date && !isNaN(achatInfo.dms)) {
-      setValue(C_DMS, achatInfo.dms);
-    } else {
-      setValue(C_DMS, returnedAt);
-    }
+    // Dans Stock, MIS EN STOCK doit être la date du clic RETOUR
+    setValue(C_DMS, returnedAt);
   }
 
   if (C_STAMPV) {
