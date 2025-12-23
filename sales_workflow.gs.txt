@@ -438,11 +438,18 @@ function exportVente_(e, row, C_ID, C_LABEL, C_SKU, C_PRIX, C_DVENTE, C_STAMPV, 
     return;
   }
 
-  const dMiseLigne = C_DMIS ? sh.getRange(row, C_DMIS).getValue() : null;
-  const dPub = C_DPUB ? sh.getRange(row, C_DPUB).getValue() : null;
+  function getDateCell_(r, c) {
+    if (!c) return null;
+    const cell = sh.getRange(r, c);
+    const v = cell.getValue();
+    if (v instanceof Date && !isNaN(v)) return v;
+    return getDateOrNull_(cell.getDisplayValue());
+  }
 
-  let dMiseStock = C_DMS ? sh.getRange(row, C_DMS).getValue() : null;
-  if (!(dMiseStock instanceof Date) || isNaN(dMiseStock)) dMiseStock = null;
+  const dMiseLigne = getDateCell_(row, C_DMIS);
+  const dPub       = getDateCell_(row, C_DPUB);
+
+  let dMiseStock = getDateCell_(row, C_DMS);
 
   if (!dMiseStock && sku) {
     const base = extractSkuBase_(sku);
