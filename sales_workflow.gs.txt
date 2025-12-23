@@ -416,7 +416,9 @@ function exportVente_(e, row, C_ID, C_LABEL, C_SKU, C_PRIX, C_DVENTE, C_STAMPV, 
   const headersS = getSheetHeaders_(sh, 'Stock');
   const resolverS = makeHeaderResolver_(headersS);
 
-  const C_DMS = resolverS.colExact(HEADERS.STOCK.DATE_MISE_EN_STOCK);
+  const C_DMS = resolverS.colExact(HEADERS.STOCK.DATE_MISE_EN_STOCK)
+    || resolverS.colExact(HEADERS.STOCK.DATE_MISE_EN_STOCK_ALT2) // "MIS EN STOCK"
+    || resolverS.colWhere(h => h.includes('mise en stock'));
 
   const combinedMisForRow = resolveCombinedMisEnLigneColumn_(resolverS);
   const legacyMisForRow = combinedMisForRow ? { checkboxCol: 0, dateCol: 0 } : resolveLegacyMisEnLigneColumn_(resolverS);
@@ -566,9 +568,13 @@ function getAchatsRecordByIdOrSku_(ss, idVal, sku) {
   const colId = resolver.colExact(HEADERS.ACHATS.ID);
   const colRef = resolver.colExact(HEADERS.ACHATS.REFERENCE);
   const colPrix = resolver.colExact(HEADERS.ACHATS.PRIX_UNITAIRE_TTC)
-  || resolver.colExact(HEADERS.ACHATS.PRIX_UNITAIRE_TTC_ALT);
+    || resolver.colExact(HEADERS.ACHATS.PRIX_UNITAIRE_TTC_ALT)
+    || resolver.colExact(HEADERS.ACHATS.PRIX_UNITAIRE_BRUTE)
+    || resolver.colExact(HEADERS.ACHATS.PRIX_UNITAIRE_BRUTE_ALT)
+    || resolver.colWhere(h => h.includes('prix') && h.includes('achat'));
   const colDate = resolver.colExact(HEADERS.ACHATS.DATE_LIVRAISON)
-    || resolver.colExact(HEADERS.ACHATS.DATE_LIVRAISON_ALT);
+    || resolver.colExact(HEADERS.ACHATS.DATE_LIVRAISON_ALT)
+    || resolver.colWhere(h => h.includes('livraison'));
   const colArticle = resolver.colExact(HEADERS.ACHATS.ARTICLE)
     || resolver.colExact(HEADERS.ACHATS.ARTICLE_ALT);
 
