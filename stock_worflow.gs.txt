@@ -12,7 +12,10 @@ function handleStock(e) {
     if (layout[name]) return name;
     const normalizedName = normText_(name || '');
     const match = Object.keys(layout).find(key => normText_(key) === normalizedName);
-    return match || 'Stock';
+    if (match) return match;
+    if (layout.STOCK) return 'STOCK';
+    if (layout.Stock) return 'Stock';
+    return name || 'Stock';
   }
 
   const layoutName = resolveLayoutName_(sheetName);
