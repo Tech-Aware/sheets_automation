@@ -413,8 +413,49 @@ function exportVente_(e, row, C_ID, C_LABEL, C_SKU, C_PRIX, C_DVENTE, C_STAMPV, 
     : null;
 
   // Colonnes chrono stock (pour calcul délais + check)
-  const headersS = getSheetHeaders_(sh, 'Stock');
-  const resolverS = makeHeaderResolver_(headersS);
+  function resolveStockHeadersWithFallback_() {
+    const maxProbe = 10;
+    const lastCol = sh.getLastColumn();
+    if (!lastCol) {
+      return { headers: [], resolver: makeHeaderResolver_([]), headerRow: 1, dataStartRow: 2, fallback: false };
+    }
+
+    function build(row) {
+      const headers = sh.getRange(row, 1, 1, lastCol).getValues()[0];
+      return { headers, resolver: makeHeaderResolver_(headers), headerRow: row, dataStartRow: row + 1 };
+    }
+
+    function hasChrono(resolver) {
+      return !!(
+        resolver.colExact(HEADERS.STOCK.DATE_MISE_EN_STOCK)
+        || resolver.colExact(HEADERS.STOCK.DATE_MISE_EN_STOCK_ALT2)
+        || resolver.colWhere(h => h.includes('mise en stock'))
+      );
+    }
+
+    const layoutHeader = getSheetHeaderRow_('Stock');
+    const candidate = build(layoutHeader);
+    if (hasChrono(candidate.resolver)) {
+      return Object.assign(candidate, { fallback: false });
+    }
+
+    const lastRow = sh.getLastRow();
+    const upperBound = Math.min(maxProbe, lastRow || maxProbe);
+    for (let r = 1; r <= upperBound; r++) {
+      const probe = build(r);
+      if (hasChrono(probe.resolver)) {
+        logDebug_('exportVente_.fallbackHeader', { headerRow: r });
+        return Object.assign(probe, { fallback: true });
+      }
+    }
+
+    logDebug_('exportVente_.noChronoHeaders', { triedRows: upperBound, lastCol });
+    return Object.assign(candidate, { fallback: false });
+  }
+
+  const headerInfo = resolveStockHeadersWithFallback_();
+  const headersS = headerInfo.headers;
+  const resolverS = headerInfo.resolver;
 
   const C_DMS = resolverS.colExact(HEADERS.STOCK.DATE_MISE_EN_STOCK)
     || resolverS.colExact(HEADERS.STOCK.DATE_MISE_EN_STOCK_ALT2) // "MIS EN STOCK"
