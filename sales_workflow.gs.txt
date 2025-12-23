@@ -262,7 +262,8 @@ function restoreSaleToStock_(ss, sale) {
     return {};
   }
 
-  const C_ID = colExact(HEADERS.STOCK.ID);
+  const C_ID = colExact(HEADERS.STOCK.ID)
+    || colWhere(h => h === 'id' || h === 'identifiant' || h.includes('id'));
   const C_LABEL = colExact(HEADERS.STOCK.LIBELLE)
     || colExact(HEADERS.STOCK.LIBELLE_ALT)
     || colExact(HEADERS.STOCK.LIBELLE_ALT2)
@@ -270,10 +271,11 @@ function restoreSaleToStock_(ss, sale) {
     || colExact(HEADERS.STOCK.ARTICLE_ALT)
     || colExact(HEADERS.STOCK.ARTICLE_ALT2)
     || colWhere(h => h.includes('libell'))
-    || colWhere(h => h.includes('article'));
+    || colWhere(h => h.includes('article'))
+    || colWhere(h => h === 'articles');
   const C_SKU = colExact(HEADERS.STOCK.SKU)
     || colExact(HEADERS.STOCK.REFERENCE)
-    || colWhere(h => h.includes('sku'));
+    || colWhere(h => h.includes('sku') || h.includes('reference'));
   const C_PRIX = colExact(HEADERS.STOCK.PRIX_VENTE)
     || colExact(HEADERS.STOCK.PRIX_VENTE_ALT2)
     || colWhere(h => h.includes('prix') && h.includes('vente'));
@@ -384,6 +386,18 @@ function restoreSaleToStock_(ss, sale) {
 
   const targetRow = Math.max(dataStartRow, stock.getLastRow() + 1);
   stock.getRange(targetRow, 1, 1, lastColumn).setValues([rowValues]);
+  logDebug_('restoreSaleToStock.resultRow', {
+    targetRow,
+    C_ID,
+    C_SKU,
+    C_LABEL,
+    C_PRIX,
+    C_TAILLE,
+    C_LOT,
+    C_LIVRAISON,
+    C_DMS,
+    rowPreview: rowValues.slice(0, Math.min(12, rowValues.length))
+  });
 
   return { success: true, row: targetRow };
 }
