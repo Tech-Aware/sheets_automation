@@ -377,11 +377,14 @@ function restoreSaleToStock_(ss, sale) {
   // Livraisons depuis Achats
   // Exigence : dans Stock, la colonne LIVRAISON doit refléter la date de mise en stock d’Achats
   const C_LIVRAISON = colExact(HEADERS.STOCK.DATE_LIVRAISON) || colExact(HEADERS.STOCK.DATE_LIVRAISON_ALT2) || colWhere(h => h.includes('livraison'));
-  if (C_LIVRAISON && achatInfo && achatInfo.dms instanceof Date && !isNaN(achatInfo.dms)) {
-    setValue(C_LIVRAISON, achatInfo.dms);
-  } else if (C_LIVRAISON && achatInfo && achatInfo.livraison instanceof Date && !isNaN(achatInfo.livraison)) {
-    // fallback: si pas de DMS Achats, on garde la date de livraison Achats
-    setValue(C_LIVRAISON, achatInfo.livraison);
+  if (C_LIVRAISON) {
+    if (achatInfo && achatInfo.dms instanceof Date && !isNaN(achatInfo.dms)) {
+      // LIVRAISON = date de mise en stock Achats
+      setValue(C_LIVRAISON, achatInfo.dms);
+    } else {
+      // Pas d’info → on laisse vide pour éviter une date erronée
+      setValue(C_LIVRAISON, '');
+    }
   }
 
   if (C_PRIX && sale) {
