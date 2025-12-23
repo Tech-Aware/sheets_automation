@@ -6,6 +6,9 @@ function handleAchats(e) {
   const turnedOn = (e.value === "TRUE") || (e.value === true);
   const turnedOff = (e.value === "FALSE") || (e.value === false);
 
+  const STOCK_HEADER_ROW = getSheetHeaderRow_('Stock');
+  const STOCK_DATA_START_ROW = getSheetDataStartRow_('Stock');
+
   const achatsHeaders = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0];
   const resolver = makeHeaderResolver_(achatsHeaders);
   const colWhere = resolver.colWhere.bind(resolver);
@@ -111,7 +114,7 @@ function handleAchats(e) {
     const stock = ss.getSheetByName('Stock');
     if (!stock) return;
 
-    const headersS = stock.getRange(1,1,1,stock.getLastColumn()).getValues()[0];
+    const headersS = getSheetHeaders_(stock, 'Stock');
     const resolverS = makeHeaderResolver_(headersS);
     const C_SKU_STOCK = resolverS.colExact(HEADERS.STOCK.SKU)
       || resolverS.colExact(HEADERS.STOCK.REFERENCE);
@@ -119,10 +122,10 @@ function handleAchats(e) {
     if (!C_SKU_STOCK || !C_DMS_STOCK) return;
 
     const lastS = stock.getLastRow();
-    if (lastS < 2) return;
+    if (lastS < STOCK_DATA_START_ROW) return;
 
-    const skuVals = stock.getRange(2, C_SKU_STOCK, lastS - 1, 1).getValues();
-    const dmsVals = stock.getRange(2, C_DMS_STOCK, lastS - 1, 1).getValues();
+    const skuVals = stock.getRange(STOCK_DATA_START_ROW, C_SKU_STOCK, lastS - STOCK_DATA_START_ROW + 1, 1).getValues();
+    const dmsVals = stock.getRange(STOCK_DATA_START_ROW, C_DMS_STOCK, lastS - STOCK_DATA_START_ROW + 1, 1).getValues();
 
     for (let i = 0; i < skuVals.length; i++) {
       const base = extractSkuBase_(skuVals[i][0]);
@@ -132,7 +135,12 @@ function handleAchats(e) {
       }
     }
 
-    stock.getRange(2, C_DMS_STOCK, lastS - 1, 1).setValues(dmsVals);
+    stock.getRange(STOCK_DATA_START_ROW, C_DMS_STOCK, lastS - STOCK_DATA_START_ROW + 1, 1).setValues(dmsVals);
+    logDebug_('syncReadyDateToStock_', {
+      refBase,
+      dateMiseStock: dms,
+      lignesMaj: dmsVals.length
+    });
   }
 
   // -------------------------
@@ -148,16 +156,16 @@ function handleAchats(e) {
     const stock = ss.getSheetByName("Stock");
     if (!stock) return;
 
-    const headersS = stock.getRange(1,1,1,stock.getLastColumn()).getValues()[0];
+    const headersS = getSheetHeaders_(stock, 'Stock');
     const resolverS = makeHeaderResolver_(headersS);
     const C_SKU_STOCK = resolverS.colExact(HEADERS.STOCK.SKU)
       || resolverS.colExact(HEADERS.STOCK.REFERENCE);
     if (!C_SKU_STOCK) return;
 
     const lastS = stock.getLastRow();
-    if (lastS < 2) return;
+    if (lastS < STOCK_DATA_START_ROW) return;
 
-    const skuVals = stock.getRange(2, C_SKU_STOCK, lastS - 1, 1).getValues();
+    const skuVals = stock.getRange(STOCK_DATA_START_ROW, C_SKU_STOCK, lastS - STOCK_DATA_START_ROW + 1, 1).getValues();
     const newSkuVals = [];
 
     const prefixOld = oldBase + '-';
@@ -188,7 +196,7 @@ function handleAchats(e) {
       newSkuVals.push([s]);
     }
 
-    stock.getRange(2, C_SKU_STOCK, lastS - 1, 1).setValues(newSkuVals);
+    stock.getRange(STOCK_DATA_START_ROW, C_SKU_STOCK, lastS - STOCK_DATA_START_ROW + 1, 1).setValues(newSkuVals);
     // On ne touche pas aux numéros, juste le préfixe.
     return;
   }
@@ -442,7 +450,7 @@ function handleAchats(e) {
     if (COL_DATE_STOCK) rowValues[COL_DATE_STOCK - 1] = dateLiv;
   }
 
-  const start = Math.max(2, target.getLastRow() + 1);
+  const start = Math.max(STOCK_DATA_START_ROW, target.getLastRow() + 1);
   target.getRange(start, 1, rows.length, rows[0].length).setValues(rows);
 
   if (C_DMS_STOCK) {
@@ -450,10 +458,10 @@ function handleAchats(e) {
   }
 
   const lastS = target.getLastRow();
-  if (lastS > 2 && COL_DATE_STOCK) {
-    target.getRange(2, 1, lastS - 1, target.getLastColumn())
+  if (lastS >= STOCK_DATA_START_ROW && COL_DATE_STOCK) {
+    target.getRange(STOCK_DATA_START_ROW, 1, lastS - STOCK_DATA_START_ROW + 1, target.getLastColumn())
           .sort({ column: COL_DATE_STOCK, ascending: true });
-    target.getRange(2, COL_DATE_STOCK, lastS - 1, 1).setNumberFormat("dd/MM/yyyy");
+    target.getRange(STOCK_DATA_START_ROW, COL_DATE_STOCK, lastS - STOCK_DATA_START_ROW + 1, 1).setNumberFormat("dd/MM/yyyy");
   }
 
   renumberStockByBrand_();
@@ -472,12 +480,15 @@ function renumberStockByBrand_(onlyOld) {
   const stock  = ss.getSheetByName('Stock');
   if (!stock) return;
 
+  const headerRow = getSheetHeaderRow_('Stock');
+  const dataStartRow = getSheetDataStartRow_('Stock');
+
   const last = stock.getLastRow();
-  if (last < 2) return;
+  if (last < dataStartRow) return;
 
   onlyOld = !!onlyOld;
 
-  const stockHeaders = stock.getRange(1,1,1,stock.getLastColumn()).getValues()[0];
+  const stockHeaders = getSheetHeaders_(stock, 'Stock');
   const resolver = makeHeaderResolver_(stockHeaders);
   const COL_ID    = resolver.colExact('id');
   const COL_OLD   = resolver.colExact(HEADERS.STOCK.OLD_SKU) || resolver.colWhere(h => h.includes('ancienne')) || 2; // B
@@ -487,7 +498,7 @@ function renumberStockByBrand_(onlyOld) {
     || 3; // C
 
   const width = Math.max(COL_NEW, COL_OLD, COL_ID || 0, stock.getLastColumn());
-  const data = stock.getRange(2, 1, last - 1, width).getValues();
+  const data = stock.getRange(dataStartRow, 1, last - dataStartRow + 1, width).getValues();
 
   const idToBase = COL_ID ? buildIdToSkuBaseMap_(ss) : null;
   const baseCounters = Object.create(null);
@@ -587,5 +598,5 @@ function renumberStockByBrand_(onlyOld) {
     newSkuColValues.push([counterKey + '-' + nextSuffix]);
   }
 
-  stock.getRange(2, COL_NEW, newSkuColValues.length, 1).setValues(newSkuColValues);
+  stock.getRange(dataStartRow, COL_NEW, newSkuColValues.length, 1).setValues(newSkuColValues);
 }

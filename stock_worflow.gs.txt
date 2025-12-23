@@ -5,8 +5,8 @@ function handleStock(e) {
   const turnedOff = (e.value === "FALSE") || (e.value === false);
   const CLEAR_ON_UNCHECK = false;
 
-  const HEADER_ROW = 6; // ✅ ta ligne d’en-tête
-  const DATA_START_ROW = HEADER_ROW + 1; // ✅ 7
+  const HEADER_ROW = getSheetHeaderRow_('Stock');
+  const DATA_START_ROW = getSheetDataStartRow_('Stock');
 
   // Ignore les edits au-dessus des données
   if (e.range.getRow() < DATA_START_ROW) return;
@@ -20,21 +20,27 @@ function handleStock(e) {
   const C_ID      = colExact(HEADERS.STOCK.ID);
   const C_LABEL   = colExact(HEADERS.STOCK.LIBELLE)
     || colExact(HEADERS.STOCK.LIBELLE_ALT)
+    || colExact(HEADERS.STOCK.LIBELLE_ALT2)
     || colExact(HEADERS.STOCK.ARTICLE)
     || colExact(HEADERS.STOCK.ARTICLE_ALT)
+    || colExact(HEADERS.STOCK.ARTICLE_ALT2)
     || colWhere(h => h.includes('libell'))
     || colWhere(h => h.includes('article'))
     || 2;
   const C_OLD_SKU = colExact(HEADERS.STOCK.OLD_SKU) || 2;
   const C_SKU     = colExact(HEADERS.STOCK.SKU) || colExact(HEADERS.STOCK.REFERENCE); // B/C
   const C_PRIX    = colExact(HEADERS.STOCK.PRIX_VENTE)
+    || colExact(HEADERS.STOCK.PRIX_VENTE_ALT2)
     || colWhere(h => h.includes("prix") && h.includes("vente"));
   const C_TAILLE  = colExact(HEADERS.STOCK.TAILLE_COLIS)
     || colExact(HEADERS.STOCK.TAILLE_COLIS_ALT)
     || colExact(HEADERS.STOCK.TAILLE)
     || colWhere(isShippingSizeHeader_);
   const tailleHeaderLabel = getHeaderLabel_(resolver, C_TAILLE, HEADERS.STOCK.TAILLE);
-  const C_LOT     = colExact(HEADERS.STOCK.LOT) || colWhere(h => h.includes('lot'));
+  const C_LOT     = colExact(HEADERS.STOCK.LOT)
+    || colExact(HEADERS.STOCK.LOT_ALT2)
+    || colExact(HEADERS.STOCK.LOT_ALT3)
+    || colWhere(h => h.includes('lot'));
   const C_DMS     = colExact(HEADERS.STOCK.DATE_MISE_EN_STOCK);
 
   const combinedMisCol = resolveCombinedMisEnLigneColumn_(resolver);
@@ -63,16 +69,19 @@ function handleStock(e) {
 
   const C_REPUB = colExact(HEADERS.STOCK.REPUBLIE)
   || colExact(HEADERS.STOCK.REPUBLIE_ALT)
+  || colExact(HEADERS.STOCK.REPUBLIE_ALT2)
   || colWhere(h => h.toLowerCase().includes('republ'));
 
   const c = e.range.getColumn(), r = e.range.getRow();
   if (r === HEADER_ROW) return;
   
-  ss.toast(
-    `c=${c} | C_PUB=${C_PUB} | C_REPUB=${C_REPUB} | header(c)="${stockHeaders[c-1]}" | header(C_REPUB)="${stockHeaders[(C_REPUB||1)-1]}"`,
-    'DEBUG',
-    8
-  );
+  logDebug_('handleStock', {
+    ligne: r,
+    colonne: c,
+    enteteCourant: stockHeaders[c - 1],
+    enteteRepublie: C_REPUB ? stockHeaders[(C_REPUB || 1) - 1] : '',
+    ranges: { C_PUB, C_REPUB, C_VENDU, C_DVENTE }
+  });
 
   if (C_REPUB && c === C_REPUB) {
   if (!turnedOn) return;
@@ -81,12 +90,14 @@ function handleStock(e) {
   if (sold) {
     sh.getRange(r, C_REPUB).setValue(false);
     ss.toast('Impossible de republier un produit déjà vendu.', 'Stock', 5);
+    logDebug_('handleStock.republie', { ligne: r, statut: 'refusé', raison: 'déjà vendu' });
     return;
   }
 
   if (!C_LABEL) {
     sh.getRange(r, C_REPUB).setValue(false);
     ss.toast('Colonne LIBELLÉ introuvable (badge republication).', 'Stock', 6);
+    logDebug_('handleStock.republie', { ligne: r, statut: 'refusé', raison: 'libellé manquant' });
     return;
   }
 
@@ -95,6 +106,7 @@ function handleStock(e) {
   labelCell.setValue(bumpRepublishBadge_(currentLabel));
 
   sh.getRange(r, C_REPUB).setValue(false);
+  logDebug_('handleStock.republie', { ligne: r, statut: 'badge appliqué', ancienLibelle: currentLabel });
   return;
 }
 

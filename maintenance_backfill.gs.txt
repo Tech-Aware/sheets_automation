@@ -365,13 +365,15 @@ function recalcStock() {
     return;
   }
 
+  const headerRow = getSheetHeaderRow_('Stock');
+  const dataStartRow = getSheetDataStartRow_('Stock');
   const last = stock.getLastRow();
-  if (last < 2) {
+  if (last < dataStartRow) {
     SpreadsheetApp.getActive().toast('Aucune ligne dans Stock', 'Recalcul SKU', 5);
     return;
   }
 
-  const stockHeaders = stock.getRange(1,1,1,stock.getLastColumn()).getValues()[0];
+  const stockHeaders = getSheetHeaders_(stock, 'Stock');
   const resolver = makeHeaderResolver_(stockHeaders);
 
   let C_DATE = resolver.colExact(HEADERS.STOCK.DATE_LIVRAISON);
@@ -379,9 +381,9 @@ function recalcStock() {
 
   const width = stock.getLastColumn();
 
-  stock.getRange(2, 1, last - 1, width)
+  stock.getRange(dataStartRow, 1, last - dataStartRow + 1, width)
        .sort({ column: C_DATE, ascending: true });
-  stock.getRange(2, C_DATE, last - 1, 1)
+  stock.getRange(dataStartRow, C_DATE, last - dataStartRow + 1, 1)
        .setNumberFormat('dd/MM/yyyy');
 
   SpreadsheetApp.getActive().toast(
@@ -401,6 +403,9 @@ function syncMiseEnStockFromAchats() {
     return;
   }
 
+  const stockHeaderRow = getSheetHeaderRow_('Stock');
+  const stockDataStartRow = getSheetDataStartRow_('Stock');
+
   const lastA = achats.getLastRow();
   if (lastA < 2) {
     SpreadsheetApp.getActive().toast('Aucune donnée dans Achats', 'Mise à jour DMS', 5);
@@ -410,12 +415,12 @@ function syncMiseEnStockFromAchats() {
   const mapBaseToDMS = buildBaseToStockDate_(ss);
 
   const lastS = stock.getLastRow();
-  if (lastS < 2) {
+  if (lastS < stockDataStartRow) {
     SpreadsheetApp.getActive().toast('Aucune donnée dans Stock', 'Mise à jour DMS', 5);
     return;
   }
 
-  const headersS = stock.getRange(1,1,1,stock.getLastColumn()).getValues()[0];
+  const headersS = getSheetHeaders_(stock, 'Stock');
   const resolverS = makeHeaderResolver_(headersS);
 
   const C_SKU  = resolverS.colExact(HEADERS.STOCK.SKU)
@@ -430,8 +435,8 @@ function syncMiseEnStockFromAchats() {
     return;
   }
 
-  const skuVals = stock.getRange(2, C_SKU, lastS - 1, 1).getValues();
-  const dmsRange = stock.getRange(2, C_DMS, lastS - 1, 1);
+  const skuVals = stock.getRange(stockDataStartRow, C_SKU, lastS - stockDataStartRow + 1, 1).getValues();
+  const dmsRange = stock.getRange(stockDataStartRow, C_DMS, lastS - stockDataStartRow + 1, 1);
   const dmsVals = dmsRange.getValues();
 
   let updated = 0;
@@ -471,19 +476,24 @@ function purgeStockFromVentes() {
     return;
   }
 
+  const stockHeaderRow = getSheetHeaderRow_('Stock');
+  const stockDataStartRow = getSheetDataStartRow_('Stock');
+  const ventesHeaderRow = getSheetHeaderRow_('Ventes');
+  const ventesDataStartRow = getSheetDataStartRow_('Ventes');
+
   const stockLast = stock.getLastRow();
   const ventesLast = ventes.getLastRow();
-  if (stockLast < 2) {
+  if (stockLast < stockDataStartRow) {
     ss.toast('Aucune ligne à traiter dans "Stock".', 'Purge du stock', 6);
     return;
   }
-  if (ventesLast < 2) {
+  if (ventesLast < ventesDataStartRow) {
     ss.toast('Aucune vente disponible pour le rapprochement.', 'Purge du stock', 6);
     return;
   }
 
-  const stockHeaders = stock.getRange(1, 1, 1, stock.getLastColumn()).getValues()[0];
-  const ventesHeaders = ventes.getRange(1, 1, 1, ventes.getLastColumn()).getValues()[0];
+  const stockHeaders = getSheetHeaders_(stock, 'Stock');
+  const ventesHeaders = getSheetHeaders_(ventes, 'Ventes');
   const stockResolver = makeHeaderResolver_(stockHeaders);
   const ventesResolver = makeHeaderResolver_(ventesHeaders);
 
@@ -507,7 +517,7 @@ function purgeStockFromVentes() {
   }
 
   const ventesWidth = ventes.getLastColumn();
-  const ventesValues = ventes.getRange(2, 1, ventesLast - 1, ventesWidth).getValues();
+  const ventesValues = ventes.getRange(ventesDataStartRow, 1, ventesLast - ventesDataStartRow + 1, ventesWidth).getValues();
   const venteCounts = new Map();
   let ventesIgnorées = 0;
 
@@ -534,7 +544,7 @@ function purgeStockFromVentes() {
   }
 
   const stockWidth = stock.getLastColumn();
-  const stockValues = stock.getRange(2, 1, stockLast - 1, stockWidth).getValues();
+  const stockValues = stock.getRange(stockDataStartRow, 1, stockLast - stockDataStartRow + 1, stockWidth).getValues();
   const rowsToDelete = [];
   const deletedItems = [];
 
@@ -543,9 +553,9 @@ function purgeStockFromVentes() {
     const key = buildKey(row[C_STOCK_ID - 1], row[C_STOCK_SKU - 1]);
     const count = key ? venteCounts.get(key) : 0;
     if (count && count > 0) {
-      rowsToDelete.push(i + 2);
+      rowsToDelete.push(i + stockDataStartRow);
       deletedItems.push({
-        rowNumber: i + 2,
+        rowNumber: i + stockDataStartRow,
         id: row[C_STOCK_ID - 1],
         sku: row[C_STOCK_SKU - 1],
         label: C_STOCK_LABEL ? row[C_STOCK_LABEL - 1] : ''
@@ -951,13 +961,15 @@ function validateAllSales() {
     return;
   }
 
+  const headerRow = getSheetHeaderRow_('Stock');
+  const dataStartRow = getSheetDataStartRow_('Stock');
   const last = stock.getLastRow();
-  if (last < 2) {
+  if (last < dataStartRow) {
     SpreadsheetApp.getUi().alert('Validation groupée', 'Aucune ligne à traiter dans "Stock".', SpreadsheetApp.getUi().ButtonSet.OK);
     return;
   }
 
-  const stockHeaders = stock.getRange(1, 1, 1, stock.getLastColumn()).getValues()[0];
+  const stockHeaders = getSheetHeaders_(stock, 'Stock');
   const resolver = makeHeaderResolver_(stockHeaders);
   const colExact = resolver.colExact.bind(resolver);
   const colWhere = resolver.colWhere.bind(resolver);
@@ -972,6 +984,7 @@ function validateAllSales() {
     || 2;
   const C_SKU      = colExact(HEADERS.STOCK.SKU) || colExact(HEADERS.STOCK.REFERENCE);
   const C_PRIX     = colExact(HEADERS.STOCK.PRIX_VENTE)
+    || colExact(HEADERS.STOCK.PRIX_VENTE_ALT2)
     || colWhere(h => h.includes("prix") && h.includes("vente"));
   const C_TAILLE   = colExact(HEADERS.STOCK.TAILLE_COLIS)
     || colExact(HEADERS.STOCK.TAILLE_COLIS_ALT)
@@ -1020,7 +1033,7 @@ function validateAllSales() {
   }
 
   const lastCol = stock.getLastColumn();
-  const data = stock.getRange(2, 1, last - 1, lastCol).getValues();
+  const data = stock.getRange(dataStartRow, 1, last - dataStartRow + 1, lastCol).getValues();
   const baseToDmsMap = buildBaseToStockDate_(ss);
   const shippingLookup = buildShippingFeeLookup_(ss);
   if (!shippingLookup) {
@@ -1102,7 +1115,7 @@ function validateAllSales() {
 
   for (let i = data.length - 1; i >= 0; i--) {
     const row = data[i];
-    const rowIndex = i + 2;
+    const rowIndex = i + dataStartRow;
 
     const validateOk = C_VALIDATE ? (row[C_VALIDATE - 1] === true) : true;
     if (!validateOk) continue;
