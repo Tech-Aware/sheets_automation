@@ -226,6 +226,42 @@ function restoreSaleToStock_(ss, sale) {
   const colExact = resolver.colExact.bind(resolver);
   const colWhere = resolver.colWhere.bind(resolver);
 
+  // --- récupération infos Achats (livraison et date de mise en stock depuis Achats si dispo) ---
+  function getAchatInfo_(ss, idValue, skuValue) {
+    const achats = ss && ss.getSheetByName('Achats');
+    if (!achats) return {};
+
+    const lastRow = achats.getLastRow();
+    if (lastRow < 2) return {};
+
+    const headersA = achats.getRange(1, 1, 1, achats.getLastColumn()).getValues()[0];
+    const resA = makeHeaderResolver_(headersA);
+    const colIdA = resA.colExact(HEADERS.ACHATS.ID);
+    const colRefA = resA.colExact(HEADERS.ACHATS.REFERENCE) || resA.colWhere(h => h.includes('reference'));
+    const colLivA = resA.colExact(HEADERS.ACHATS.DATE_LIVRAISON)
+      || resA.colExact(HEADERS.ACHATS.DATE_LIVRAISON_ALT)
+      || resA.colWhere(h => h.includes('livraison'));
+    const colDmsA = resA.colExact(HEADERS.ACHATS.DATE_MISE_EN_STOCK)
+      || resA.colExact(HEADERS.ACHATS.DATE_MISE_EN_STOCK_ALT)
+      || resA.colWhere(h => h.includes('mise en stock'));
+
+    if (!colIdA && !colRefA) return {};
+
+    const data = achats.getRange(2, 1, lastRow - 1, achats.getLastColumn()).getValues();
+    const keyId = idValue !== undefined && idValue !== null ? normText_(idValue) : '';
+    const keySku = skuValue ? normText_(skuValue) : '';
+    for (let i = 0; i < data.length; i++) {
+      const row = data[i];
+      const idMatch = keyId && colIdA ? normText_(row[colIdA - 1]) === keyId : false;
+      const refMatch = keySku && colRefA ? normText_(row[colRefA - 1]) === keySku : false;
+      if (!idMatch && !refMatch) continue;
+      const livraison = colLivA ? row[colLivA - 1] : null;
+      const dms = colDmsA ? row[colDmsA - 1] : null;
+      return { livraison, dms };
+    }
+    return {};
+  }
+
   const C_ID = colExact(HEADERS.STOCK.ID);
   const C_LABEL = colExact(HEADERS.STOCK.LIBELLE)
     || colExact(HEADERS.STOCK.LIBELLE_ALT)
@@ -284,6 +320,7 @@ function restoreSaleToStock_(ss, sale) {
   const returnedAt = sale && sale.returnedAt instanceof Date && !isNaN(sale.returnedAt)
     ? sale.returnedAt
     : new Date();
+  const achatInfo = getAchatInfo_(ss, sale && sale.id, sale && sale.sku);
 
   function setValue(column, value) {
     if (!column) return;
@@ -304,6 +341,12 @@ function restoreSaleToStock_(ss, sale) {
   const labelWithBadge = bumpReturnBadge_(sale && sale.libelle !== undefined && sale.libelle !== null ? sale.libelle : '');
   setValue(C_LABEL, labelWithBadge);
 
+  // Livraisons depuis Achats
+  const C_LIVRAISON = colExact(HEADERS.STOCK.DATE_LIVRAISON) || colExact(HEADERS.STOCK.DATE_LIVRAISON_ALT2) || colWhere(h => h.includes('livraison'));
+  if (C_LIVRAISON && achatInfo && achatInfo.livraison instanceof Date && !isNaN(achatInfo.livraison)) {
+    setValue(C_LIVRAISON, achatInfo.livraison);
+  }
+
   if (C_PRIX && sale) {
     const priceValue = valueToNumber_(sale.prixVente);
     if (Number.isFinite(priceValue)) {
@@ -315,7 +358,12 @@ function restoreSaleToStock_(ss, sale) {
   setValue(C_LOT, sale && sale.lot !== undefined && sale.lot !== null ? sale.lot : '');
 
   if (C_DMS) {
-    setValue(C_DMS, returnedAt);
+    // si Achats a une date de mise en stock, on la réplique, sinon la date du retour
+    if (achatInfo && achatInfo.dms instanceof Date && !isNaN(achatInfo.dms)) {
+      setValue(C_DMS, achatInfo.dms);
+    } else {
+      setValue(C_DMS, returnedAt);
+    }
   }
 
   if (C_STAMPV) {
