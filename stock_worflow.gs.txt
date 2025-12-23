@@ -42,8 +42,10 @@ function handleStock(e) {
     || colWhere(h => h.includes('libell'))
     || colWhere(h => h.includes('article'))
     || 2;
-  const C_OLD_SKU = colExact(HEADERS.STOCK.OLD_SKU) || 2;
-  const C_SKU     = colExact(HEADERS.STOCK.SKU) || colExact(HEADERS.STOCK.REFERENCE); // B/C
+  const C_OLD_SKU = colExact(HEADERS.STOCK.OLD_SKU);
+  const C_SKU     = colExact(HEADERS.STOCK.SKU)
+    || colExact(HEADERS.STOCK.REFERENCE)
+    || colWhere(h => h.includes('sku')); // Compat titres variés
   const C_PRIX    = colExact(HEADERS.STOCK.PRIX_VENTE)
     || colExact(HEADERS.STOCK.PRIX_VENTE_ALT2)
     || colWhere(h => h.includes("prix") && h.includes("vente"));
@@ -56,7 +58,9 @@ function handleStock(e) {
     || colExact(HEADERS.STOCK.LOT_ALT2)
     || colExact(HEADERS.STOCK.LOT_ALT3)
     || colWhere(h => h.includes('lot'));
-  const C_DMS     = colExact(HEADERS.STOCK.DATE_MISE_EN_STOCK);
+  const C_DMS     = colExact(HEADERS.STOCK.DATE_MISE_EN_STOCK)
+    || colExact(HEADERS.STOCK.DATE_MISE_EN_STOCK_ALT2) // "MIS EN STOCK"
+    || colWhere(h => h.includes('mise en stock'));
 
   const combinedMisCol = resolveCombinedMisEnLigneColumn_(resolver);
   const legacyMisCols = combinedMisCol ? { checkboxCol: 0, dateCol: 0 } : resolveLegacyMisEnLigneColumn_(resolver);
