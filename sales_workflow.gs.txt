@@ -274,7 +274,7 @@ function restoreSaleToStock_(ss, sale) {
       || resA.colWhere(h => h.includes('livraison'));
     const colDmsA = resA.colExact(HEADERS.ACHATS.DATE_MISE_EN_STOCK)
       || resA.colExact(HEADERS.ACHATS.DATE_MISE_EN_STOCK_ALT)
-      || resA.colWhere(h => h.includes('mise en stock'));
+      || resA.colWhere(h => h.includes('mise en stock') || h.includes('mis en stock'));
 
     if (!colIdA && !colRefA) return {};
 
@@ -286,8 +286,8 @@ function restoreSaleToStock_(ss, sale) {
       const idMatch = keyId && colIdA ? normText_(row[colIdA - 1]) === keyId : false;
       const refMatch = keySku && colRefA ? normText_(row[colRefA - 1]) === keySku : false;
       if (!idMatch && !refMatch) continue;
-      const livraison = colLivA ? row[colLivA - 1] : null;
-      const dms = colDmsA ? row[colDmsA - 1] : null;
+      const livraison = colLivA ? getDateOrNull_(row[colLivA - 1]) : null;
+      const dms = colDmsA ? getDateOrNull_(row[colDmsA - 1]) : null;
       return { livraison, dms };
     }
     return {};
@@ -378,13 +378,10 @@ function restoreSaleToStock_(ss, sale) {
   // Exigence : dans Stock, la colonne LIVRAISON doit refléter la date de mise en stock d’Achats
   const C_LIVRAISON = colExact(HEADERS.STOCK.DATE_LIVRAISON) || colExact(HEADERS.STOCK.DATE_LIVRAISON_ALT2) || colWhere(h => h.includes('livraison'));
   if (C_LIVRAISON) {
-    if (achatInfo && achatInfo.dms instanceof Date && !isNaN(achatInfo.dms)) {
-      // LIVRAISON = date de mise en stock Achats
-      setValue(C_LIVRAISON, achatInfo.dms);
-    } else {
-      // Pas d’info → on laisse vide pour éviter une date erronée
-      setValue(C_LIVRAISON, '');
-    }
+    const livraisonDate = (achatInfo && achatInfo.dms instanceof Date && !isNaN(achatInfo.dms))
+      ? achatInfo.dms
+      : (achatInfo && achatInfo.livraison instanceof Date && !isNaN(achatInfo.livraison) ? achatInfo.livraison : returnedAt);
+    setValue(C_LIVRAISON, livraisonDate);
   }
 
   if (C_PRIX && sale) {
