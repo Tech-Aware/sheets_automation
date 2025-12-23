@@ -221,8 +221,39 @@ function restoreSaleToStock_(ss, sale) {
     return { success: false, message: 'La feuille "Stock" ne contient aucune colonne.' };
   }
 
-  const headers = getSheetHeaders_(stock, 'Stock');
-  const resolver = makeHeaderResolver_(headers);
+  // Fallback pour retrouver la vraie ligne d’en-tête dans Stock (si déplacée)
+  function resolveStockHeaderWithFallback_() {
+    const maxProbe = 10;
+    const lastCol = stock.getLastColumn();
+    if (!lastCol) return { headers: [], resolver: makeHeaderResolver_([]), headerRow: 1, dataStartRow: 2, fallback: false };
+
+    const tryRow = (row) => {
+      const headers = stock.getRange(row, 1, 1, lastCol).getValues()[0];
+      return { headers, resolver: makeHeaderResolver_(headers), headerRow: row, dataStartRow: row + 1 };
+    };
+
+    const baseRow = getSheetHeaderRow_('Stock') || 1;
+    const base = tryRow(baseRow);
+    const hasIdAndSku = (res) =>
+      !!(res.colExact(HEADERS.STOCK.ID) || res.colWhere(h => normText_(h) === 'id')) &&
+      !!(res.colExact(HEADERS.STOCK.SKU) || res.colExact(HEADERS.STOCK.REFERENCE) || res.colWhere(h => h.includes('sku') || h.includes('reference')));
+    if (hasIdAndSku(base.resolver)) return Object.assign(base, { fallback: false });
+
+    const limit = Math.min(maxProbe, stock.getLastRow() || maxProbe);
+    for (let r = 1; r <= limit; r++) {
+      const probe = tryRow(r);
+      if (hasIdAndSku(probe.resolver)) {
+        logDebug_('restoreSaleToStock_.fallbackHeader', { headerRow: r });
+        return Object.assign(probe, { fallback: true });
+      }
+    }
+    logDebug_('restoreSaleToStock_.noHeader', { triedRows: limit, lastCol });
+    return Object.assign(base, { fallback: false });
+  }
+
+  const headerInfoStock = resolveStockHeaderWithFallback_();
+  const headers = headerInfoStock.headers;
+  const resolver = headerInfoStock.resolver;
   const colExact = resolver.colExact.bind(resolver);
   const colWhere = resolver.colWhere.bind(resolver);
 
@@ -384,7 +415,7 @@ function restoreSaleToStock_(ss, sale) {
     setValue(C_DVENTE, '');
   }
 
-  const targetRow = Math.max(dataStartRow, stock.getLastRow() + 1);
+  const targetRow = Math.max(headerInfoStock.dataStartRow, stock.getLastRow() + 1);
   stock.getRange(targetRow, 1, 1, lastColumn).setValues([rowValues]);
   logDebug_('restoreSaleToStock.resultRow', {
     targetRow,
