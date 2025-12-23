@@ -9,7 +9,22 @@ function handleStock(e) {
   const DATA_START_ROW = getSheetDataStartRow_('Stock');
 
   // Ignore les edits au-dessus des données
-  if (e.range.getRow() < DATA_START_ROW) return;
+  if (e.range.getRow() < DATA_START_ROW) {
+    logDebug_('handleStock.skip', {
+      ligne: e.range.getRow(),
+      colonne: e.range.getColumn(),
+      headerRow: HEADER_ROW,
+      dataStartRow: DATA_START_ROW,
+      feuille: sh && sh.getName && sh.getName()
+    });
+    return;
+  }
+
+  ss.toast(
+    `Stock • Ligne ${e.range.getRow()} • Colonne ${e.range.getColumn()} • DataStart ${DATA_START_ROW}`,
+    'Diagnostic Stock',
+    4
+  );
 
   const stockHeaders = sh.getRange(HEADER_ROW, 1, 1, sh.getLastColumn()).getValues()[0];
 
@@ -632,6 +647,19 @@ function handleStock(e) {
 
   // 3) VENDU → horodatage + alerte prix, déplacement seulement via "Valider la saisie"
   if (isCombinedVenduCell && C_VENDU && c === C_VENDU) {
+    logDebug_('handleStock.vendu.combined', {
+      ligne: r,
+      colonne: c,
+      C_VENDU,
+      C_DVENTE,
+      valeur: e.value,
+      ancienneValeur: e.oldValue
+    });
+    ss.toast(
+      `VENDU (combiné) • ligne ${r} • valeur ${e.value || '—'} • col VENDU ${C_VENDU} / DATE ${C_DVENTE}`,
+      'Diagnostic Stock',
+      5
+    );
     const cell = sh.getRange(r, C_VENDU);
     const previousValidation = cell.getDataValidation();
     const wasCheckbox = isCheckboxValidation_(previousValidation);
@@ -767,6 +795,19 @@ function handleStock(e) {
   }
 
   if (!isCombinedVenduCell && C_VENDU && c === C_VENDU) {
+    logDebug_('handleStock.vendu.legacy', {
+      ligne: r,
+      colonne: c,
+      C_VENDU,
+      C_DVENTE,
+      valeur: e.value,
+      ancienneValeur: e.oldValue
+    });
+    ss.toast(
+      `VENDU (legacy) • ligne ${r} • valeur ${e.value || '—'} • col VENDU ${C_VENDU} / DATE ${C_DVENTE}`,
+      'Diagnostic Stock',
+      5
+    );
     const dv = sh.getRange(r, C_DVENTE);
 
     if (turnedOn) {
