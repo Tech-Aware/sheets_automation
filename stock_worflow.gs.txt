@@ -6,8 +6,9 @@ function handleStock(e) {
   const CLEAR_ON_UNCHECK = false;
 
   const sheetName = sh && typeof sh.getName === 'function' ? sh.getName() : 'Stock';
-  const HEADER_ROW = getSheetHeaderRow_(sheetName);
-  const DATA_START_ROW = getSheetDataStartRow_(sheetName);
+  const layoutName = (SHEET_LAYOUT && SHEET_LAYOUT[sheetName]) ? sheetName : 'Stock';
+  const HEADER_ROW = getSheetHeaderRow_(layoutName);
+  const DATA_START_ROW = getSheetDataStartRow_(layoutName);
 
   // Ignore les edits au-dessus des données
   if (e.range.getRow() < DATA_START_ROW) {
@@ -22,7 +23,7 @@ function handleStock(e) {
   }
 
   ss.toast(
-    `${sheetName} • Ligne ${e.range.getRow()} • Colonne ${e.range.getColumn()} • DataStart ${DATA_START_ROW}`,
+    `${sheetName} • Ligne ${e.range.getRow()} • Colonne ${e.range.getColumn()} • DataStart ${DATA_START_ROW} • Layout ${layoutName}`,
     'Diagnostic Stock',
     4
   );
