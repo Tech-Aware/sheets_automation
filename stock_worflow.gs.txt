@@ -6,7 +6,16 @@ function handleStock(e) {
   const CLEAR_ON_UNCHECK = false;
 
   const sheetName = sh && typeof sh.getName === 'function' ? sh.getName() : 'Stock';
-  const layoutName = (SHEET_LAYOUT && SHEET_LAYOUT[sheetName]) ? sheetName : 'Stock';
+
+  function resolveLayoutName_(name) {
+    const layout = SHEET_LAYOUT || {};
+    if (layout[name]) return name;
+    const normalizedName = normText_(name || '');
+    const match = Object.keys(layout).find(key => normText_(key) === normalizedName);
+    return match || 'Stock';
+  }
+
+  const layoutName = resolveLayoutName_(sheetName);
   const HEADER_ROW = getSheetHeaderRow_(layoutName);
   const DATA_START_ROW = getSheetDataStartRow_(layoutName);
 
@@ -92,6 +101,22 @@ function handleStock(e) {
   || colExact(HEADERS.STOCK.REPUBLIE_ALT)
   || colExact(HEADERS.STOCK.REPUBLIE_ALT2)
   || colWhere(h => h.toLowerCase().includes('republ'));
+
+  if (!C_VENDU || !C_DVENTE) {
+    const missing = [];
+    if (!C_VENDU) missing.push('VENDU');
+    if (!C_DVENTE) missing.push('DATE DE VENTE');
+    const message = `Colonnes manquantes: ${missing.join(', ')} — layout ${layoutName}, headerRow ${HEADER_ROW}, dataStart ${DATA_START_ROW}`;
+    logDebug_('handleStock.missingColumns', {
+      message,
+      layoutName,
+      headerRow: HEADER_ROW,
+      dataStartRow: DATA_START_ROW,
+      headersPreview: stockHeaders.slice(0, 15)
+    });
+    ss.toast(message, 'Stock', 6);
+    return;
+  }
 
   const c = e.range.getColumn(), r = e.range.getRow();
   if (r === HEADER_ROW) return;
