@@ -603,11 +603,34 @@ function getAchatsRecordByIdOrSku_(ss, idVal, sku) {
   const lastRow = achats.getLastRow();
   if (lastRow < 2) return null;
 
-  const headers = achats.getRange(1, 1, 1, achats.getLastColumn()).getValues()[0];
-  const resolver = makeHeaderResolver_(headers);
+  function resolveAchatsHeaderWithFallback_() {
+    const maxProbe = 10;
+    const lastCol = achats.getLastColumn();
+    const tryRow = (row) => {
+      const headers = achats.getRange(row, 1, 1, lastCol).getValues()[0];
+      return { headers, resolver: makeHeaderResolver_(headers), headerRow: row };
+    };
+    const base = tryRow(1);
+    const hasCore = (res) => res.colExact(HEADERS.ACHATS.ID) && (res.colExact(HEADERS.ACHATS.REFERENCE) || res.colWhere(h => h.includes('reference')));
+    if (hasCore(base.resolver)) return Object.assign(base, { fallback: false });
+    const limit = Math.min(maxProbe, lastRow);
+    for (let r = 2; r <= limit; r++) {
+      const probe = tryRow(r);
+      if (hasCore(probe.resolver)) {
+        logDebug_('getAchatsRecordByIdOrSku_.fallbackHeader', { headerRow: r });
+        return Object.assign(probe, { fallback: true });
+      }
+    }
+    logDebug_('getAchatsRecordByIdOrSku_.noHeader', { triedRows: limit, lastCol });
+    return Object.assign(base, { fallback: false });
+  }
+
+  const headerInfo = resolveAchatsHeaderWithFallback_();
+  const headers = headerInfo.headers;
+  const resolver = headerInfo.resolver;
 
   const colId = resolver.colExact(HEADERS.ACHATS.ID);
-  const colRef = resolver.colExact(HEADERS.ACHATS.REFERENCE);
+  const colRef = resolver.colExact(HEADERS.ACHATS.REFERENCE) || resolver.colWhere(h => h.includes('reference'));
   const colPrix = resolver.colExact(HEADERS.ACHATS.PRIX_UNITAIRE_TTC)
     || resolver.colExact(HEADERS.ACHATS.PRIX_UNITAIRE_TTC_ALT)
     || resolver.colExact(HEADERS.ACHATS.PRIX_UNITAIRE_BRUTE)
