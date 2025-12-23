@@ -527,6 +527,15 @@ function exportVente_(e, row, C_ID, C_LABEL, C_SKU, C_PRIX, C_DVENTE, C_STAMPV, 
     ? prix / prixAchat
     : '';
 
+  if (!Number.isFinite(prixAchat)) {
+    logDebug_('exportVente_.prixAchatManquant', {
+      id: idVal,
+      sku,
+      headerRowStock: headerInfo.headerRow || getSheetHeaderRow_('Stock'),
+      prixAchat
+    });
+  }
+
   // Insert vente
   const start = Math.max(2, ventes.getLastRow() + 1);
   const newRow = Array(widthVentes).fill("");
@@ -610,11 +619,12 @@ function getAchatsRecordByIdOrSku_(ss, idVal, sku) {
       const headers = achats.getRange(row, 1, 1, lastCol).getValues()[0];
       return { headers, resolver: makeHeaderResolver_(headers), headerRow: row };
     };
-    const base = tryRow(1);
+    const baseRow = getSheetHeaderRow_('Achats') || 1;
+    const base = tryRow(baseRow);
     const hasCore = (res) => res.colExact(HEADERS.ACHATS.ID) && (res.colExact(HEADERS.ACHATS.REFERENCE) || res.colWhere(h => h.includes('reference')));
     if (hasCore(base.resolver)) return Object.assign(base, { fallback: false });
     const limit = Math.min(maxProbe, lastRow);
-    for (let r = 2; r <= limit; r++) {
+    for (let r = 1; r <= limit; r++) {
       const probe = tryRow(r);
       if (hasCore(probe.resolver)) {
         logDebug_('getAchatsRecordByIdOrSku_.fallbackHeader', { headerRow: r });
@@ -628,6 +638,7 @@ function getAchatsRecordByIdOrSku_(ss, idVal, sku) {
   const headerInfo = resolveAchatsHeaderWithFallback_();
   const headers = headerInfo.headers;
   const resolver = headerInfo.resolver;
+  const dataStartRow = headerInfo.headerRow + 1;
 
   const colId = resolver.colExact(HEADERS.ACHATS.ID);
   const colRef = resolver.colExact(HEADERS.ACHATS.REFERENCE) || resolver.colWhere(h => h.includes('reference'));
@@ -651,7 +662,11 @@ function getAchatsRecordByIdOrSku_(ss, idVal, sku) {
 
   if (!keyId && !keyRef) return null;
 
-  const data = achats.getRange(2, 1, lastRow - 1, achats.getLastColumn()).getValues();
+  const dataStart = Math.max(dataStartRow, 2);
+  const dataHeight = Math.max(lastRow - dataStart + 1, 0);
+  if (dataHeight <= 0) return null;
+
+  const data = achats.getRange(dataStart, 1, dataHeight, achats.getLastColumn()).getValues();
   for (let i = 0; i < data.length; i++) {
     const row = data[i];
     const idMatch = keyId && colId ? normText_(row[colId - 1]) === keyId : false;
@@ -659,13 +674,38 @@ function getAchatsRecordByIdOrSku_(ss, idVal, sku) {
     if (!idMatch && !refMatch) continue;
 
     const prixCell = colPrix ? row[colPrix - 1] : null;
-    const prixAchat = typeof prixCell === 'number' && Number.isFinite(prixCell) ? prixCell : null;
+    let prixAchat = null;
+    if (typeof prixCell === 'number' && Number.isFinite(prixCell)) {
+      prixAchat = prixCell;
+    } else {
+      const parsed = toNumber_(prixCell);
+      if (Number.isFinite(parsed)) {
+        prixAchat = parsed;
+      }
+    }
     const dateCell = colDate ? row[colDate - 1] : null;
     const dateReception = dateCell instanceof Date && !isNaN(dateCell) ? dateCell : null;
+
+    logDebug_('getAchatsRecordByIdOrSku_.match', {
+      rowIndex: i + dataStart,
+      prixAchat,
+      dateReception,
+      prixCell,
+      idMatch,
+      refMatch
+    });
 
     return { prixAchat, dateReception };
   }
 
+  logDebug_('getAchatsRecordByIdOrSku_.notFound', {
+    id: keyId,
+    sku: keyRef,
+    headerRow: headerInfo.headerRow,
+    dataStartRow,
+    lastRow,
+    headersSample: headers.slice(0, 15)
+  });
   return null;
 }
 
