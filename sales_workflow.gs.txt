@@ -2,31 +2,61 @@ function handleVentesReturn(e) {
   const ss = e && e.source;
   const sh = ss && ss.getActiveSheet();
   const range = e && e.range;
-  if (!ss || !sh || sh.getName() !== 'Ventes' || !range) return;
+  logDebug_('handleVentesReturn.start', {
+    sheet: sh && sh.getName && sh.getName(),
+    row: range && range.getRow(),
+    col: range && range.getColumn(),
+    value: e && e.value,
+    oldValue: e && e.oldValue
+  });
+  if (!ss || !sh || sh.getName() !== 'Ventes' || !range) {
+    logDebug_('handleVentesReturn.skip', { reason: 'sheet/range invalid', sheet: sh && sh.getName && sh.getName() });
+    return;
+  }
 
   const row = range.getRow();
-  if (row <= 1) return;
+  if (row <= 1) {
+    logDebug_('handleVentesReturn.skip', { reason: 'header row', row });
+    return;
+  }
 
   const lastColumn = sh.getLastColumn();
-  if (!lastColumn) return;
+  if (!lastColumn) {
+    logDebug_('handleVentesReturn.skip', { reason: 'no columns' });
+    return;
+  }
 
   const headers = sh.getRange(1, 1, 1, lastColumn).getValues()[0];
   const resolver = makeHeaderResolver_(headers);
   const colReturn = resolver.colExact(HEADERS.VENTES.RETOUR)
     || resolver.colWhere(header => header.includes('retour'));
-  if (!colReturn || range.getColumn() !== colReturn) return;
+  if (!colReturn || range.getColumn() !== colReturn) {
+    logDebug_('handleVentesReturn.skip', { reason: 'not return column', colReturn, col: range.getColumn() });
+    return;
+  }
 
   logDebug_('handleVentesReturn', { ligne: row, colonne: range.getColumn(), valeur: newValue });
 
   const newValue = e.value !== undefined ? e.value : range.getValue();
   if (!isReturnFlagActive_(newValue)) {
+    logDebug_('handleVentesReturn.skip', { reason: 'flag not active', value: newValue });
     return;
   }
 
   const rowValues = sh.getRange(row, 1, 1, lastColumn).getValues()[0];
   const sale = buildSaleRecordFromVentesRow_(rowValues, resolver, row);
+  logDebug_('handleVentesReturn.sale', {
+    id: sale && sale.id,
+    sku: sale && sale.sku,
+    libelle: sale && sale.libelle,
+    dateVente: sale && sale.dateVente,
+    lot: sale && sale.lot,
+    taille: sale && sale.taille
+  });
+
   // Nouveau code :
   if (!sale.dateVente) {
+    logDebug_('handleVentesReturn.stop', { reason: 'dateVente missing' });
     clearReturnFlag_(range);
     ss.toast('Impossible de traiter le retour : date de vente introuvable.', 'Ventes', 8);
     logDebug_('handleVentesReturn', { ligne: row, statut: 'arrêt', raison: 'date de vente manquante' });
@@ -59,6 +89,7 @@ function handleVentesReturn(e) {
       Object.assign({}, sale, { retour: true }),
       { updateExisting: true }
     );
+    logDebug_('handleVentesReturn.ledger', { result: ledgerResult });
 
     if (!ledgerResult || !ledgerResult.removed) {
       clearReturnFlag_(range);
@@ -69,6 +100,7 @@ function handleVentesReturn(e) {
 
     const returnedAt = new Date();
     const stockResult = restoreSaleToStock_(ss, Object.assign({}, sale, { returnedAt }));
+    logDebug_('handleVentesReturn.restoreStock', stockResult);
     if (!stockResult.success) {
       copySaleToMonthlySheet_(ss, sale, { updateExisting: true });
       clearReturnFlag_(range);
@@ -81,6 +113,7 @@ function handleVentesReturn(e) {
     ss.toast(`Retour traité pour ${labelForToast}.`, 'Ventes', 5);
     logDebug_('handleVentesReturn', { ligne: row, statut: 'succès', cibleStock: stockResult.row });
   } catch (err) {
+    logDebug_('handleVentesReturn.exception', { message: err && err.message, stack: err && err.stack });
     clearReturnFlag_(range);
     const message = err && err.message ? err.message : err;
     ss.toast(`Erreur lors du retour : ${message}`, 'Ventes', 10);
