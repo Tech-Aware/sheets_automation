@@ -984,6 +984,7 @@ function validateAllSales() {
     || 2;
   const C_SKU      = colExact(HEADERS.STOCK.SKU) || colExact(HEADERS.STOCK.REFERENCE);
   const C_PRIX     = colExact(HEADERS.STOCK.PRIX_VENTE)
+    || colExact(HEADERS.STOCK.PRIX_VENTE_ALT2)
     || colWhere(h => h.includes("prix") && h.includes("vente"));
   const C_TAILLE   = colExact(HEADERS.STOCK.TAILLE_COLIS)
     || colExact(HEADERS.STOCK.TAILLE_COLIS_ALT)

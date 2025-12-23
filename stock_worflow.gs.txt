@@ -20,21 +20,27 @@ function handleStock(e) {
   const C_ID      = colExact(HEADERS.STOCK.ID);
   const C_LABEL   = colExact(HEADERS.STOCK.LIBELLE)
     || colExact(HEADERS.STOCK.LIBELLE_ALT)
+    || colExact(HEADERS.STOCK.LIBELLE_ALT2)
     || colExact(HEADERS.STOCK.ARTICLE)
     || colExact(HEADERS.STOCK.ARTICLE_ALT)
+    || colExact(HEADERS.STOCK.ARTICLE_ALT2)
     || colWhere(h => h.includes('libell'))
     || colWhere(h => h.includes('article'))
     || 2;
   const C_OLD_SKU = colExact(HEADERS.STOCK.OLD_SKU) || 2;
   const C_SKU     = colExact(HEADERS.STOCK.SKU) || colExact(HEADERS.STOCK.REFERENCE); // B/C
   const C_PRIX    = colExact(HEADERS.STOCK.PRIX_VENTE)
+    || colExact(HEADERS.STOCK.PRIX_VENTE_ALT2)
     || colWhere(h => h.includes("prix") && h.includes("vente"));
   const C_TAILLE  = colExact(HEADERS.STOCK.TAILLE_COLIS)
     || colExact(HEADERS.STOCK.TAILLE_COLIS_ALT)
     || colExact(HEADERS.STOCK.TAILLE)
     || colWhere(isShippingSizeHeader_);
   const tailleHeaderLabel = getHeaderLabel_(resolver, C_TAILLE, HEADERS.STOCK.TAILLE);
-  const C_LOT     = colExact(HEADERS.STOCK.LOT) || colWhere(h => h.includes('lot'));
+  const C_LOT     = colExact(HEADERS.STOCK.LOT)
+    || colExact(HEADERS.STOCK.LOT_ALT2)
+    || colExact(HEADERS.STOCK.LOT_ALT3)
+    || colWhere(h => h.includes('lot'));
   const C_DMS     = colExact(HEADERS.STOCK.DATE_MISE_EN_STOCK);
 
   const combinedMisCol = resolveCombinedMisEnLigneColumn_(resolver);
@@ -63,6 +69,7 @@ function handleStock(e) {
 
   const C_REPUB = colExact(HEADERS.STOCK.REPUBLIE)
   || colExact(HEADERS.STOCK.REPUBLIE_ALT)
+  || colExact(HEADERS.STOCK.REPUBLIE_ALT2)
   || colWhere(h => h.toLowerCase().includes('republ'));
 
   const c = e.range.getColumn(), r = e.range.getRow();

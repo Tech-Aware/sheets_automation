@@ -227,7 +227,9 @@ function resolveCombinedMisEnLigneColumn_(resolver) {
   const colWhere = resolver.colWhere ? resolver.colWhere.bind(resolver) : () => 0;
 
   const combined = colExact(HEADERS.STOCK.MIS_EN_LIGNE)
-    || colWhere(h => h.includes('mis en ligne') && h.includes('date'));
+    || colExact(HEADERS.STOCK.MIS_EN_LIGNE_ALT)
+    || colExact(HEADERS.STOCK.MIS_EN_LIGNE_ALT2)
+    || colWhere(h => h.includes('mis en ligne'));
   if (combined) {
     return combined;
   }
@@ -241,8 +243,10 @@ function resolveLegacyMisEnLigneColumn_(resolver) {
   const colWhere = resolver.colWhere ? resolver.colWhere.bind(resolver) : () => 0;
 
   const checkboxCol = colExact(HEADERS.STOCK.MIS_EN_LIGNE_ALT)
+    || colExact(HEADERS.STOCK.MIS_EN_LIGNE_ALT2)
     || colWhere(h => h.includes('mis') && h.includes('ligne') && !h.includes('date'));
   const dateCol = colExact(HEADERS.STOCK.DATE_MISE_EN_LIGNE_ALT)
+    || colExact(HEADERS.STOCK.DATE_MISE_EN_LIGNE_ALT2)
     || colWhere(h => h.includes('date') && h.includes('mise en ligne'));
 
   return { checkboxCol, dateCol };
@@ -254,9 +258,10 @@ function resolveCombinedPublicationColumn_(resolver) {
   const colWhere = resolver.colWhere ? resolver.colWhere.bind(resolver) : () => 0;
 
   const combined = colExact(HEADERS.STOCK.PUBLIE)
+    || colExact(HEADERS.STOCK.PUBLIE_ALT)
+    || colExact(HEADERS.STOCK.PUBLIE_ALT2)
     || colWhere(h =>
       h.includes('publi') &&
-      h.includes('date') &&
       !h.includes('republ') // ✅ exclut REPUBLIÉ
     );
 
@@ -270,6 +275,7 @@ function resolveLegacyPublicationColumns_(resolver) {
   const colWhere = resolver.colWhere ? resolver.colWhere.bind(resolver) : () => 0;
 
   const checkboxCol = colExact(HEADERS.STOCK.PUBLIE_ALT)
+    || colExact(HEADERS.STOCK.PUBLIE_ALT2)
     || colWhere(h =>
       h.includes('publi') &&
       !h.includes('date') &&
@@ -277,6 +283,7 @@ function resolveLegacyPublicationColumns_(resolver) {
     );
 
   const dateCol = colExact(HEADERS.STOCK.DATE_PUBLICATION_ALT)
+    || colExact(HEADERS.STOCK.DATE_PUBLICATION_ALT2)
     || colWhere(h =>
       h.includes('date') &&
       h.includes('publi') &&
@@ -293,7 +300,9 @@ function resolveCombinedVenduColumn_(resolver) {
   const colWhere = resolver.colWhere ? resolver.colWhere.bind(resolver) : () => 0;
 
   const combined = colExact(HEADERS.STOCK.VENDU)
-    || colWhere(h => h.includes('vendu') && h.includes('date'));
+    || colExact(HEADERS.STOCK.VENDU_ALT)
+    || colExact(HEADERS.STOCK.VENDU_ALT2)
+    || colWhere(h => h.includes('vendu'));
   return combined || 0;
 }
 
@@ -303,8 +312,10 @@ function resolveLegacyVenduColumns_(resolver) {
   const colWhere = resolver.colWhere ? resolver.colWhere.bind(resolver) : () => 0;
 
   const checkboxCol = colExact(HEADERS.STOCK.VENDU_ALT)
+    || colExact(HEADERS.STOCK.VENDU_ALT2)
     || colWhere(h => h.includes('vendu') && !h.includes('date'));
   const dateCol = colExact(HEADERS.STOCK.DATE_VENTE_ALT)
+    || colExact(HEADERS.STOCK.DATE_VENTE_ALT2)
     || colWhere(h => h.includes('date') && (h.includes('vente') || h.includes('vendu')));
 
   return { checkboxCol, dateCol };

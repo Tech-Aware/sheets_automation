@@ -193,20 +193,26 @@ function restoreSaleToStock_(ss, sale) {
   const C_ID = colExact(HEADERS.STOCK.ID);
   const C_LABEL = colExact(HEADERS.STOCK.LIBELLE)
     || colExact(HEADERS.STOCK.LIBELLE_ALT)
+    || colExact(HEADERS.STOCK.LIBELLE_ALT2)
     || colExact(HEADERS.STOCK.ARTICLE)
     || colExact(HEADERS.STOCK.ARTICLE_ALT)
+    || colExact(HEADERS.STOCK.ARTICLE_ALT2)
     || colWhere(h => h.includes('libell'))
     || colWhere(h => h.includes('article'));
   const C_SKU = colExact(HEADERS.STOCK.SKU)
     || colExact(HEADERS.STOCK.REFERENCE)
     || colWhere(h => h.includes('sku'));
   const C_PRIX = colExact(HEADERS.STOCK.PRIX_VENTE)
+    || colExact(HEADERS.STOCK.PRIX_VENTE_ALT2)
     || colWhere(h => h.includes('prix') && h.includes('vente'));
   const C_TAILLE = colExact(HEADERS.STOCK.TAILLE_COLIS)
     || colExact(HEADERS.STOCK.TAILLE_COLIS_ALT)
     || colExact(HEADERS.STOCK.TAILLE)
     || colWhere(isShippingSizeHeader_);
-  const C_LOT = colExact(HEADERS.STOCK.LOT) || colWhere(h => h.includes('lot'));
+  const C_LOT = colExact(HEADERS.STOCK.LOT)
+    || colExact(HEADERS.STOCK.LOT_ALT2)
+    || colExact(HEADERS.STOCK.LOT_ALT3)
+    || colWhere(h => h.includes('lot'));
   const C_DMS = colExact(HEADERS.STOCK.DATE_MISE_EN_STOCK) || colWhere(h => h.includes('mise en stock'));
   const C_STAMPV = colExact(HEADERS.STOCK.VENTE_EXPORTEE_LE) || colWhere(h => h.includes('exporte'));
   const C_VALIDE = colExact(HEADERS.STOCK.VALIDER_SAISIE)
