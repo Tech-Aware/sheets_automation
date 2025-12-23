@@ -2,25 +2,29 @@ function handleVentesReturn(e) {
   const ss = e && e.source;
   const sh = ss && ss.getActiveSheet();
   const range = e && e.range;
-  logDebug_('handleVentesReturn.start', {
-    sheet: sh && sh.getName && sh.getName(),
-    row: range && range.getRow(),
-    col: range && range.getColumn(),
-    value: e && e.value,
-    oldValue: e && e.oldValue
-  });
   if (!ss || !sh || sh.getName() !== 'Ventes' || !range) {
     logDebug_('handleVentesReturn.skip', { reason: 'sheet/range invalid', sheet: sh && sh.getName && sh.getName() });
     return;
   }
 
   const row = range.getRow();
+  const col = range.getColumn();
+  const lastColumn = sh.getLastColumn();
+  const newValue = e && e.value !== undefined ? e.value : range.getValue();
+
+  logDebug_('handleVentesReturn.start', {
+    sheet: sh && sh.getName && sh.getName(),
+    row,
+    col,
+    value: newValue,
+    oldValue: e && e.oldValue
+  });
+
   if (row <= 1) {
     logDebug_('handleVentesReturn.skip', { reason: 'header row', row });
     return;
   }
 
-  const lastColumn = sh.getLastColumn();
   if (!lastColumn) {
     logDebug_('handleVentesReturn.skip', { reason: 'no columns' });
     return;
@@ -30,14 +34,13 @@ function handleVentesReturn(e) {
   const resolver = makeHeaderResolver_(headers);
   const colReturn = resolver.colExact(HEADERS.VENTES.RETOUR)
     || resolver.colWhere(header => header.includes('retour'));
-  if (!colReturn || range.getColumn() !== colReturn) {
-    logDebug_('handleVentesReturn.skip', { reason: 'not return column', colReturn, col: range.getColumn() });
+  if (!colReturn || col !== colReturn) {
+    logDebug_('handleVentesReturn.skip', { reason: 'not return column', colReturn, col });
     return;
   }
 
-  logDebug_('handleVentesReturn', { ligne: row, colonne: range.getColumn(), valeur: newValue });
+  logDebug_('handleVentesReturn', { ligne: row, colonne: col, valeur: newValue });
 
-  const newValue = e.value !== undefined ? e.value : range.getValue();
   if (!isReturnFlagActive_(newValue)) {
     logDebug_('handleVentesReturn.skip', { reason: 'flag not active', value: newValue });
     return;
