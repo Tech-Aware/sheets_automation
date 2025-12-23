@@ -5,11 +5,27 @@ function handleStock(e) {
   const turnedOff = (e.value === "FALSE") || (e.value === false);
   const CLEAR_ON_UNCHECK = false;
 
-  const HEADER_ROW = getSheetHeaderRow_('Stock');
-  const DATA_START_ROW = getSheetDataStartRow_('Stock');
+  const sheetName = sh && typeof sh.getName === 'function' ? sh.getName() : 'Stock';
+  const HEADER_ROW = getSheetHeaderRow_(sheetName);
+  const DATA_START_ROW = getSheetDataStartRow_(sheetName);
 
   // Ignore les edits au-dessus des données
-  if (e.range.getRow() < DATA_START_ROW) return;
+  if (e.range.getRow() < DATA_START_ROW) {
+    logDebug_('handleStock.skip', {
+      ligne: e.range.getRow(),
+      colonne: e.range.getColumn(),
+      headerRow: HEADER_ROW,
+      dataStartRow: DATA_START_ROW,
+      feuille: sheetName
+    });
+    return;
+  }
+
+  ss.toast(
+    `${sheetName} • Ligne ${e.range.getRow()} • Colonne ${e.range.getColumn()} • DataStart ${DATA_START_ROW}`,
+    'Diagnostic Stock',
+    4
+  );
 
   const stockHeaders = sh.getRange(HEADER_ROW, 1, 1, sh.getLastColumn()).getValues()[0];
 
@@ -27,8 +43,10 @@ function handleStock(e) {
     || colWhere(h => h.includes('libell'))
     || colWhere(h => h.includes('article'))
     || 2;
-  const C_OLD_SKU = colExact(HEADERS.STOCK.OLD_SKU) || 2;
-  const C_SKU     = colExact(HEADERS.STOCK.SKU) || colExact(HEADERS.STOCK.REFERENCE); // B/C
+  const C_OLD_SKU = colExact(HEADERS.STOCK.OLD_SKU);
+  const C_SKU     = colExact(HEADERS.STOCK.SKU)
+    || colExact(HEADERS.STOCK.REFERENCE)
+    || colWhere(h => h.includes('sku')); // Compat titres variés
   const C_PRIX    = colExact(HEADERS.STOCK.PRIX_VENTE)
     || colExact(HEADERS.STOCK.PRIX_VENTE_ALT2)
     || colWhere(h => h.includes("prix") && h.includes("vente"));
@@ -41,7 +59,9 @@ function handleStock(e) {
     || colExact(HEADERS.STOCK.LOT_ALT2)
     || colExact(HEADERS.STOCK.LOT_ALT3)
     || colWhere(h => h.includes('lot'));
-  const C_DMS     = colExact(HEADERS.STOCK.DATE_MISE_EN_STOCK);
+  const C_DMS     = colExact(HEADERS.STOCK.DATE_MISE_EN_STOCK)
+    || colExact(HEADERS.STOCK.DATE_MISE_EN_STOCK_ALT2) // "MIS EN STOCK"
+    || colWhere(h => h.includes('mise en stock'));
 
   const combinedMisCol = resolveCombinedMisEnLigneColumn_(resolver);
   const legacyMisCols = combinedMisCol ? { checkboxCol: 0, dateCol: 0 } : resolveLegacyMisEnLigneColumn_(resolver);
@@ -632,6 +652,19 @@ function handleStock(e) {
 
   // 3) VENDU → horodatage + alerte prix, déplacement seulement via "Valider la saisie"
   if (isCombinedVenduCell && C_VENDU && c === C_VENDU) {
+    logDebug_('handleStock.vendu.combined', {
+      ligne: r,
+      colonne: c,
+      C_VENDU,
+      C_DVENTE,
+      valeur: e.value,
+      ancienneValeur: e.oldValue
+    });
+    ss.toast(
+      `VENDU (combiné) • ligne ${r} • valeur ${e.value || '—'} • col VENDU ${C_VENDU} / DATE ${C_DVENTE}`,
+      'Diagnostic Stock',
+      5
+    );
     const cell = sh.getRange(r, C_VENDU);
     const previousValidation = cell.getDataValidation();
     const wasCheckbox = isCheckboxValidation_(previousValidation);
@@ -767,6 +800,19 @@ function handleStock(e) {
   }
 
   if (!isCombinedVenduCell && C_VENDU && c === C_VENDU) {
+    logDebug_('handleStock.vendu.legacy', {
+      ligne: r,
+      colonne: c,
+      C_VENDU,
+      C_DVENTE,
+      valeur: e.value,
+      ancienneValeur: e.oldValue
+    });
+    ss.toast(
+      `VENDU (legacy) • ligne ${r} • valeur ${e.value || '—'} • col VENDU ${C_VENDU} / DATE ${C_DVENTE}`,
+      'Diagnostic Stock',
+      5
+    );
     const dv = sh.getRange(r, C_DVENTE);
 
     if (turnedOn) {
