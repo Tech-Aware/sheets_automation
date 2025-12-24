@@ -974,7 +974,8 @@ function bulkValidateStockSelection() {
 
   const C_VALIDE = colExact(HEADERS.STOCK.VALIDER_SAISIE)
     || colExact(HEADERS.STOCK.VALIDER_SAISIE_ALT)
-    || colWhere(h => h.includes('valider'));
+    || colWhere(h => h.includes('valider'))
+    || colWhere(h => h.includes('valid')); // fallback large (ex: "Validation saisie")
   const C_ID = colExact(HEADERS.STOCK.ID);
   const C_LABEL = colExact(HEADERS.STOCK.LIBELLE)
     || colExact(HEADERS.STOCK.LIBELLE_ALT)
@@ -1005,6 +1006,18 @@ function bulkValidateStockSelection() {
   const legacyVenduCols = combinedVenduCol ? { checkboxCol: 0, dateCol: 0 } : resolveLegacyVenduColumns_(resolver);
   const useCombinedVenduCol = !!combinedVenduCol;
 
+  logDebug_('bulkValidateStockSelection.columns', {
+    headerRow: getSheetHeaderRow_('Stock'),
+    dataStartRow,
+    headersPreview: headers.slice(0, 20),
+    resolved: {
+      C_VALIDE, C_ID, C_LABEL, C_SKU, C_PRIX, C_TAILLE, C_LOT, C_STAMPV,
+      combinedFlags: { useCombinedMisCol, useCombinedPubCol, useCombinedVenduCol },
+      chronology: { C_DMS, C_DMIS: useCombinedMisCol ? combinedMisCol : legacyMisCols.dateCol, C_DPUB, C_DVENTE }
+    },
+    normalizedHeaders: resolver.normalized ? resolver.normalized.slice(0, 20) : []
+  });
+
   const C_DMIS = useCombinedMisCol ? combinedMisCol : legacyMisCols.dateCol;
   const C_DPUB = useCombinedPubCol ? combinedPubCol : legacyPubCols.dateCol;
   const C_VENDU = useCombinedVenduCol ? combinedVenduCol : legacyVenduCols.checkboxCol;
@@ -1017,18 +1030,37 @@ function bulkValidateStockSelection() {
     || colWhere(h => h.includes('mise en stock'));
 
   if (!C_VALIDE) {
+    logDebug_('bulkValidateStockSelection.error', {
+      reason: 'C_VALIDE missing',
+      headersPreview: headers.slice(0, 25),
+      normalizedHeaders: resolver.normalized ? resolver.normalized.slice(0, 25) : []
+    });
     ss.toast('Colonne "Valider la saisie" introuvable dans Stock.', 'Validation en lot', 8);
     return;
   }
   if (!C_VENDU || !C_DVENTE) {
+    logDebug_('bulkValidateStockSelection.error', {
+      reason: 'C_VENDU or C_DVENTE missing',
+      C_VENDU,
+      C_DVENTE,
+      headersPreview: headers.slice(0, 25)
+    });
     ss.toast('Colonnes "Vendu" ou "Date de vente" introuvables pour valider la sélection.', 'Validation en lot', 8);
     return;
   }
   if (!C_PRIX) {
+    logDebug_('bulkValidateStockSelection.error', {
+      reason: 'C_PRIX missing',
+      headersPreview: headers.slice(0, 25)
+    });
     ss.toast(`Colonne ${HEADERS.STOCK.PRIX_VENTE} introuvable.`, 'Validation en lot', 8);
     return;
   }
   if (!C_TAILLE) {
+    logDebug_('bulkValidateStockSelection.error', {
+      reason: 'C_TAILLE missing',
+      headersPreview: headers.slice(0, 25)
+    });
     ss.toast(`Colonne ${tailleHeaderLabel} introuvable.`, 'Validation en lot', 8);
     return;
   }
