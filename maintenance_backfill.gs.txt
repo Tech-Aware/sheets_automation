@@ -952,6 +952,216 @@ function runBackfillMonthlyLedgers_(filter) {
   ss.toast(messageParts.join(' '), title, 8);
 }
 
+function bulkValidateStockSelection() {
+  const ss = SpreadsheetApp.getActive();
+  const sh = ss.getActiveSheet();
+  if (!sh || sh.getName() !== 'Stock') {
+    ss.toast('Ouvre la feuille "Stock" puis sélectionne la colonne "Valider".', 'Validation en lot', 6);
+    return;
+  }
+
+  const dataStartRow = getSheetDataStartRow_('Stock');
+  const lastRow = sh.getLastRow();
+  if (lastRow < dataStartRow) {
+    ss.toast('Aucune ligne à traiter dans "Stock".', 'Validation en lot', 6);
+    return;
+  }
+
+  const headers = getSheetHeaders_(sh, 'Stock');
+  const resolver = makeHeaderResolver_(headers);
+  const colExact = resolver.colExact.bind(resolver);
+  const colWhere = resolver.colWhere.bind(resolver);
+
+  const C_VALIDE = colExact(HEADERS.STOCK.VALIDER_SAISIE)
+    || colExact(HEADERS.STOCK.VALIDER_SAISIE_ALT)
+    || colWhere(h => h.includes('valider'));
+  const C_ID = colExact(HEADERS.STOCK.ID);
+  const C_LABEL = colExact(HEADERS.STOCK.LIBELLE)
+    || colExact(HEADERS.STOCK.LIBELLE_ALT)
+    || colExact(HEADERS.STOCK.ARTICLE)
+    || colExact(HEADERS.STOCK.ARTICLE_ALT)
+    || colWhere(h => h.includes('libell'))
+    || colWhere(h => h.includes('article'))
+    || 2;
+  const C_SKU = colExact(HEADERS.STOCK.SKU) || colExact(HEADERS.STOCK.REFERENCE);
+  const C_PRIX = colExact(HEADERS.STOCK.PRIX_VENTE)
+    || colExact(HEADERS.STOCK.PRIX_VENTE_ALT2)
+    || colWhere(h => h.includes('prix') && h.includes('vente'));
+  const C_TAILLE = colExact(HEADERS.STOCK.TAILLE_COLIS)
+    || colExact(HEADERS.STOCK.TAILLE_COLIS_ALT)
+    || colExact(HEADERS.STOCK.TAILLE)
+    || colWhere(isShippingSizeHeader_);
+  const tailleHeaderLabel = getHeaderLabel_(resolver, C_TAILLE, HEADERS.STOCK.TAILLE);
+  const C_LOT = colExact(HEADERS.STOCK.LOT) || colWhere(h => h.includes('lot'));
+  const C_STAMPV = colExact(HEADERS.STOCK.VENTE_EXPORTEE_LE);
+
+  const combinedMisCol = resolveCombinedMisEnLigneColumn_(resolver);
+  const legacyMisCols = combinedMisCol ? { checkboxCol: 0, dateCol: 0 } : resolveLegacyMisEnLigneColumn_(resolver);
+  const useCombinedMisCol = !!combinedMisCol;
+  const combinedPubCol = resolveCombinedPublicationColumn_(resolver);
+  const legacyPubCols = combinedPubCol ? { checkboxCol: 0, dateCol: 0 } : resolveLegacyPublicationColumns_(resolver);
+  const useCombinedPubCol = !!combinedPubCol;
+  const combinedVenduCol = resolveCombinedVenduColumn_(resolver);
+  const legacyVenduCols = combinedVenduCol ? { checkboxCol: 0, dateCol: 0 } : resolveLegacyVenduColumns_(resolver);
+  const useCombinedVenduCol = !!combinedVenduCol;
+
+  const C_DMIS = useCombinedMisCol ? combinedMisCol : legacyMisCols.dateCol;
+  const C_DPUB = useCombinedPubCol ? combinedPubCol : legacyPubCols.dateCol;
+  const C_VENDU = useCombinedVenduCol ? combinedVenduCol : legacyVenduCols.checkboxCol;
+  let C_DVENTE = useCombinedVenduCol ? combinedVenduCol : legacyVenduCols.dateCol;
+  if (!C_DVENTE) {
+    C_DVENTE = colExact(HEADERS.STOCK.DATE_VENTE_ALT) || 10;
+  }
+  const C_DMS = colExact(HEADERS.STOCK.DATE_MISE_EN_STOCK)
+    || colExact(HEADERS.STOCK.DATE_MISE_EN_STOCK_ALT2)
+    || colWhere(h => h.includes('mise en stock'));
+
+  if (!C_VALIDE) {
+    ss.toast('Colonne "Valider la saisie" introuvable dans Stock.', 'Validation en lot', 8);
+    return;
+  }
+  if (!C_VENDU || !C_DVENTE) {
+    ss.toast('Colonnes "Vendu" ou "Date de vente" introuvables pour valider la sélection.', 'Validation en lot', 8);
+    return;
+  }
+  if (!C_PRIX) {
+    ss.toast(`Colonne ${HEADERS.STOCK.PRIX_VENTE} introuvable.`, 'Validation en lot', 8);
+    return;
+  }
+  if (!C_TAILLE) {
+    ss.toast(`Colonne ${tailleHeaderLabel} introuvable.`, 'Validation en lot', 8);
+    return;
+  }
+
+  const selection = ss.getSelection();
+  const rangeList = selection ? selection.getActiveRangeList() : null;
+  const ranges = rangeList ? rangeList.getRanges() : (selection && selection.getActiveRange() ? [selection.getActiveRange()] : []);
+  if (!ranges.length) {
+    ss.toast('Sélectionne d’abord les cases "Valider" à cocher.', 'Validation en lot', 6);
+    return;
+  }
+
+  for (let i = 0; i < ranges.length; i++) {
+    const range = ranges[i];
+    if (!range) continue;
+    if (range.getNumColumns() !== 1 || range.getColumn() !== C_VALIDE) {
+      ss.toast('La sélection doit être limitée à la colonne "Valider".', 'Validation en lot', 7);
+      return;
+    }
+    if (range.getRow() < dataStartRow) {
+      ss.toast('La sélection doit démarrer à partir des lignes de données.', 'Validation en lot', 7);
+      return;
+    }
+  }
+
+  const shippingLookup = buildShippingFeeLookup_(ss);
+  if (!shippingLookup) {
+    ss.toast('Impossible de calculer les frais de colissage : configure la feuille "Frais".', 'Validation en lot', 8);
+    return;
+  }
+  const baseToDmsMap = buildBaseToStockDate_(ss);
+  const chronoCols = { dms: C_DMS, dmis: C_DMIS, dpub: C_DPUB, dvente: C_DVENTE };
+  const rowSet = new Set();
+  ranges.forEach(r => {
+    const rowStart = r.getRow();
+    const numRows = r.getNumRows();
+    for (let offset = 0; offset < numRows; offset++) {
+      rowSet.add(rowStart + offset);
+    }
+  });
+  const rows = Array.from(rowSet).sort((a, b) => b - a);
+
+  let success = 0;
+  const errors = [];
+  logDebug_('bulkValidateStockSelection.start', { rows, C_VALIDE, chronoCols });
+
+  rows.forEach(rowIndex => {
+    try {
+      const vendu = isStatusActiveValue_(sh.getRange(rowIndex, C_VENDU).getValue());
+      if (!vendu) {
+        errors.push({ row: rowIndex, reason: 'La case "Vendu" est vide ou décochée.' });
+        return;
+      }
+
+      const chronoCheck = enforceChronologicalDates_(sh, rowIndex, chronoCols, {
+        requireAllDates: true,
+        warnOnly: true,
+        toastLabel: 'Validation en lot'
+      });
+      if (!chronoCheck.ok) {
+        errors.push({ row: rowIndex, reason: chronoCheck.message || 'Chronologie manquante ou invalide.' });
+        return;
+      }
+
+      if (!ensureValidPriceOrWarn_(sh, rowIndex, C_PRIX)) {
+        errors.push({ row: rowIndex, reason: `Prix de vente invalide en colonne ${HEADERS.STOCK.PRIX_VENTE}.` });
+        return;
+      }
+
+      const tailleValue = String(sh.getRange(rowIndex, C_TAILLE).getDisplayValue() || '').trim();
+      if (!tailleValue) {
+        errors.push({ row: rowIndex, reason: `Valeur manquante dans ${tailleHeaderLabel}.` });
+        return;
+      }
+      const lotValue = C_LOT ? String(sh.getRange(rowIndex, C_LOT).getDisplayValue() || '').trim() : '';
+      const fraisColis = shippingLookup(tailleValue, lotValue);
+      if (!Number.isFinite(fraisColis)) {
+        const lotMessage = lotValue ? ` / lot ${lotValue}` : '';
+        errors.push({ row: rowIndex, reason: `Frais de colissage introuvables pour ${tailleValue}${lotMessage}.` });
+        return;
+      }
+
+      const dateVente = sh.getRange(rowIndex, C_DVENTE).getValue();
+      if (!(dateVente instanceof Date) || isNaN(dateVente.getTime())) {
+        errors.push({ row: rowIndex, reason: 'Date de vente absente ou invalide.' });
+        return;
+      }
+
+      const validation = sh.getRange(rowIndex, C_VALIDE).getDataValidation();
+      if (!validation
+        || validation.getCriteriaType() !== SpreadsheetApp.DataValidationCriteria.CHECKBOX
+        || (validation.getAllowInvalid && validation.getAllowInvalid())) {
+        const checkboxRule = SpreadsheetApp.newDataValidation().requireCheckbox().setAllowInvalid(false).build();
+        sh.getRange(rowIndex, C_VALIDE).setDataValidation(checkboxRule);
+      }
+      sh.getRange(rowIndex, C_VALIDE).setValue(true);
+
+      const perItemFee = computePerItemShippingFee_(fraisColis, lotValue);
+      exportVente_(
+        null,
+        rowIndex,
+        C_ID,
+        C_LABEL,
+        C_SKU,
+        C_PRIX,
+        C_DVENTE,
+        C_STAMPV,
+        baseToDmsMap,
+        { shipping: { size: tailleValue, lot: lotValue, fee: perItemFee } }
+      );
+      success++;
+      logDebug_('bulkValidateStockSelection.rowSuccess', {
+        ligne: rowIndex,
+        taille: tailleValue,
+        lot: lotValue,
+        fraisColis,
+        perItemFee
+      });
+    } catch (err) {
+      const message = err && err.message ? err.message : String(err);
+      errors.push({ row: rowIndex, reason: message });
+      logDebug_('bulkValidateStockSelection.exception', { ligne: rowIndex, message, stack: err && err.stack });
+    }
+  });
+
+  const errorPreview = errors.slice(0, 3).map(e => `L${e.row}: ${e.reason}`).join(' / ');
+  const suffix = errorPreview
+    ? ` ${errors.length} ligne(s) en erreur : ${errorPreview}${errors.length > 3 ? ' …' : ''}`
+    : '';
+  ss.toast(`${success} ligne(s) validée(s).${suffix}`, 'Validation en lot', 8);
+  logDebug_('bulkValidateStockSelection.done', { success, errors });
+}
+
 // Validation groupée
 function validateAllSales() {
   const ss = SpreadsheetApp.getActive();
