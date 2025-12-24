@@ -2,31 +2,64 @@ function handleVentesReturn(e) {
   const ss = e && e.source;
   const sh = ss && ss.getActiveSheet();
   const range = e && e.range;
-  if (!ss || !sh || sh.getName() !== 'Ventes' || !range) return;
+  if (!ss || !sh || sh.getName() !== 'Ventes' || !range) {
+    logDebug_('handleVentesReturn.skip', { reason: 'sheet/range invalid', sheet: sh && sh.getName && sh.getName() });
+    return;
+  }
 
   const row = range.getRow();
-  if (row <= 1) return;
-
+  const col = range.getColumn();
   const lastColumn = sh.getLastColumn();
-  if (!lastColumn) return;
+  const newValue = e && e.value !== undefined ? e.value : range.getValue();
+
+  logDebug_('handleVentesReturn.start', {
+    sheet: sh && sh.getName && sh.getName(),
+    row,
+    col,
+    value: newValue,
+    oldValue: e && e.oldValue
+  });
+
+  if (row <= 1) {
+    logDebug_('handleVentesReturn.skip', { reason: 'header row', row });
+    return;
+  }
+
+  if (!lastColumn) {
+    logDebug_('handleVentesReturn.skip', { reason: 'no columns' });
+    return;
+  }
 
   const headers = sh.getRange(1, 1, 1, lastColumn).getValues()[0];
   const resolver = makeHeaderResolver_(headers);
   const colReturn = resolver.colExact(HEADERS.VENTES.RETOUR)
     || resolver.colWhere(header => header.includes('retour'));
-  if (!colReturn || range.getColumn() !== colReturn) return;
+  if (!colReturn || col !== colReturn) {
+    logDebug_('handleVentesReturn.skip', { reason: 'not return column', colReturn, col });
+    return;
+  }
 
-  logDebug_('handleVentesReturn', { ligne: row, colonne: range.getColumn(), valeur: newValue });
+  logDebug_('handleVentesReturn', { ligne: row, colonne: col, valeur: newValue });
 
-  const newValue = e.value !== undefined ? e.value : range.getValue();
   if (!isReturnFlagActive_(newValue)) {
+    logDebug_('handleVentesReturn.skip', { reason: 'flag not active', value: newValue });
     return;
   }
 
   const rowValues = sh.getRange(row, 1, 1, lastColumn).getValues()[0];
   const sale = buildSaleRecordFromVentesRow_(rowValues, resolver, row);
+  logDebug_('handleVentesReturn.sale', {
+    id: sale && sale.id,
+    sku: sale && sale.sku,
+    libelle: sale && sale.libelle,
+    dateVente: sale && sale.dateVente,
+    lot: sale && sale.lot,
+    taille: sale && sale.taille
+  });
+
   // Nouveau code :
   if (!sale.dateVente) {
+    logDebug_('handleVentesReturn.stop', { reason: 'dateVente missing' });
     clearReturnFlag_(range);
     ss.toast('Impossible de traiter le retour : date de vente introuvable.', 'Ventes', 8);
     logDebug_('handleVentesReturn', { ligne: row, statut: 'arrêt', raison: 'date de vente manquante' });
@@ -59,6 +92,7 @@ function handleVentesReturn(e) {
       Object.assign({}, sale, { retour: true }),
       { updateExisting: true }
     );
+    logDebug_('handleVentesReturn.ledger', { result: ledgerResult });
 
     if (!ledgerResult || !ledgerResult.removed) {
       clearReturnFlag_(range);
@@ -69,6 +103,7 @@ function handleVentesReturn(e) {
 
     const returnedAt = new Date();
     const stockResult = restoreSaleToStock_(ss, Object.assign({}, sale, { returnedAt }));
+    logDebug_('handleVentesReturn.restoreStock', stockResult);
     if (!stockResult.success) {
       copySaleToMonthlySheet_(ss, sale, { updateExisting: true });
       clearReturnFlag_(range);
@@ -81,6 +116,7 @@ function handleVentesReturn(e) {
     ss.toast(`Retour traité pour ${labelForToast}.`, 'Ventes', 5);
     logDebug_('handleVentesReturn', { ligne: row, statut: 'succès', cibleStock: stockResult.row });
   } catch (err) {
+    logDebug_('handleVentesReturn.exception', { message: err && err.message, stack: err && err.stack });
     clearReturnFlag_(range);
     const message = err && err.message ? err.message : err;
     ss.toast(`Erreur lors du retour : ${message}`, 'Ventes', 10);
@@ -185,12 +221,80 @@ function restoreSaleToStock_(ss, sale) {
     return { success: false, message: 'La feuille "Stock" ne contient aucune colonne.' };
   }
 
-  const headers = getSheetHeaders_(stock, 'Stock');
-  const resolver = makeHeaderResolver_(headers);
+  // Fallback pour retrouver la vraie ligne d’en-tête dans Stock (si déplacée)
+  function resolveStockHeaderWithFallback_() {
+    const maxProbe = 10;
+    const lastCol = stock.getLastColumn();
+    if (!lastCol) return { headers: [], resolver: makeHeaderResolver_([]), headerRow: 1, dataStartRow: 2, fallback: false };
+
+    const tryRow = (row) => {
+      const headers = stock.getRange(row, 1, 1, lastCol).getValues()[0];
+      return { headers, resolver: makeHeaderResolver_(headers), headerRow: row, dataStartRow: row + 1 };
+    };
+
+    const baseRow = getSheetHeaderRow_('Stock') || 1;
+    const base = tryRow(baseRow);
+    const hasIdAndSku = (res) =>
+      !!(res.colExact(HEADERS.STOCK.ID) || res.colWhere(h => normText_(h) === 'id')) &&
+      !!(res.colExact(HEADERS.STOCK.SKU) || res.colExact(HEADERS.STOCK.REFERENCE) || res.colWhere(h => h.includes('sku') || h.includes('reference')));
+    if (hasIdAndSku(base.resolver)) return Object.assign(base, { fallback: false });
+
+    const limit = Math.min(maxProbe, stock.getLastRow() || maxProbe);
+    for (let r = 1; r <= limit; r++) {
+      const probe = tryRow(r);
+      if (hasIdAndSku(probe.resolver)) {
+        logDebug_('restoreSaleToStock_.fallbackHeader', { headerRow: r });
+        return Object.assign(probe, { fallback: true });
+      }
+    }
+    logDebug_('restoreSaleToStock_.noHeader', { triedRows: limit, lastCol });
+    return Object.assign(base, { fallback: false });
+  }
+
+  const headerInfoStock = resolveStockHeaderWithFallback_();
+  const headers = headerInfoStock.headers;
+  const resolver = headerInfoStock.resolver;
   const colExact = resolver.colExact.bind(resolver);
   const colWhere = resolver.colWhere.bind(resolver);
 
-  const C_ID = colExact(HEADERS.STOCK.ID);
+  // --- récupération infos Achats (livraison et date de mise en stock depuis Achats si dispo) ---
+  function getAchatInfo_(ss, idValue, skuValue) {
+    const achats = ss && ss.getSheetByName('Achats');
+    if (!achats) return {};
+
+    const lastRow = achats.getLastRow();
+    if (lastRow < 2) return {};
+
+    const headersA = achats.getRange(1, 1, 1, achats.getLastColumn()).getValues()[0];
+    const resA = makeHeaderResolver_(headersA);
+    const colIdA = resA.colExact(HEADERS.ACHATS.ID);
+    const colRefA = resA.colExact(HEADERS.ACHATS.REFERENCE) || resA.colWhere(h => h.includes('reference'));
+    const colLivA = resA.colExact(HEADERS.ACHATS.DATE_LIVRAISON)
+      || resA.colExact(HEADERS.ACHATS.DATE_LIVRAISON_ALT)
+      || resA.colWhere(h => h.includes('livraison'));
+    const colDmsA = resA.colExact(HEADERS.ACHATS.DATE_MISE_EN_STOCK)
+      || resA.colExact(HEADERS.ACHATS.DATE_MISE_EN_STOCK_ALT)
+      || resA.colWhere(h => h.includes('mise en stock') || h.includes('mis en stock'));
+
+    if (!colIdA && !colRefA) return {};
+
+    const data = achats.getRange(2, 1, lastRow - 1, achats.getLastColumn()).getValues();
+    const keyId = idValue !== undefined && idValue !== null ? normText_(idValue) : '';
+    const keySku = skuValue ? normText_(skuValue) : '';
+    for (let i = 0; i < data.length; i++) {
+      const row = data[i];
+      const idMatch = keyId && colIdA ? normText_(row[colIdA - 1]) === keyId : false;
+      const refMatch = keySku && colRefA ? normText_(row[colRefA - 1]) === keySku : false;
+      if (!idMatch && !refMatch) continue;
+      const livraison = colLivA ? getDateOrNull_(row[colLivA - 1]) : null;
+      const dms = colDmsA ? getDateOrNull_(row[colDmsA - 1]) : null;
+      return { livraison, dms };
+    }
+    return {};
+  }
+
+  const C_ID = colExact(HEADERS.STOCK.ID)
+    || colWhere(h => h === 'id' || h === 'identifiant' || h.includes('id'));
   const C_LABEL = colExact(HEADERS.STOCK.LIBELLE)
     || colExact(HEADERS.STOCK.LIBELLE_ALT)
     || colExact(HEADERS.STOCK.LIBELLE_ALT2)
@@ -198,10 +302,11 @@ function restoreSaleToStock_(ss, sale) {
     || colExact(HEADERS.STOCK.ARTICLE_ALT)
     || colExact(HEADERS.STOCK.ARTICLE_ALT2)
     || colWhere(h => h.includes('libell'))
-    || colWhere(h => h.includes('article'));
+    || colWhere(h => h.includes('article'))
+    || colWhere(h => h === 'articles');
   const C_SKU = colExact(HEADERS.STOCK.SKU)
     || colExact(HEADERS.STOCK.REFERENCE)
-    || colWhere(h => h.includes('sku'));
+    || colWhere(h => h.includes('sku') || h.includes('reference'));
   const C_PRIX = colExact(HEADERS.STOCK.PRIX_VENTE)
     || colExact(HEADERS.STOCK.PRIX_VENTE_ALT2)
     || colWhere(h => h.includes('prix') && h.includes('vente'));
@@ -213,7 +318,7 @@ function restoreSaleToStock_(ss, sale) {
     || colExact(HEADERS.STOCK.LOT_ALT2)
     || colExact(HEADERS.STOCK.LOT_ALT3)
     || colWhere(h => h.includes('lot'));
-  const C_DMS = colExact(HEADERS.STOCK.DATE_MISE_EN_STOCK) || colWhere(h => h.includes('mise en stock'));
+  const C_DMS = colExact(HEADERS.STOCK.DATE_MISE_EN_STOCK) || colWhere(h => h.includes('mise en stock') || h.includes('mis en stock'));
   const C_STAMPV = colExact(HEADERS.STOCK.VENTE_EXPORTEE_LE) || colWhere(h => h.includes('exporte'));
   const C_VALIDE = colExact(HEADERS.STOCK.VALIDER_SAISIE)
     || colExact(HEADERS.STOCK.VALIDER_SAISIE_ALT)
@@ -248,6 +353,7 @@ function restoreSaleToStock_(ss, sale) {
   const returnedAt = sale && sale.returnedAt instanceof Date && !isNaN(sale.returnedAt)
     ? sale.returnedAt
     : new Date();
+  const achatInfo = getAchatInfo_(ss, sale && sale.id, sale && sale.sku);
 
   function setValue(column, value) {
     if (!column) return;
@@ -268,6 +374,16 @@ function restoreSaleToStock_(ss, sale) {
   const labelWithBadge = bumpReturnBadge_(sale && sale.libelle !== undefined && sale.libelle !== null ? sale.libelle : '');
   setValue(C_LABEL, labelWithBadge);
 
+  // Livraisons depuis Achats
+  // Exigence : dans Stock, la colonne LIVRAISON doit refléter la date de mise en stock d’Achats
+  const C_LIVRAISON = colExact(HEADERS.STOCK.DATE_LIVRAISON) || colExact(HEADERS.STOCK.DATE_LIVRAISON_ALT2) || colWhere(h => h.includes('livraison'));
+  if (C_LIVRAISON) {
+    const livraisonDate = (achatInfo && achatInfo.dms instanceof Date && !isNaN(achatInfo.dms))
+      ? achatInfo.dms
+      : (achatInfo && achatInfo.livraison instanceof Date && !isNaN(achatInfo.livraison) ? achatInfo.livraison : returnedAt);
+    setValue(C_LIVRAISON, livraisonDate);
+  }
+
   if (C_PRIX && sale) {
     const priceValue = valueToNumber_(sale.prixVente);
     if (Number.isFinite(priceValue)) {
@@ -279,6 +395,7 @@ function restoreSaleToStock_(ss, sale) {
   setValue(C_LOT, sale && sale.lot !== undefined && sale.lot !== null ? sale.lot : '');
 
   if (C_DMS) {
+    // Dans Stock, MIS EN STOCK doit être la date du clic RETOUR
     setValue(C_DMS, returnedAt);
   }
 
@@ -298,8 +415,20 @@ function restoreSaleToStock_(ss, sale) {
     setValue(C_DVENTE, '');
   }
 
-  const targetRow = Math.max(dataStartRow, stock.getLastRow() + 1);
+  const targetRow = Math.max(headerInfoStock.dataStartRow, stock.getLastRow() + 1);
   stock.getRange(targetRow, 1, 1, lastColumn).setValues([rowValues]);
+  logDebug_('restoreSaleToStock.resultRow', {
+    targetRow,
+    C_ID,
+    C_SKU,
+    C_LABEL,
+    C_PRIX,
+    C_TAILLE,
+    C_LOT,
+    C_LIVRAISON,
+    C_DMS,
+    rowPreview: rowValues.slice(0, Math.min(12, rowValues.length))
+  });
 
   return { success: true, row: targetRow };
 }
@@ -413,10 +542,53 @@ function exportVente_(e, row, C_ID, C_LABEL, C_SKU, C_PRIX, C_DVENTE, C_STAMPV, 
     : null;
 
   // Colonnes chrono stock (pour calcul délais + check)
-  const headersS = getSheetHeaders_(sh, 'Stock');
-  const resolverS = makeHeaderResolver_(headersS);
+  function resolveStockHeadersWithFallback_() {
+    const maxProbe = 10;
+    const lastCol = sh.getLastColumn();
+    if (!lastCol) {
+      return { headers: [], resolver: makeHeaderResolver_([]), headerRow: 1, dataStartRow: 2, fallback: false };
+    }
 
-  const C_DMS = resolverS.colExact(HEADERS.STOCK.DATE_MISE_EN_STOCK);
+    function build(row) {
+      const headers = sh.getRange(row, 1, 1, lastCol).getValues()[0];
+      return { headers, resolver: makeHeaderResolver_(headers), headerRow: row, dataStartRow: row + 1 };
+    }
+
+    function hasChrono(resolver) {
+      return !!(
+        resolver.colExact(HEADERS.STOCK.DATE_MISE_EN_STOCK)
+        || resolver.colExact(HEADERS.STOCK.DATE_MISE_EN_STOCK_ALT2)
+        || resolver.colWhere(h => h.includes('mise en stock') || h.includes('mis en stock'))
+      );
+    }
+
+    const layoutHeader = getSheetHeaderRow_('Stock');
+    const candidate = build(layoutHeader);
+    if (hasChrono(candidate.resolver)) {
+      return Object.assign(candidate, { fallback: false });
+    }
+
+    const lastRow = sh.getLastRow();
+    const upperBound = Math.min(maxProbe, lastRow || maxProbe);
+    for (let r = 1; r <= upperBound; r++) {
+      const probe = build(r);
+      if (hasChrono(probe.resolver)) {
+        logDebug_('exportVente_.fallbackHeader', { headerRow: r });
+        return Object.assign(probe, { fallback: true });
+      }
+    }
+
+    logDebug_('exportVente_.noChronoHeaders', { triedRows: upperBound, lastCol });
+    return Object.assign(candidate, { fallback: false });
+  }
+
+  const headerInfo = resolveStockHeadersWithFallback_();
+  const headersS = headerInfo.headers;
+  const resolverS = headerInfo.resolver;
+
+  const C_DMS = resolverS.colExact(HEADERS.STOCK.DATE_MISE_EN_STOCK)
+    || resolverS.colExact(HEADERS.STOCK.DATE_MISE_EN_STOCK_ALT2) // "MIS EN STOCK"
+    || resolverS.colWhere(h => h.includes('mise en stock'));
 
   const combinedMisForRow = resolveCombinedMisEnLigneColumn_(resolverS);
   const legacyMisForRow = combinedMisForRow ? { checkboxCol: 0, dateCol: 0 } : resolveLegacyMisEnLigneColumn_(resolverS);
@@ -483,6 +655,15 @@ function exportVente_(e, row, C_ID, C_LABEL, C_SKU, C_PRIX, C_DVENTE, C_STAMPV, 
   const coeffMarge = Number.isFinite(prix) && Number.isFinite(prixAchat) && prixAchat !== 0
     ? prix / prixAchat
     : '';
+
+  if (!Number.isFinite(prixAchat)) {
+    logDebug_('exportVente_.prixAchatManquant', {
+      id: idVal,
+      sku,
+      headerRowStock: headerInfo.headerRow || getSheetHeaderRow_('Stock'),
+      prixAchat
+    });
+  }
 
   // Insert vente
   const start = Math.max(2, ventes.getLastRow() + 1);
@@ -560,15 +741,44 @@ function getAchatsRecordByIdOrSku_(ss, idVal, sku) {
   const lastRow = achats.getLastRow();
   if (lastRow < 2) return null;
 
-  const headers = achats.getRange(1, 1, 1, achats.getLastColumn()).getValues()[0];
-  const resolver = makeHeaderResolver_(headers);
+  function resolveAchatsHeaderWithFallback_() {
+    const maxProbe = 10;
+    const lastCol = achats.getLastColumn();
+    const tryRow = (row) => {
+      const headers = achats.getRange(row, 1, 1, lastCol).getValues()[0];
+      return { headers, resolver: makeHeaderResolver_(headers), headerRow: row };
+    };
+    const baseRow = getSheetHeaderRow_('Achats') || 1;
+    const base = tryRow(baseRow);
+    const hasCore = (res) => res.colExact(HEADERS.ACHATS.ID) && (res.colExact(HEADERS.ACHATS.REFERENCE) || res.colWhere(h => h.includes('reference')));
+    if (hasCore(base.resolver)) return Object.assign(base, { fallback: false });
+    const limit = Math.min(maxProbe, lastRow);
+    for (let r = 1; r <= limit; r++) {
+      const probe = tryRow(r);
+      if (hasCore(probe.resolver)) {
+        logDebug_('getAchatsRecordByIdOrSku_.fallbackHeader', { headerRow: r });
+        return Object.assign(probe, { fallback: true });
+      }
+    }
+    logDebug_('getAchatsRecordByIdOrSku_.noHeader', { triedRows: limit, lastCol });
+    return Object.assign(base, { fallback: false });
+  }
+
+  const headerInfo = resolveAchatsHeaderWithFallback_();
+  const headers = headerInfo.headers;
+  const resolver = headerInfo.resolver;
+  const dataStartRow = headerInfo.headerRow + 1;
 
   const colId = resolver.colExact(HEADERS.ACHATS.ID);
-  const colRef = resolver.colExact(HEADERS.ACHATS.REFERENCE);
+  const colRef = resolver.colExact(HEADERS.ACHATS.REFERENCE) || resolver.colWhere(h => h.includes('reference'));
   const colPrix = resolver.colExact(HEADERS.ACHATS.PRIX_UNITAIRE_TTC)
-  || resolver.colExact(HEADERS.ACHATS.PRIX_UNITAIRE_TTC_ALT);
+    || resolver.colExact(HEADERS.ACHATS.PRIX_UNITAIRE_TTC_ALT)
+    || resolver.colExact(HEADERS.ACHATS.PRIX_UNITAIRE_BRUTE)
+    || resolver.colExact(HEADERS.ACHATS.PRIX_UNITAIRE_BRUTE_ALT)
+    || resolver.colWhere(h => h.includes('prix') && h.includes('achat'));
   const colDate = resolver.colExact(HEADERS.ACHATS.DATE_LIVRAISON)
-    || resolver.colExact(HEADERS.ACHATS.DATE_LIVRAISON_ALT);
+    || resolver.colExact(HEADERS.ACHATS.DATE_LIVRAISON_ALT)
+    || resolver.colWhere(h => h.includes('livraison'));
   const colArticle = resolver.colExact(HEADERS.ACHATS.ARTICLE)
     || resolver.colExact(HEADERS.ACHATS.ARTICLE_ALT);
 
@@ -581,7 +791,11 @@ function getAchatsRecordByIdOrSku_(ss, idVal, sku) {
 
   if (!keyId && !keyRef) return null;
 
-  const data = achats.getRange(2, 1, lastRow - 1, achats.getLastColumn()).getValues();
+  const dataStart = Math.max(dataStartRow, 2);
+  const dataHeight = Math.max(lastRow - dataStart + 1, 0);
+  if (dataHeight <= 0) return null;
+
+  const data = achats.getRange(dataStart, 1, dataHeight, achats.getLastColumn()).getValues();
   for (let i = 0; i < data.length; i++) {
     const row = data[i];
     const idMatch = keyId && colId ? normText_(row[colId - 1]) === keyId : false;
@@ -589,13 +803,38 @@ function getAchatsRecordByIdOrSku_(ss, idVal, sku) {
     if (!idMatch && !refMatch) continue;
 
     const prixCell = colPrix ? row[colPrix - 1] : null;
-    const prixAchat = typeof prixCell === 'number' && Number.isFinite(prixCell) ? prixCell : null;
+    let prixAchat = null;
+    if (typeof prixCell === 'number' && Number.isFinite(prixCell)) {
+      prixAchat = prixCell;
+    } else {
+      const parsed = toNumber_(prixCell);
+      if (Number.isFinite(parsed)) {
+        prixAchat = parsed;
+      }
+    }
     const dateCell = colDate ? row[colDate - 1] : null;
     const dateReception = dateCell instanceof Date && !isNaN(dateCell) ? dateCell : null;
+
+    logDebug_('getAchatsRecordByIdOrSku_.match', {
+      rowIndex: i + dataStart,
+      prixAchat,
+      dateReception,
+      prixCell,
+      idMatch,
+      refMatch
+    });
 
     return { prixAchat, dateReception };
   }
 
+  logDebug_('getAchatsRecordByIdOrSku_.notFound', {
+    id: keyId,
+    sku: keyRef,
+    headerRow: headerInfo.headerRow,
+    dataStartRow,
+    lastRow,
+    headersSample: headers.slice(0, 15)
+  });
   return null;
 }
 
