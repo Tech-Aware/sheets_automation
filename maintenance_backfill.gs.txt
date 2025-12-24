@@ -960,14 +960,16 @@ function bulkValidateStockSelection() {
     return;
   }
 
-  const dataStartRow = getSheetDataStartRow_('Stock');
+  const layoutName = SHEET_LAYOUT.STOCK ? 'STOCK' : 'Stock';
+  const headerRow = getSheetHeaderRow_(layoutName);
+  const dataStartRow = getSheetDataStartRow_(layoutName);
   const lastRow = sh.getLastRow();
   if (lastRow < dataStartRow) {
     ss.toast('Aucune ligne à traiter dans "Stock".', 'Validation en lot', 6);
     return;
   }
 
-  const headers = getSheetHeaders_(sh, 'Stock');
+  const headers = getSheetHeaders_(sh, layoutName);
   const resolver = makeHeaderResolver_(headers);
   const colExact = resolver.colExact.bind(resolver);
   const colWhere = resolver.colWhere.bind(resolver);
@@ -1018,7 +1020,7 @@ function bulkValidateStockSelection() {
     || colWhere(h => h.includes('mise en stock'));
 
   logDebug_('bulkValidateStockSelection.columns', {
-    headerRow: getSheetHeaderRow_('Stock'),
+    headerRow,
     dataStartRow,
     headersPreview: headers.slice(0, 20),
     resolved: {
