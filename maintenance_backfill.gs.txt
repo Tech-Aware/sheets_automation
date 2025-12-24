@@ -1006,18 +1006,6 @@ function bulkValidateStockSelection() {
   const legacyVenduCols = combinedVenduCol ? { checkboxCol: 0, dateCol: 0 } : resolveLegacyVenduColumns_(resolver);
   const useCombinedVenduCol = !!combinedVenduCol;
 
-  logDebug_('bulkValidateStockSelection.columns', {
-    headerRow: getSheetHeaderRow_('Stock'),
-    dataStartRow,
-    headersPreview: headers.slice(0, 20),
-    resolved: {
-      C_VALIDE, C_ID, C_LABEL, C_SKU, C_PRIX, C_TAILLE, C_LOT, C_STAMPV,
-      combinedFlags: { useCombinedMisCol, useCombinedPubCol, useCombinedVenduCol },
-      chronology: { C_DMS, C_DMIS: useCombinedMisCol ? combinedMisCol : legacyMisCols.dateCol, C_DPUB, C_DVENTE }
-    },
-    normalizedHeaders: resolver.normalized ? resolver.normalized.slice(0, 20) : []
-  });
-
   const C_DMIS = useCombinedMisCol ? combinedMisCol : legacyMisCols.dateCol;
   const C_DPUB = useCombinedPubCol ? combinedPubCol : legacyPubCols.dateCol;
   const C_VENDU = useCombinedVenduCol ? combinedVenduCol : legacyVenduCols.checkboxCol;
@@ -1028,6 +1016,18 @@ function bulkValidateStockSelection() {
   const C_DMS = colExact(HEADERS.STOCK.DATE_MISE_EN_STOCK)
     || colExact(HEADERS.STOCK.DATE_MISE_EN_STOCK_ALT2)
     || colWhere(h => h.includes('mise en stock'));
+
+  logDebug_('bulkValidateStockSelection.columns', {
+    headerRow: getSheetHeaderRow_('Stock'),
+    dataStartRow,
+    headersPreview: headers.slice(0, 20),
+    resolved: {
+      C_VALIDE, C_ID, C_LABEL, C_SKU, C_PRIX, C_TAILLE, C_LOT, C_STAMPV,
+      combinedFlags: { useCombinedMisCol, useCombinedPubCol, useCombinedVenduCol },
+      chronology: { C_DMS, C_DMIS, C_DPUB, C_DVENTE }
+    },
+    normalizedHeaders: resolver.normalized ? resolver.normalized.slice(0, 20) : []
+  });
 
   if (!C_VALIDE) {
     logDebug_('bulkValidateStockSelection.error', {
