@@ -476,16 +476,15 @@ function handleAchats(e) {
 
     if (C_DMS_STOCK) {
       target.getRange(start, C_DMS_STOCK, rows.length, 1).setNumberFormat("dd/MM/yyyy");
+    } else {
+      logDebug_('handleAchats.creation.warn', {
+        message: 'Colonne DATE DE MISE EN STOCK introuvable, aucune date écrite',
+        base,
+        achatId: achatIdKey
+      });
     }
     if (COL_DATE_STOCK) {
       target.getRange(start, COL_DATE_STOCK, rows.length, 1).setNumberFormat("dd/MM/yyyy");
-    }
-
-    const lastS = target.getLastRow();
-    if (lastS >= STOCK_DATA_START_ROW && COL_DATE_STOCK) {
-      target.getRange(STOCK_DATA_START_ROW, 1, lastS - STOCK_DATA_START_ROW + 1, target.getLastColumn())
-            .sort({ column: COL_DATE_STOCK, ascending: true });
-      target.getRange(STOCK_DATA_START_ROW, COL_DATE_STOCK, lastS - STOCK_DATA_START_ROW + 1, 1).setNumberFormat("dd/MM/yyyy");
     }
 
     logDebug_('handleAchats.creation', {
@@ -494,7 +493,8 @@ function handleAchats(e) {
       quantiteRecue: qty,
       lignesCreees: rowsToCreate,
       suffixDepart: maxSuffixForBase + 1,
-      stockDataStart: STOCK_DATA_START_ROW
+      stockDataStart: STOCK_DATA_START_ROW,
+      insertionStartRow: start
     });
 
     renumberStockByBrand_();
