@@ -351,15 +351,17 @@ function handleAchats(e) {
   }
 
   const target = ss.getSheetByName("Stock");
-  if (!target) return;
+  if (!target) {
+    logDebug_('handleAchats.error', { message: 'Feuille Stock introuvable' });
+    return;
+  }
 
-  // Repère dynamiquement les colonnes de Stock
-  const headersStock = target.getRange(1, 1, 1, Math.max(4, target.getLastColumn())).getValues()[0];
+  // Repère dynamiquement les colonnes de Stock (en-tête à la ligne 6)
+  const headersStock = getSheetHeaders_(target, 'Stock');
   const resolverStock = makeHeaderResolver_(headersStock);
 
   const COL_ID_STOCK    = resolverStock.colExact(HEADERS.STOCK.ID);
   const COL_LABEL_STOCK = resolverStock.colWhere(h => h.includes('libell')) || resolverStock.colWhere(h => h.includes('article')) || 2;
-  const COL_OLD_STOCK   = resolverStock.colExact(HEADERS.STOCK.OLD_SKU);
   const COL_SKU_STOCK   = resolverStock.colExact(HEADERS.STOCK.SKU)
     || resolverStock.colExact(HEADERS.STOCK.REFERENCE)
     || resolverStock.colWhere(h => h.includes('sku'))
@@ -371,58 +373,61 @@ function handleAchats(e) {
   const label = `${article} ${marque} ${genre}`.trim();
 
   const lastExistingStockRow = target.getLastRow();
-  let existingStockHasBase = false;
+  const dataStartStock = STOCK_DATA_START_ROW;
+  const width = Math.max(target.getLastColumn(), COL_LABEL_STOCK || 0, COL_SKU_STOCK || 0, COL_DATE_STOCK || 0, COL_ID_STOCK || 0);
+  const achatIdKey = (achatId === null || achatId === undefined || achatId === '') ? '' : String(achatId);
+
   let existingStockDms = null;
-  if (lastExistingStockRow >= 2 && COL_SKU_STOCK) {
-    const existingSkuValues = target.getRange(2, COL_SKU_STOCK, lastExistingStockRow - 1, 1).getValues();
-    let existingDmsValues = null;
-    if (C_DMS_STOCK) {
-      existingDmsValues = target.getRange(2, C_DMS_STOCK, lastExistingStockRow - 1, 1).getValues();
-    }
-    let existingIdValues = null;
-    if (COL_ID_STOCK) {
-      existingIdValues = target.getRange(2, COL_ID_STOCK, lastExistingStockRow - 1, 1).getValues();
-    }
-    const prefix = `${base}-`;
-    const legacyPrefix = base;
-    const achatIdKey = (achatId === null || achatId === undefined || achatId === '') ? '' : String(achatId);
-    for (let i = 0; i < existingSkuValues.length; i++) {
-      const rawSku = normalizeSkuBase_(existingSkuValues[i][0]);
-      if (!rawSku || (rawSku.indexOf(prefix) !== 0 && rawSku.indexOf(legacyPrefix) !== 0)) continue;
+  let maxSuffixForBase = 0;
+  let existingCountForBaseAndId = 0;
+  let totalExistingRows = 0;
 
-      let idMatches = true;
-      let storedIdKey = '';
-      if (COL_ID_STOCK && existingIdValues) {
-        const storedRaw = existingIdValues[i] && existingIdValues[i][0];
-        storedIdKey = (storedRaw === null || storedRaw === undefined || storedRaw === '') ? '' : String(storedRaw);
-        if (achatIdKey && storedIdKey) {
-          idMatches = (storedIdKey === achatIdKey);
+  try {
+    if (lastExistingStockRow >= dataStartStock && COL_SKU_STOCK) {
+      const existingRows = lastExistingStockRow - dataStartStock + 1;
+      const existingSkuValues = target.getRange(dataStartStock, COL_SKU_STOCK, existingRows, 1).getValues();
+      let existingDmsValues = null;
+      if (C_DMS_STOCK) {
+        existingDmsValues = target.getRange(dataStartStock, C_DMS_STOCK, existingRows, 1).getValues();
+      }
+      let existingIdValues = null;
+      if (COL_ID_STOCK) {
+        existingIdValues = target.getRange(dataStartStock, COL_ID_STOCK, existingRows, 1).getValues();
+      }
+
+      const prefix = `${base}-`;
+      totalExistingRows = existingRows;
+
+      for (let i = 0; i < existingSkuValues.length; i++) {
+        const rawSku = normalizeSkuBase_(existingSkuValues[i][0]);
+        const rowIdRaw = existingIdValues && existingIdValues[i] ? existingIdValues[i][0] : '';
+        const rowId = (rowIdRaw === null || rowIdRaw === undefined || rowIdRaw === '') ? '' : String(rowIdRaw);
+        const suffix = extractSkuSuffix_(rawSku, base);
+
+        if (suffix) {
+          maxSuffixForBase = Math.max(maxSuffixForBase, suffix);
+        }
+
+        const baseMatches = rawSku && rawSku.indexOf(prefix) === 0;
+        const idMatches = !achatIdKey || (achatIdKey && rowId === achatIdKey);
+
+        if (baseMatches && idMatches) {
+          existingCountForBaseAndId++;
+          if (existingDmsValues && !existingStockDms && C_DMS_STOCK) {
+            const candidate = existingDmsValues[i][0];
+            if (candidate instanceof Date && !isNaN(candidate)) {
+              existingStockDms = candidate;
+            }
+          }
         }
       }
-
-      if (!idMatches) {
-        continue;
-      }
-
-      existingStockHasBase = true;
-
-      if (existingDmsValues && !existingStockDms && COL_ID_STOCK && achatIdKey && storedIdKey && storedIdKey === achatIdKey) {
-        const candidate = existingDmsValues[i][0];
-        if (candidate instanceof Date && !isNaN(candidate)) {
-          existingStockDms = candidate;
-        }
-      }
     }
-  }
-
-  if (existingStockHasBase) {
-    if (COL_STP && !getDateOrNull_(stockStampRaw)) {
-      const fallbackDms = existingStockDms || getDateOrNull_(stockStampDisplay);
-      if (fallbackDms) {
-        stpCell.setValue(fallbackDms);
-      }
-    }
-    renumberStockByBrand_();
+  } catch (err) {
+    logDebug_('handleAchats.analyseStock.error', {
+      message: err && err.message ? err.message : err,
+      base,
+      achatId: achatIdKey
+    });
     return;
   }
 
@@ -438,33 +443,69 @@ function handleAchats(e) {
     stpCell.setValue(miseStockDate);
   }
 
-  const width = Math.max(target.getLastColumn(), COL_LABEL_STOCK || 0, COL_SKU_STOCK || 0, COL_DATE_STOCK || 0, COL_ID_STOCK || 0, COL_OLD_STOCK || 0);
-  const rows = Array.from({length: qty}, () => Array(Math.max(1, width)).fill(""));
-
-  for (let i = 0; i < rows.length; i++) {
-    const rowValues = rows[i];
-    if (COL_ID_STOCK) rowValues[COL_ID_STOCK - 1] = achatId;
-    if (COL_LABEL_STOCK) rowValues[COL_LABEL_STOCK - 1] = label;
-    if (COL_OLD_STOCK) rowValues[COL_OLD_STOCK - 1] = "";
-    if (COL_SKU_STOCK) rowValues[COL_SKU_STOCK - 1] = `${base}-0`;
-    if (COL_DATE_STOCK) rowValues[COL_DATE_STOCK - 1] = dateLiv;
+  const rowsToCreate = Math.max(0, qty - existingCountForBaseAndId);
+  if (rowsToCreate <= 0) {
+    if (C_DMS_STOCK && existingStockDms) {
+      stpCell.setValue(existingStockDms);
+    }
+    logDebug_('handleAchats.skipCreation', {
+      base,
+      achatId: achatIdKey,
+      quantiteRecue: qty,
+      dejaExistants: existingCountForBaseAndId,
+      totalStock: totalExistingRows
+    });
+    renumberStockByBrand_();
+    return;
   }
 
-  const start = Math.max(STOCK_DATA_START_ROW, target.getLastRow() + 1);
-  target.getRange(start, 1, rows.length, rows[0].length).setValues(rows);
+  try {
+    const rows = Array.from({length: rowsToCreate}, () => Array(Math.max(1, width)).fill(""));
+    for (let i = 0; i < rows.length; i++) {
+      const suffix = maxSuffixForBase + i + 1;
+      const rowValues = rows[i];
+      if (COL_ID_STOCK) rowValues[COL_ID_STOCK - 1] = achatId;
+      if (COL_LABEL_STOCK) rowValues[COL_LABEL_STOCK - 1] = label;
+      if (COL_SKU_STOCK) rowValues[COL_SKU_STOCK - 1] = `${base}-${suffix}`;
+      if (COL_DATE_STOCK) rowValues[COL_DATE_STOCK - 1] = dateLiv;
+      if (C_DMS_STOCK) rowValues[C_DMS_STOCK - 1] = miseStockDate;
+    }
 
-  if (C_DMS_STOCK) {
-    target.getRange(start, C_DMS_STOCK, rows.length, 1).setValue(miseStockDate);
+    const start = Math.max(STOCK_DATA_START_ROW, target.getLastRow() + 1);
+    target.getRange(start, 1, rows.length, rows[0].length).setValues(rows);
+
+    if (C_DMS_STOCK) {
+      target.getRange(start, C_DMS_STOCK, rows.length, 1).setNumberFormat("dd/MM/yyyy");
+    }
+    if (COL_DATE_STOCK) {
+      target.getRange(start, COL_DATE_STOCK, rows.length, 1).setNumberFormat("dd/MM/yyyy");
+    }
+
+    const lastS = target.getLastRow();
+    if (lastS >= STOCK_DATA_START_ROW && COL_DATE_STOCK) {
+      target.getRange(STOCK_DATA_START_ROW, 1, lastS - STOCK_DATA_START_ROW + 1, target.getLastColumn())
+            .sort({ column: COL_DATE_STOCK, ascending: true });
+      target.getRange(STOCK_DATA_START_ROW, COL_DATE_STOCK, lastS - STOCK_DATA_START_ROW + 1, 1).setNumberFormat("dd/MM/yyyy");
+    }
+
+    logDebug_('handleAchats.creation', {
+      base,
+      achatId: achatIdKey,
+      quantiteRecue: qty,
+      lignesCreees: rowsToCreate,
+      suffixDepart: maxSuffixForBase + 1,
+      stockDataStart: STOCK_DATA_START_ROW
+    });
+
+    renumberStockByBrand_();
+  } catch (err) {
+    logDebug_('handleAchats.creation.error', {
+      message: err && err.message ? err.message : err,
+      base,
+      achatId: achatIdKey
+    });
+    ss.toast('Erreur lors de la création des lignes dans Stock. Consulte les journaux.', 'Achats → Stock', 8);
   }
-
-  const lastS = target.getLastRow();
-  if (lastS >= STOCK_DATA_START_ROW && COL_DATE_STOCK) {
-    target.getRange(STOCK_DATA_START_ROW, 1, lastS - STOCK_DATA_START_ROW + 1, target.getLastColumn())
-          .sort({ column: COL_DATE_STOCK, ascending: true });
-    target.getRange(STOCK_DATA_START_ROW, COL_DATE_STOCK, lastS - STOCK_DATA_START_ROW + 1, 1).setNumberFormat("dd/MM/yyyy");
-  }
-
-  renumberStockByBrand_();
 }
 
 // === RE-NUMÉROTATION GLOBALE PAR BASE DE SKU AVEC OVERRIDE PAR B ===
@@ -491,13 +532,13 @@ function renumberStockByBrand_(onlyOld) {
   const stockHeaders = getSheetHeaders_(stock, 'Stock');
   const resolver = makeHeaderResolver_(stockHeaders);
   const COL_ID    = resolver.colExact('id');
-  const COL_OLD   = resolver.colExact(HEADERS.STOCK.OLD_SKU) || resolver.colWhere(h => h.includes('ancienne')) || 2; // B
+  const COL_OLD   = resolver.colExact(HEADERS.STOCK.OLD_SKU) || 0;
   const COL_NEW   = resolver.colExact(HEADERS.STOCK.SKU)
     || resolver.colExact(HEADERS.STOCK.REFERENCE)
     || resolver.colWhere(h => h.includes('sku'))
     || 3; // C
 
-  const width = Math.max(COL_NEW, COL_OLD, COL_ID || 0, stock.getLastColumn());
+  const width = Math.max(COL_NEW || 0, COL_OLD || 0, COL_ID || 0, stock.getLastColumn());
   const data = stock.getRange(dataStartRow, 1, last - dataStartRow + 1, width).getValues();
 
   const idToBase = COL_ID ? buildIdToSkuBaseMap_(ss) : null;
@@ -507,7 +548,7 @@ function renumberStockByBrand_(onlyOld) {
   for (let i = 0; i < data.length; i++) {
     const row = data[i];
 
-    const oldSku = String(row[COL_OLD - 1] || "").trim();  // SKU ancienne
+    const oldSku = COL_OLD ? String(row[COL_OLD - 1] || "").trim() : "";  // SKU ancienne si présente
     const curSku = String(row[COL_NEW - 1] || "").trim();   // SKU actuelle (base-0 ou autre)
     const idRaw = (COL_ID ? row[COL_ID - 1] : '');
     const idKey = idRaw === null || idRaw === undefined || idRaw === '' ? '' : String(idRaw);
