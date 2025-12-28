@@ -101,13 +101,9 @@ function handleStock(e) {
     || colWhere(h => h.includes("valider"));
 
   const C_REPUB = colExact(HEADERS.STOCK.REPUBLIE)
-    || colExact(HEADERS.STOCK.REPUBLIE_ALT)
-    || colExact(HEADERS.STOCK.REPUBLIE_ALT2)
-    || colWhere(h => h.toLowerCase().includes('republ'));
-
-  const C_BOOST = colExact(HEADERS.STOCK.BOOST)
-    || colExact(HEADERS.STOCK.BOOST_ALT)
-    || colWhere(h => normText_(h).includes('boost'));
+  || colExact(HEADERS.STOCK.REPUBLIE_ALT)
+  || colExact(HEADERS.STOCK.REPUBLIE_ALT2)
+  || colWhere(h => h.toLowerCase().includes('republ'));
 
   if (!C_VENDU || !C_DVENTE) {
     const missing = [];
@@ -127,7 +123,7 @@ function handleStock(e) {
 
   const c = e.range.getColumn(), r = e.range.getRow();
   if (r === HEADER_ROW) return;
-  
+
   logDebug_('handleStock', {
     ligne: r,
     colonne: c,
@@ -162,39 +158,6 @@ function handleStock(e) {
   logDebug_('handleStock.republie', { ligne: r, statut: 'badge appliqué', ancienLibelle: currentLabel });
   return;
 }
-
-  // Laisser la colonne Boost configurée en case à cocher et le libellé éditable pour conserver la souplesse côté feuille.
-  if (C_BOOST && c === C_BOOST) {
-    if (!turnedOn) return;
-
-    if (!C_LABEL) {
-      sh.getRange(r, C_BOOST).setValue(false);
-      ss.toast('Colonne LIBELLÉ introuvable (badge boost).', 'Stock', 6);
-      logDebug_('handleStock.boost', { ligne: r, statut: 'refusé', raison: 'colonne libellé manquante' });
-      return;
-    }
-
-    const labelCell = sh.getRange(r, C_LABEL);
-    const currentLabel = String(labelCell.getValue() || '');
-    const trimmedLabel = currentLabel.trim();
-    if (!trimmedLabel) {
-      sh.getRange(r, C_BOOST).setValue(false);
-      ss.toast('Libellé manquant : impossible d’appliquer le boost.', 'Stock', 6);
-      logDebug_('handleStock.boost', { ligne: r, statut: 'refusé', raison: 'libellé vide' });
-      return;
-    }
-
-    const boostedLabel = applyBoostBadge_(currentLabel);
-    labelCell.setValue(boostedLabel);
-    sh.getRange(r, C_BOOST).setValue(false);
-    logDebug_('handleStock.boost', {
-      ligne: r,
-      statut: 'badge appliqué',
-      libelleInitial: currentLabel,
-      libelleFinal: boostedLabel
-    });
-    return;
-  }
 
 
   const chronoCols = {
@@ -1011,26 +974,6 @@ function handleStock(e) {
     return;
     }
   }
-
-function applyBoostBadge_(label) {
-  if (label === null || label === undefined) return label;
-
-  const text = String(label);
-  const trimmedStart = text.replace(/^\s+/, ''); // trimStart compatible Apps Script
-  if (trimmedStart === '') return label;
-
-  const BADGE = '🚀';
-  const alreadyBoosted = trimmedStart.startsWith(BADGE);
-  const withoutBadge = alreadyBoosted
-    ? trimmedStart.slice(BADGE.length).replace(/^\s+/, '')
-    : trimmedStart;
-
-  if (!withoutBadge) {
-    return BADGE;
-  }
-
-  return `${BADGE} ${withoutBadge}`.trim();
-}
 
 function bumpRepublishBadge_(label) {
   if (label === null || label === undefined) return label;
