@@ -353,9 +353,22 @@ function handleAchats(e) {
 
   const target = ss.getSheetByName("Stock");
   if (!target) return;
+  let stockHeaderRow = STOCK_HEADER_ROW;
+  let stockDataStartRow = STOCK_DATA_START_ROW;
+  const lastStockRow = target.getLastRow();
+  if (stockHeaderRow > lastStockRow && lastStockRow >= 1) {
+    stockHeaderRow = 1;
+    stockDataStartRow = 2;
+    logDebug_('handleAchats.stockLayoutFallback', {
+      reason: 'layout supérieur aux données réelles',
+      headerRowFallback: stockHeaderRow,
+      dataStartFallback: stockDataStartRow,
+      lastStockRow
+    });
+  }
 
   // Repère dynamiquement les colonnes de Stock
-  const headersStock = getSheetHeaders_(target, 'Stock');
+  const headersStock = target.getRange(stockHeaderRow, 1, 1, Math.max(4, target.getLastColumn())).getValues()[0];
   if (!headersStock || !headersStock.length) {
     logDebug_('handleAchats.stockHeaders.absents', { feuille: 'Stock' });
     return;
@@ -384,15 +397,15 @@ function handleAchats(e) {
   let maxSuffixForBase = 0;
   let existingIdValues = null;
   let rowsNeedingId = [];
-  if (lastExistingStockRow >= STOCK_DATA_START_ROW && COL_SKU_STOCK) {
-    const dataHeight = lastExistingStockRow - STOCK_DATA_START_ROW + 1;
-    const existingSkuValues = target.getRange(STOCK_DATA_START_ROW, COL_SKU_STOCK, dataHeight, 1).getValues();
+  if (lastExistingStockRow >= stockDataStartRow && COL_SKU_STOCK) {
+    const dataHeight = lastExistingStockRow - stockDataStartRow + 1;
+    const existingSkuValues = target.getRange(stockDataStartRow, COL_SKU_STOCK, dataHeight, 1).getValues();
     let existingDmsValues = null;
     if (C_DMS_STOCK) {
-      existingDmsValues = target.getRange(STOCK_DATA_START_ROW, C_DMS_STOCK, dataHeight, 1).getValues();
+      existingDmsValues = target.getRange(stockDataStartRow, C_DMS_STOCK, dataHeight, 1).getValues();
     }
     if (COL_ID_STOCK) {
-      existingIdValues = target.getRange(STOCK_DATA_START_ROW, COL_ID_STOCK, dataHeight, 1).getValues();
+      existingIdValues = target.getRange(stockDataStartRow, COL_ID_STOCK, dataHeight, 1).getValues();
     }
     const prefix = `${base}-`;
     const legacyPrefix = base;
@@ -487,7 +500,7 @@ function handleAchats(e) {
     if (COL_DATE_STOCK) rowValues[COL_DATE_STOCK - 1] = dateLiv;
   }
 
-  const start = Math.max(STOCK_DATA_START_ROW, target.getLastRow() + 1);
+  const start = Math.max(stockDataStartRow, target.getLastRow() + 1);
   target.getRange(start, 1, rows.length, rows[0].length).setValues(rows);
   logDebug_('handleAchats.creationStock', {
     baseSku: base,
@@ -501,10 +514,10 @@ function handleAchats(e) {
   // Mise à jour ID (lignes existantes sans ID + lignes créées)
   if (COL_ID_STOCK && achatIdKey) {
     const lastS = target.getLastRow();
-    const dataHeightAll = lastS - STOCK_DATA_START_ROW + 1;
-    const idRange = target.getRange(STOCK_DATA_START_ROW, COL_ID_STOCK, dataHeightAll, 1);
+    const dataHeightAll = lastS - stockDataStartRow + 1;
+    const idRange = target.getRange(stockDataStartRow, COL_ID_STOCK, dataHeightAll, 1);
     const idValsAll = idRange.getValues();
-    const skuValsAll = target.getRange(STOCK_DATA_START_ROW, COL_SKU_STOCK, dataHeightAll, 1).getValues();
+    const skuValsAll = target.getRange(stockDataStartRow, COL_SKU_STOCK, dataHeightAll, 1).getValues();
     for (let i = 0; i < idValsAll.length; i++) {
       const skuVal = normalizeSkuBase_(skuValsAll[i][0]);
       const baseMatches = skuVal && (skuVal.indexOf(`${base}-`) === 0 || skuVal === base);
@@ -515,15 +528,20 @@ function handleAchats(e) {
       }
     }
     idRange.setValues(idValsAll);
+    logDebug_('handleAchats.updateIdStock', {
+      baseSku: base,
+      achatId: achatIdKey,
+      lignesMaj: idValsAll.length
+    });
   }
 
   // Mise à jour Date de mise en stock dans Stock (alignée sur Achats)
   if (C_DMS_STOCK && miseStockDate) {
     const lastS = target.getLastRow();
-    const dataHeightAll = lastS - STOCK_DATA_START_ROW + 1;
-    const dmsRange = target.getRange(STOCK_DATA_START_ROW, C_DMS_STOCK, dataHeightAll, 1);
+    const dataHeightAll = lastS - stockDataStartRow + 1;
+    const dmsRange = target.getRange(stockDataStartRow, C_DMS_STOCK, dataHeightAll, 1);
     const dmsVals = dmsRange.getValues();
-    const skuValsAll = target.getRange(STOCK_DATA_START_ROW, COL_SKU_STOCK, dataHeightAll, 1).getValues();
+    const skuValsAll = target.getRange(stockDataStartRow, COL_SKU_STOCK, dataHeightAll, 1).getValues();
     for (let i = 0; i < dmsVals.length; i++) {
       const skuVal = normalizeSkuBase_(skuValsAll[i][0]);
       const baseMatches = skuVal && (skuVal.indexOf(`${base}-`) === 0 || skuVal === base);
@@ -531,13 +549,19 @@ function handleAchats(e) {
       dmsVals[i][0] = miseStockDate;
     }
     dmsRange.setValues(dmsVals);
+    logDebug_('handleAchats.updateDmsStock', {
+      baseSku: base,
+      achatId: achatIdKey,
+      dateMiseStock: miseStockDate,
+      lignesMaj: dmsVals.length
+    });
   }
 
   const lastS = target.getLastRow();
-  if (lastS >= STOCK_DATA_START_ROW && COL_DATE_STOCK) {
-    target.getRange(STOCK_DATA_START_ROW, 1, lastS - STOCK_DATA_START_ROW + 1, target.getLastColumn())
+  if (lastS >= stockDataStartRow && COL_DATE_STOCK) {
+    target.getRange(stockDataStartRow, 1, lastS - stockDataStartRow + 1, target.getLastColumn())
           .sort({ column: COL_DATE_STOCK, ascending: true });
-    target.getRange(STOCK_DATA_START_ROW, COL_DATE_STOCK, lastS - STOCK_DATA_START_ROW + 1, 1).setNumberFormat("dd/MM/yyyy");
+    target.getRange(stockDataStartRow, COL_DATE_STOCK, lastS - stockDataStartRow + 1, 1).setNumberFormat("dd/MM/yyyy");
   }
 
   renumberStockByBrand_();
