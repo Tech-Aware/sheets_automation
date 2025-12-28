@@ -380,6 +380,7 @@ function handleAchats(e) {
   let existingStockDms = null;
   let existingMatchingLines = 0;
   let existingBaseLines = 0;
+  let maxSuffixForBase = 0;
   if (lastExistingStockRow >= STOCK_DATA_START_ROW && COL_SKU_STOCK) {
     const dataHeight = lastExistingStockRow - STOCK_DATA_START_ROW + 1;
     const existingSkuValues = target.getRange(STOCK_DATA_START_ROW, COL_SKU_STOCK, dataHeight, 1).getValues();
@@ -400,6 +401,10 @@ function handleAchats(e) {
 
       existingStockHasBase = true;
       existingBaseLines++;
+      const suffix = extractSkuSuffix_(rawSku, base);
+      if (suffix && suffix > maxSuffixForBase) {
+        maxSuffixForBase = suffix;
+      }
 
       let storedIdKey = '';
       if (COL_ID_STOCK && existingIdValues) {
@@ -467,13 +472,14 @@ function handleAchats(e) {
 
   const width = Math.max(target.getLastColumn(), COL_LABEL_STOCK || 0, COL_SKU_STOCK || 0, COL_DATE_STOCK || 0, COL_ID_STOCK || 0, COL_OLD_STOCK || 0);
   const rows = Array.from({length: rowsToCreate}, () => Array(Math.max(1, width)).fill(""));
+  const startSuffix = maxSuffixForBase + 1;
 
   for (let i = 0; i < rows.length; i++) {
     const rowValues = rows[i];
     if (COL_ID_STOCK) rowValues[COL_ID_STOCK - 1] = achatId;
     if (COL_LABEL_STOCK) rowValues[COL_LABEL_STOCK - 1] = label;
     if (COL_OLD_STOCK) rowValues[COL_OLD_STOCK - 1] = "";
-    if (COL_SKU_STOCK) rowValues[COL_SKU_STOCK - 1] = `${base}-0`;
+    if (COL_SKU_STOCK) rowValues[COL_SKU_STOCK - 1] = `${base}-${startSuffix + i}`;
     if (COL_DATE_STOCK) rowValues[COL_DATE_STOCK - 1] = dateLiv;
   }
 
@@ -484,7 +490,8 @@ function handleAchats(e) {
     achatId: achatIdKey,
     lignesCreees: rows.length,
     quantiteDemandee: qty,
-    lignesExistantesAssociees: existingMatchingLines
+    lignesExistantesAssociees: existingMatchingLines,
+    suffixeDepart: startSuffix
   });
 
   if (C_DMS_STOCK) {
