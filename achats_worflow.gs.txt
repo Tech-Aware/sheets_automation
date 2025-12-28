@@ -580,17 +580,29 @@ function renumberStockByBrand_(onlyOld) {
   const stock  = ss.getSheetByName('Stock');
   if (!stock) return;
 
-  const headerRow = getSheetHeaderRow_('Stock');
-  const dataStartRow = getSheetDataStartRow_('Stock');
-
+  let headerRow = getSheetHeaderRow_('Stock');
+  let dataStartRow = getSheetDataStartRow_('Stock');
   const last = stock.getLastRow();
+
+  // Fallback si la feuille a un en-tête en ligne 1 (cas observé dans les logs)
+  if (headerRow > last && last >= 1) {
+    headerRow = 1;
+    dataStartRow = 2;
+    logDebug_('renumberStockByBrand.layoutFallback', {
+      reason: 'layout supérieur aux données réelles',
+      headerRowFallback: headerRow,
+      dataStartFallback: dataStartRow,
+      lastRow: last
+    });
+  }
+
   if (last < dataStartRow) return;
 
   onlyOld = !!onlyOld;
 
-  const stockHeaders = getSheetHeaders_(stock, 'Stock');
+  const stockHeaders = stock.getRange(headerRow, 1, 1, stock.getLastColumn()).getValues()[0];
   const resolver = makeHeaderResolver_(stockHeaders);
-  const COL_ID    = resolver.colExact('id');
+  const COL_ID    = resolver.colExact(HEADERS.STOCK.ID) || resolver.colExact('id');
   const COL_OLD   = resolver.colExact(HEADERS.STOCK.OLD_SKU) || resolver.colWhere(h => h.includes('ancienne')) || 2; // B
   const COL_NEW   = resolver.colExact(HEADERS.STOCK.SKU)
     || resolver.colExact(HEADERS.STOCK.REFERENCE)
@@ -598,7 +610,12 @@ function renumberStockByBrand_(onlyOld) {
     || 3; // C
 
   const width = Math.max(COL_NEW, COL_OLD, COL_ID || 0, stock.getLastColumn());
-  const data = stock.getRange(dataStartRow, 1, last - dataStartRow + 1, width).getValues();
+  const dataHeight = last - dataStartRow + 1;
+  if (dataHeight <= 0) {
+    logDebug_('renumberStockByBrand.noData', { dataStartRow, last });
+    return;
+  }
+  const data = stock.getRange(dataStartRow, 1, dataHeight, width).getValues();
 
   const idToBase = COL_ID ? buildIdToSkuBaseMap_(ss) : null;
   const baseCounters = Object.create(null);
