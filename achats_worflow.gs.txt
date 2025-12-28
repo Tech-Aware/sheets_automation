@@ -355,7 +355,11 @@ function handleAchats(e) {
   if (!target) return;
 
   // Repère dynamiquement les colonnes de Stock
-  const headersStock = target.getRange(1, 1, 1, Math.max(4, target.getLastColumn())).getValues()[0];
+  const headersStock = getSheetHeaders_(target, 'Stock');
+  if (!headersStock || !headersStock.length) {
+    logDebug_('handleAchats.stockHeaders.absents', { feuille: 'Stock' });
+    return;
+  }
   const resolverStock = makeHeaderResolver_(headersStock);
 
   const COL_ID_STOCK    = resolverStock.colExact(HEADERS.STOCK.ID);
@@ -376,15 +380,16 @@ function handleAchats(e) {
   let existingStockDms = null;
   let existingMatchingLines = 0;
   let existingBaseLines = 0;
-  if (lastExistingStockRow >= 2 && COL_SKU_STOCK) {
-    const existingSkuValues = target.getRange(2, COL_SKU_STOCK, lastExistingStockRow - 1, 1).getValues();
+  if (lastExistingStockRow >= STOCK_DATA_START_ROW && COL_SKU_STOCK) {
+    const dataHeight = lastExistingStockRow - STOCK_DATA_START_ROW + 1;
+    const existingSkuValues = target.getRange(STOCK_DATA_START_ROW, COL_SKU_STOCK, dataHeight, 1).getValues();
     let existingDmsValues = null;
     if (C_DMS_STOCK) {
-      existingDmsValues = target.getRange(2, C_DMS_STOCK, lastExistingStockRow - 1, 1).getValues();
+      existingDmsValues = target.getRange(STOCK_DATA_START_ROW, C_DMS_STOCK, dataHeight, 1).getValues();
     }
     let existingIdValues = null;
     if (COL_ID_STOCK) {
-      existingIdValues = target.getRange(2, COL_ID_STOCK, lastExistingStockRow - 1, 1).getValues();
+      existingIdValues = target.getRange(STOCK_DATA_START_ROW, COL_ID_STOCK, dataHeight, 1).getValues();
     }
     const prefix = `${base}-`;
     const legacyPrefix = base;
