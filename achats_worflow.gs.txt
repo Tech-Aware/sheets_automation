@@ -319,6 +319,7 @@ function handleAchats(e) {
   const stockStampRaw = stpCell.getValue();
 
   const achatId = COL_ID ? sh.getRange(row, COL_ID).getValue() : "";
+  const achatIdKey = (achatId === null || achatId === undefined || achatId === '') ? '' : String(achatId);
   const article = COL_ART ? String(sh.getRange(row, COL_ART).getDisplayValue() || "").trim() : "";
   const marque  = COL_MAR ? String(sh.getRange(row, COL_MAR).getDisplayValue() || "").trim() : "";
   const genrePrimary = COL_GEN_DATA
@@ -373,6 +374,8 @@ function handleAchats(e) {
   const lastExistingStockRow = target.getLastRow();
   let existingStockHasBase = false;
   let existingStockDms = null;
+  let existingMatchingLines = 0;
+  let existingBaseLines = 0;
   if (lastExistingStockRow >= 2 && COL_SKU_STOCK) {
     const existingSkuValues = target.getRange(2, COL_SKU_STOCK, lastExistingStockRow - 1, 1).getValues();
     let existingDmsValues = null;
@@ -385,43 +388,62 @@ function handleAchats(e) {
     }
     const prefix = `${base}-`;
     const legacyPrefix = base;
-    const achatIdKey = (achatId === null || achatId === undefined || achatId === '') ? '' : String(achatId);
     for (let i = 0; i < existingSkuValues.length; i++) {
       const rawSku = normalizeSkuBase_(existingSkuValues[i][0]);
-      if (!rawSku || (rawSku.indexOf(prefix) !== 0 && rawSku.indexOf(legacyPrefix) !== 0)) continue;
+      const baseMatches = rawSku && (rawSku.indexOf(prefix) === 0 || rawSku.indexOf(legacyPrefix) === 0);
+      if (!baseMatches) continue;
 
-      let idMatches = true;
+      existingStockHasBase = true;
+      existingBaseLines++;
+
       let storedIdKey = '';
       if (COL_ID_STOCK && existingIdValues) {
         const storedRaw = existingIdValues[i] && existingIdValues[i][0];
         storedIdKey = (storedRaw === null || storedRaw === undefined || storedRaw === '') ? '' : String(storedRaw);
-        if (achatIdKey && storedIdKey) {
-          idMatches = (storedIdKey === achatIdKey);
-        }
       }
 
-      if (!idMatches) {
-        continue;
-      }
-
-      existingStockHasBase = true;
-
-      if (existingDmsValues && !existingStockDms && COL_ID_STOCK && achatIdKey && storedIdKey && storedIdKey === achatIdKey) {
-        const candidate = existingDmsValues[i][0];
-        if (candidate instanceof Date && !isNaN(candidate)) {
-          existingStockDms = candidate;
+      const idMatches = !!achatIdKey && !!storedIdKey && storedIdKey === achatIdKey;
+      if (idMatches) {
+        existingMatchingLines++;
+        if (existingDmsValues && !existingStockDms) {
+          const candidate = existingDmsValues[i][0];
+          if (candidate instanceof Date && !isNaN(candidate)) {
+            existingStockDms = candidate;
+          }
         }
       }
     }
   }
 
-  if (existingStockHasBase) {
-    if (COL_STP && !getDateOrNull_(stockStampRaw)) {
-      const fallbackDms = existingStockDms || getDateOrNull_(stockStampDisplay);
-      if (fallbackDms) {
-        stpCell.setValue(fallbackDms);
-      }
+  const alreadyCreatedForThisPurchase = !!achatIdKey && existingMatchingLines >= qty;
+  if (existingStockHasBase && COL_STP && !getDateOrNull_(stockStampRaw)) {
+    const fallbackDms = existingStockDms || getDateOrNull_(stockStampDisplay);
+    if (fallbackDms) {
+      stpCell.setValue(fallbackDms);
     }
+  }
+
+  if (alreadyCreatedForThisPurchase) {
+    logDebug_('handleAchats.skipCreation.alreadyPresent', {
+      baseSku: base,
+      achatId: achatIdKey,
+      quantiteAttendue: qty,
+      lignesExistantes: existingMatchingLines,
+      lignesBaseTotales: existingBaseLines
+    });
+    renumberStockByBrand_();
+    return;
+  }
+
+  const rowsToCreate = Math.max(0, qty - existingMatchingLines);
+  if (rowsToCreate === 0 && existingStockHasBase) {
+    logDebug_('handleAchats.skipCreation.baseOnly', {
+      baseSku: base,
+      achatId: achatIdKey,
+      quantiteAttendue: qty,
+      lignesExistantes: existingMatchingLines,
+      lignesBaseTotales: existingBaseLines
+    });
     renumberStockByBrand_();
     return;
   }
@@ -439,7 +461,7 @@ function handleAchats(e) {
   }
 
   const width = Math.max(target.getLastColumn(), COL_LABEL_STOCK || 0, COL_SKU_STOCK || 0, COL_DATE_STOCK || 0, COL_ID_STOCK || 0, COL_OLD_STOCK || 0);
-  const rows = Array.from({length: qty}, () => Array(Math.max(1, width)).fill(""));
+  const rows = Array.from({length: rowsToCreate}, () => Array(Math.max(1, width)).fill(""));
 
   for (let i = 0; i < rows.length; i++) {
     const rowValues = rows[i];
@@ -452,6 +474,13 @@ function handleAchats(e) {
 
   const start = Math.max(STOCK_DATA_START_ROW, target.getLastRow() + 1);
   target.getRange(start, 1, rows.length, rows[0].length).setValues(rows);
+  logDebug_('handleAchats.creationStock', {
+    baseSku: base,
+    achatId: achatIdKey,
+    lignesCreees: rows.length,
+    quantiteDemandee: qty,
+    lignesExistantesAssociees: existingMatchingLines
+  });
 
   if (C_DMS_STOCK) {
     target.getRange(start, C_DMS_STOCK, rows.length, 1).setValue(miseStockDate);
