@@ -104,6 +104,9 @@ function handleStock(e) {
   || colExact(HEADERS.STOCK.REPUBLIE_ALT)
   || colExact(HEADERS.STOCK.REPUBLIE_ALT2)
   || colWhere(h => h.toLowerCase().includes('republ'));
+  const C_BOOST = colExact(HEADERS.STOCK.BOOST)
+    || colExact(HEADERS.STOCK.BOOST_ALT)
+    || colWhere(h => h.toLowerCase().includes('boost'));
 
   if (!C_VENDU || !C_DVENTE) {
     const missing = [];
@@ -129,6 +132,7 @@ function handleStock(e) {
     colonne: c,
     enteteCourant: stockHeaders[c - 1],
     enteteRepublie: C_REPUB ? stockHeaders[(C_REPUB || 1) - 1] : '',
+    enteteBoost: C_BOOST ? stockHeaders[(C_BOOST || 1) - 1] : '',
     ranges: { C_PUB, C_REPUB, C_VENDU, C_DVENTE }
   });
 
@@ -158,6 +162,36 @@ function handleStock(e) {
   logDebug_('handleStock.republie', { ligne: r, statut: 'badge appliqué', ancienLibelle: currentLabel });
   return;
 }
+
+  if (C_BOOST && c === C_BOOST) {
+    if (!turnedOn) return;
+
+    const sold = C_VENDU ? isStatusActiveValue_(sh.getRange(r, C_VENDU).getValue()) : false;
+    if (sold) {
+      sh.getRange(r, C_BOOST).setValue(false);
+      ss.toast('Impossible de booster un produit déjà vendu.', 'Stock', 5);
+      logDebug_('handleStock.boost', { ligne: r, statut: 'refusé', raison: 'déjà vendu' });
+      return;
+    }
+
+    if (!C_LABEL) {
+      sh.getRange(r, C_BOOST).setValue(false);
+      ss.toast('Colonne LIBELLÉ introuvable (badge boost).', 'Stock', 6);
+      logDebug_('handleStock.boost', { ligne: r, statut: 'refusé', raison: 'libellé manquant' });
+      return;
+    }
+
+    const labelCell = sh.getRange(r, C_LABEL);
+    const currentLabel = String(labelCell.getValue() || '');
+    const boostedLabel = applyBoostBadge_(currentLabel);
+
+    labelCell.setValue(boostedLabel);
+    sh.getRange(r, C_BOOST).setValue(false);
+
+    ss.toast('Badge boost appliqué.', 'Stock', 4);
+    logDebug_('handleStock.boost', { ligne: r, statut: 'badge appliqué', ancienLibelle: currentLabel, nouveauLibelle: boostedLabel });
+    return;
+  }
 
 
   const chronoCols = {
@@ -974,6 +1008,25 @@ function handleStock(e) {
     return;
     }
   }
+
+function applyBoostBadge_(label) {
+  if (label === null || label === undefined) return label;
+
+  const text = String(label);
+  const trimmed = text.replace(/^\s+/, '');
+
+  if (trimmed === '') return label;
+
+  const BOOST_BADGE = '🚀';
+  let rest = trimmed;
+
+  if (rest.startsWith(BOOST_BADGE)) {
+    rest = rest.slice(BOOST_BADGE.length);
+    rest = rest.replace(/^\s+/, '');
+  }
+
+  return rest ? `${BOOST_BADGE} ${rest}` : BOOST_BADGE;
+}
 
 function bumpRepublishBadge_(label) {
   if (label === null || label === undefined) return label;
