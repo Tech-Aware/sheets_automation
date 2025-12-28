@@ -14,7 +14,7 @@ function handleAchats(e) {
   const colWhere = resolver.colWhere.bind(resolver);
   const colExact = resolver.colExact.bind(resolver);
 
-  const COL_ID   = colExact(HEADERS.ACHATS.ID);
+  const COL_ID   = colExact(HEADERS.ACHATS.ID) || colWhere(h => normText_(h) === 'id');
   const COL_ART  = colExact(HEADERS.ACHATS.ARTICLE)
     || colExact(HEADERS.ACHATS.ARTICLE_ALT)
     || colWhere(h => h.includes('article'));
