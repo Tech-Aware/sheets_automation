@@ -576,146 +576,154 @@ function handleAchats(e) {
 // - Paramètre onlyOld = true → on ne renumérote QUE les lignes où B est rempli.
 
 function renumberStockByBrand_(onlyOld) {
-  const ss = SpreadsheetApp.getActive();
-  const stock  = ss.getSheetByName('Stock');
-  if (!stock) return;
+  try {
+    const ss = SpreadsheetApp.getActive();
+    const stock  = ss.getSheetByName('Stock');
+    if (!stock) return;
 
-  let headerRow = getSheetHeaderRow_('Stock');
-  let dataStartRow = getSheetDataStartRow_('Stock');
-  const last = stock.getLastRow();
+    let headerRow = getSheetHeaderRow_('Stock');
+    let dataStartRow = getSheetDataStartRow_('Stock');
+    const last = stock.getLastRow();
 
-  // Fallback si la feuille a un en-tête en ligne 1 (cas observé dans les logs)
-  if (headerRow > last && last >= 1) {
-    headerRow = 1;
-    dataStartRow = 2;
-    logDebug_('renumberStockByBrand.layoutFallback', {
-      reason: 'layout supérieur aux données réelles',
-      headerRowFallback: headerRow,
-      dataStartFallback: dataStartRow,
-      lastRow: last
-    });
-  }
-
-  if (last < dataStartRow) return;
-
-  onlyOld = !!onlyOld;
-
-  const stockHeaders = stock.getRange(headerRow, 1, 1, stock.getLastColumn()).getValues()[0];
-  const resolver = makeHeaderResolver_(stockHeaders);
-  const COL_ID    = resolver.colExact(HEADERS.STOCK.ID) || resolver.colExact('id');
-  const COL_OLD   = resolver.colExact(HEADERS.STOCK.OLD_SKU) || resolver.colWhere(h => h.includes('ancienne')) || 2; // B
-  const COL_NEW   = resolver.colExact(HEADERS.STOCK.SKU)
-    || resolver.colExact(HEADERS.STOCK.REFERENCE)
-    || resolver.colWhere(h => h.includes('sku'))
-    || 3; // C
-
-  const width = Math.max(COL_NEW, COL_OLD, COL_ID || 0, stock.getLastColumn());
-  const dataHeight = last - dataStartRow + 1;
-  if (dataHeight <= 0) {
-    logDebug_('renumberStockByBrand.noData', { dataStartRow, last });
-    return;
-  }
-  const data = stock.getRange(dataStartRow, 1, dataHeight, width).getValues();
-
-  const idToBase = COL_ID ? buildIdToSkuBaseMap_(ss) : null;
-  const baseCounters = Object.create(null);
-  const rowInfos = [];
-
-  for (let i = 0; i < data.length; i++) {
-    const row = data[i];
-
-    const oldSku = String(row[COL_OLD - 1] || "").trim();  // SKU ancienne
-    const curSku = String(row[COL_NEW - 1] || "").trim();   // SKU actuelle (base-0 ou autre)
-    const idRaw = (COL_ID ? row[COL_ID - 1] : '');
-    const idKey = idRaw === null || idRaw === undefined || idRaw === '' ? '' : String(idRaw);
-
-    const idBase = (idKey && idToBase && idToBase[idKey]) ? idToBase[idKey] : '';
-    const curBase = extractSkuBase_(curSku);
-    const oldBase = extractSkuBase_(oldSku);
-
-    let base = curBase || oldBase || idBase;
-    if (base && idBase && base !== idBase) {
-      const curAligned = !curBase || curBase === idBase;
-      const oldAligned = !oldBase || oldBase === idBase;
-      if (curAligned && oldAligned) {
-        base = idBase;
-      }
+    // Fallback si la feuille a un en-tête en ligne 1 (cas observé dans les logs)
+    if (headerRow > last && last >= 1) {
+      headerRow = 1;
+      dataStartRow = 2;
+      logDebug_('renumberStockByBrand.layoutFallback', {
+        reason: 'layout supérieur aux données réelles',
+        headerRowFallback: headerRow,
+        dataStartFallback: dataStartRow,
+        lastRow: last
+      });
     }
 
-    let overrideSuffix = null;
-    let curSuffix = null;
+    if (last < dataStartRow) return;
 
-    if (base) {
+    onlyOld = !!onlyOld;
+
+    const stockHeaders = stock.getRange(headerRow, 1, 1, stock.getLastColumn()).getValues()[0];
+    const resolver = makeHeaderResolver_(stockHeaders);
+    const COL_ID    = resolver.colExact(HEADERS.STOCK.ID) || resolver.colExact('id');
+    const COL_OLD   = resolver.colExact(HEADERS.STOCK.OLD_SKU) || resolver.colWhere(h => h.includes('ancienne')) || 2; // B
+    const COL_NEW   = resolver.colExact(HEADERS.STOCK.SKU)
+      || resolver.colExact(HEADERS.STOCK.REFERENCE)
+      || resolver.colWhere(h => h.includes('sku'))
+      || 3; // C
+
+    const width = Math.max(COL_NEW, COL_OLD, COL_ID || 0, stock.getLastColumn());
+    const dataHeight = last - dataStartRow + 1;
+    if (dataHeight <= 0) {
+      logDebug_('renumberStockByBrand.noData', { dataStartRow, last });
+      return;
+    }
+    const data = stock.getRange(dataStartRow, 1, dataHeight, width).getValues();
+
+    const idToBase = COL_ID ? buildIdToSkuBaseMap_(ss) : null;
+    const baseCounters = Object.create(null);
+    const rowInfos = [];
+
+    for (let i = 0; i < data.length; i++) {
+      const row = data[i];
+
+      const oldSku = String(row[COL_OLD - 1] || "").trim();  // SKU ancienne
+      const curSku = String(row[COL_NEW - 1] || "").trim();   // SKU actuelle (base-0 ou autre)
+      const idRaw = (COL_ID ? row[COL_ID - 1] : '');
+      const idKey = idRaw === null || idRaw === undefined || idRaw === '' ? '' : String(idRaw);
+
+      const idBase = (idKey && idToBase && idToBase[idKey]) ? idToBase[idKey] : '';
+      const curBase = extractSkuBase_(curSku);
+      const oldBase = extractSkuBase_(oldSku);
+
+      let base = curBase || oldBase || idBase;
+      if (base && idBase && base !== idBase) {
+        const curAligned = !curBase || curBase === idBase;
+        const oldAligned = !oldBase || oldBase === idBase;
+        if (curAligned && oldAligned) {
+          base = idBase;
+        }
+      }
+
+      let overrideSuffix = null;
+      let curSuffix = null;
+
+      if (base) {
+        const counterKey = base;
+        if (!Object.prototype.hasOwnProperty.call(baseCounters, counterKey)) {
+          baseCounters[counterKey] = 0;
+        }
+
+        if (oldSku && (!oldBase || oldBase === base)) {
+          overrideSuffix = extractSkuSuffix_(oldSku, base);
+          if (overrideSuffix === 0) overrideSuffix = null; // 0 = placeholder, on renumérote
+          if (overrideSuffix != null) {
+            baseCounters[counterKey] = Math.max(baseCounters[counterKey], overrideSuffix);
+          }
+        }
+
+        if (curSku && (!curBase || curBase === base)) {
+          curSuffix = extractSkuSuffix_(curSku, base);
+          if (curSuffix === 0) curSuffix = null; // 0 = placeholder, on renumérote
+          if (curSuffix != null) {
+            baseCounters[counterKey] = Math.max(baseCounters[counterKey], curSuffix);
+          }
+        }
+      }
+
+      rowInfos.push({
+        base,
+        oldSku,
+        curSku,
+        overrideSuffix,
+        curSuffix
+      });
+    }
+
+    const newSkuColValues = [];
+
+    for (let i = 0; i < rowInfos.length; i++) {
+      const info = rowInfos[i];
+      const base = info.base;
+      const oldSku = info.oldSku;
+      const curSku = info.curSku;
+
+      if (onlyOld && !oldSku) {
+        newSkuColValues.push([curSku]);
+        continue;
+      }
+
+      if (!base) {
+        newSkuColValues.push([curSku]);
+        continue;
+      }
+
       const counterKey = base;
       if (!Object.prototype.hasOwnProperty.call(baseCounters, counterKey)) {
         baseCounters[counterKey] = 0;
       }
 
-      if (oldSku && (!oldBase || oldBase === base)) {
-        overrideSuffix = extractSkuSuffix_(oldSku, base);
-        if (overrideSuffix === 0) overrideSuffix = null; // 0 = placeholder, on renumérote
-        if (overrideSuffix != null) {
-          baseCounters[counterKey] = Math.max(baseCounters[counterKey], overrideSuffix);
-        }
+      if (info.overrideSuffix != null) {
+        baseCounters[counterKey] = Math.max(baseCounters[counterKey], info.overrideSuffix);
+        newSkuColValues.push([counterKey + '-' + info.overrideSuffix]);
+        continue;
       }
 
-      if (curSku && (!curBase || curBase === base)) {
-        curSuffix = extractSkuSuffix_(curSku, base);
-        if (curSuffix === 0) curSuffix = null; // 0 = placeholder, on renumérote
-        if (curSuffix != null) {
-          baseCounters[counterKey] = Math.max(baseCounters[counterKey], curSuffix);
-        }
+      if (info.curSuffix != null) {
+        baseCounters[counterKey] = Math.max(baseCounters[counterKey], info.curSuffix);
+        newSkuColValues.push([curSku]);
+        continue;
       }
+
+      const nextSuffix = baseCounters[counterKey] + 1;
+      baseCounters[counterKey] = nextSuffix;
+      newSkuColValues.push([counterKey + '-' + nextSuffix]);
     }
 
-    rowInfos.push({
-      base,
-      oldSku,
-      curSku,
-      overrideSuffix,
-      curSuffix
+    stock.getRange(dataStartRow, COL_NEW, newSkuColValues.length, 1).setValues(newSkuColValues);
+  } catch (err) {
+    logDebug_('renumberStockByBrand.error', {
+      message: err && err.message ? err.message : err,
+      stack: err && err.stack ? err.stack : '',
+      sheet: 'Stock'
     });
   }
-
-  const newSkuColValues = [];
-
-  for (let i = 0; i < rowInfos.length; i++) {
-    const info = rowInfos[i];
-    const base = info.base;
-    const oldSku = info.oldSku;
-    const curSku = info.curSku;
-
-    if (onlyOld && !oldSku) {
-      newSkuColValues.push([curSku]);
-      continue;
-    }
-
-    if (!base) {
-      newSkuColValues.push([curSku]);
-      continue;
-    }
-
-    const counterKey = base;
-    if (!Object.prototype.hasOwnProperty.call(baseCounters, counterKey)) {
-      baseCounters[counterKey] = 0;
-    }
-
-    if (info.overrideSuffix != null) {
-      baseCounters[counterKey] = Math.max(baseCounters[counterKey], info.overrideSuffix);
-      newSkuColValues.push([counterKey + '-' + info.overrideSuffix]);
-      continue;
-    }
-
-    if (info.curSuffix != null) {
-      baseCounters[counterKey] = Math.max(baseCounters[counterKey], info.curSuffix);
-      newSkuColValues.push([curSku]);
-      continue;
-    }
-
-    const nextSuffix = baseCounters[counterKey] + 1;
-    baseCounters[counterKey] = nextSuffix;
-    newSkuColValues.push([counterKey + '-' + nextSuffix]);
-  }
-
-  stock.getRange(dataStartRow, COL_NEW, newSkuColValues.length, 1).setValues(newSkuColValues);
 }
