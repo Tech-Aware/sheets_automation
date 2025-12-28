@@ -570,6 +570,7 @@ function renumberStockByBrand_(onlyOld) {
 
       if (oldSku && (!oldBase || oldBase === base)) {
         overrideSuffix = extractSkuSuffix_(oldSku, base);
+        if (overrideSuffix === 0) overrideSuffix = null; // 0 = placeholder, on renumérote
         if (overrideSuffix != null) {
           baseCounters[counterKey] = Math.max(baseCounters[counterKey], overrideSuffix);
         }
@@ -577,6 +578,7 @@ function renumberStockByBrand_(onlyOld) {
 
       if (curSku && (!curBase || curBase === base)) {
         curSuffix = extractSkuSuffix_(curSku, base);
+        if (curSuffix === 0) curSuffix = null; // 0 = placeholder, on renumérote
         if (curSuffix != null) {
           baseCounters[counterKey] = Math.max(baseCounters[counterKey], curSuffix);
         }
