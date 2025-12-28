@@ -97,6 +97,8 @@ const HEADERS = Object.freeze({
     REPUBLIE: 'REPUBLIÉ',
     REPUBLIE_ALT: 'REPUBLIE',
     REPUBLIE_ALT2: 'REPUBLIER',
+    BOOST: 'BOOST',
+    BOOST_ALT: 'Boost'
   }),
   VENTES: Object.freeze({
     ID: 'ID',
