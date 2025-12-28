@@ -382,6 +382,8 @@ function handleAchats(e) {
   let existingMatchingLines = 0;
   let existingBaseLines = 0;
   let maxSuffixForBase = 0;
+  let existingIdValues = null;
+  let rowsNeedingId = [];
   if (lastExistingStockRow >= STOCK_DATA_START_ROW && COL_SKU_STOCK) {
     const dataHeight = lastExistingStockRow - STOCK_DATA_START_ROW + 1;
     const existingSkuValues = target.getRange(STOCK_DATA_START_ROW, COL_SKU_STOCK, dataHeight, 1).getValues();
@@ -389,7 +391,6 @@ function handleAchats(e) {
     if (C_DMS_STOCK) {
       existingDmsValues = target.getRange(STOCK_DATA_START_ROW, C_DMS_STOCK, dataHeight, 1).getValues();
     }
-    let existingIdValues = null;
     if (COL_ID_STOCK) {
       existingIdValues = target.getRange(STOCK_DATA_START_ROW, COL_ID_STOCK, dataHeight, 1).getValues();
     }
@@ -422,6 +423,8 @@ function handleAchats(e) {
             existingStockDms = candidate;
           }
         }
+      } else if (COL_ID_STOCK && achatIdKey && existingIdValues && (!storedIdKey || storedIdKey === '')) {
+        rowsNeedingId.push(i);
       }
     }
   }
@@ -495,8 +498,39 @@ function handleAchats(e) {
     suffixeDepart: startSuffix
   });
 
-  if (C_DMS_STOCK) {
-    target.getRange(start, C_DMS_STOCK, rows.length, 1).setValue(miseStockDate);
+  // Mise à jour ID (lignes existantes sans ID + lignes créées)
+  if (COL_ID_STOCK && achatIdKey) {
+    const lastS = target.getLastRow();
+    const dataHeightAll = lastS - STOCK_DATA_START_ROW + 1;
+    const idRange = target.getRange(STOCK_DATA_START_ROW, COL_ID_STOCK, dataHeightAll, 1);
+    const idValsAll = idRange.getValues();
+    const skuValsAll = target.getRange(STOCK_DATA_START_ROW, COL_SKU_STOCK, dataHeightAll, 1).getValues();
+    for (let i = 0; i < idValsAll.length; i++) {
+      const skuVal = normalizeSkuBase_(skuValsAll[i][0]);
+      const baseMatches = skuVal && (skuVal.indexOf(`${base}-`) === 0 || skuVal === base);
+      if (!baseMatches) continue;
+      const curId = idValsAll[i][0];
+      if (curId === null || curId === undefined || curId === '') {
+        idValsAll[i][0] = achatId;
+      }
+    }
+    idRange.setValues(idValsAll);
+  }
+
+  // Mise à jour Date de mise en stock dans Stock (alignée sur Achats)
+  if (C_DMS_STOCK && miseStockDate) {
+    const lastS = target.getLastRow();
+    const dataHeightAll = lastS - STOCK_DATA_START_ROW + 1;
+    const dmsRange = target.getRange(STOCK_DATA_START_ROW, C_DMS_STOCK, dataHeightAll, 1);
+    const dmsVals = dmsRange.getValues();
+    const skuValsAll = target.getRange(STOCK_DATA_START_ROW, COL_SKU_STOCK, dataHeightAll, 1).getValues();
+    for (let i = 0; i < dmsVals.length; i++) {
+      const skuVal = normalizeSkuBase_(skuValsAll[i][0]);
+      const baseMatches = skuVal && (skuVal.indexOf(`${base}-`) === 0 || skuVal === base);
+      if (!baseMatches) continue;
+      dmsVals[i][0] = miseStockDate;
+    }
+    dmsRange.setValues(dmsVals);
   }
 
   const lastS = target.getLastRow();
