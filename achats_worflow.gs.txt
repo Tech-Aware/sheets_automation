@@ -367,7 +367,10 @@ function handleAchats(e) {
     || resolverStock.colWhere(h => h.includes('sku'))
     || 3;
   const COL_DATE_STOCK  = resolverStock.colWhere(h => h.includes('livraison')) || (COL_SKU_STOCK ? COL_SKU_STOCK + 1 : 0);
-  const C_DMS_STOCK     = resolverStock.colExact(HEADERS.STOCK.DATE_MISE_EN_STOCK); // optionnel
+  const C_DMS_STOCK     = resolverStock.colExact(HEADERS.STOCK.DATE_MISE_EN_STOCK)
+    || resolverStock.colExact(HEADERS.STOCK.DATE_MISE_EN_STOCK_ALT2)
+    || resolverStock.colWhere(h => h.includes('mise en stock'))
+    || resolverStock.colWhere(h => h.includes('mis en stock')); // optionnel
 
   const base = skuBase;
   const label = `${article} ${marque} ${genre}`.trim();
