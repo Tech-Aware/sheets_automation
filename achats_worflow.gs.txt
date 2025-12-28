@@ -6,8 +6,8 @@ function handleAchats(e) {
   const turnedOn = (e.value === "TRUE") || (e.value === true);
   const turnedOff = (e.value === "FALSE") || (e.value === false);
 
-  const STOCK_HEADER_ROW = getSheetHeaderRow_('Stock');
-  const STOCK_DATA_START_ROW = getSheetDataStartRow_('Stock');
+  const STOCK_HEADER_ROW = getSheetHeaderRow_('STOCK');
+  const STOCK_DATA_START_ROW = getSheetDataStartRow_('STOCK');
 
   const achatsHeaders = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0];
   const resolver = makeHeaderResolver_(achatsHeaders);
@@ -357,7 +357,7 @@ function handleAchats(e) {
   }
 
   // Repère dynamiquement les colonnes de Stock (en-tête à la ligne 6)
-  const headersStock = getSheetHeaders_(target, 'Stock');
+  const headersStock = getSheetHeaders_(target, 'STOCK');
   const resolverStock = makeHeaderResolver_(headersStock);
 
   const COL_ID_STOCK    = resolverStock.colExact(HEADERS.STOCK.ID);
@@ -521,8 +521,8 @@ function renumberStockByBrand_(onlyOld) {
   const stock  = ss.getSheetByName('Stock');
   if (!stock) return;
 
-  const headerRow = getSheetHeaderRow_('Stock');
-  const dataStartRow = getSheetDataStartRow_('Stock');
+  const headerRow = getSheetHeaderRow_('STOCK');
+  const dataStartRow = getSheetDataStartRow_('STOCK');
 
   const last = stock.getLastRow();
   if (last < dataStartRow) return;
