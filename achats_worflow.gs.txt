@@ -362,7 +362,8 @@ function handleAchats(e) {
   }
   const resolverStock = makeHeaderResolver_(headersStock);
 
-  const COL_ID_STOCK    = resolverStock.colExact(HEADERS.STOCK.ID);
+  const COL_ID_STOCK    = resolverStock.colExact(HEADERS.STOCK.ID)
+    || resolverStock.colWhere(h => normText_(h) === 'id');
   const COL_LABEL_STOCK = resolverStock.colWhere(h => h.includes('libell')) || resolverStock.colWhere(h => h.includes('article')) || 2;
   const COL_OLD_STOCK   = resolverStock.colExact(HEADERS.STOCK.OLD_SKU);
   const COL_SKU_STOCK   = resolverStock.colExact(HEADERS.STOCK.SKU)
