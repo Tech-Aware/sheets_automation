@@ -217,7 +217,8 @@ function resolveCombinedPretPourStockColumn_(resolver) {
   const colWhere = resolver.colWhere ? resolver.colWhere.bind(resolver) : () => 0;
 
   const combined = colExact(HEADERS.ACHATS.PRET_STOCK_COMBINED)
-    || colWhere(h => h.includes('pret') && h.includes('mise en stock') && h.includes('date'));
+    || colWhere(h => h.includes('pret') && h.includes('mise en stock') && h.includes('date'))
+    || colWhere(h => h.includes('mis en stock') && !h.includes('pret')); // header renommé « MIS EN STOCK »
   return combined || 0;
 }
 
