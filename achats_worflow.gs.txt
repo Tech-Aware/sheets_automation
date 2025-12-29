@@ -412,7 +412,7 @@ function handleAchats(e) {
         }
 
         const baseMatches = rawSku && rawSku.indexOf(prefix) === 0;
-        const idMatches = !achatIdKey || (achatIdKey && rowId === achatIdKey);
+        const idMatches = achatIdKey ? (rowId === achatIdKey) : false;
 
         if (baseMatches && idMatches) {
           existingCountForBaseAndId++;
