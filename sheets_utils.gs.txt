@@ -54,14 +54,23 @@ function makeHeaderResolver_(headers) {
   };
 }
 
+function getSheetLayoutConfig_(sheetName) {
+  if (!SHEET_LAYOUT) {
+    return null;
+  }
+
+  const key = String(sheetName || '');
+  return SHEET_LAYOUT[key] || SHEET_LAYOUT[key.toUpperCase()] || null;
+}
+
 function getSheetHeaderRow_(sheetName) {
-  const layout = SHEET_LAYOUT && SHEET_LAYOUT[sheetName];
+  const layout = getSheetLayoutConfig_(sheetName);
   const headerRow = layout && Number(layout.HEADER_ROW);
   return headerRow && headerRow > 0 ? headerRow : 1;
 }
 
 function getSheetDataStartRow_(sheetName) {
-  const layout = SHEET_LAYOUT && SHEET_LAYOUT[sheetName];
+  const layout = getSheetLayoutConfig_(sheetName);
   const dataRow = layout && Number(layout.DATA_START_ROW);
   if (dataRow && dataRow > 0) {
     return dataRow;

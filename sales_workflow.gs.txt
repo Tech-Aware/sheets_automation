@@ -7,6 +7,8 @@ function handleVentesReturn(e) {
     return;
   }
 
+  const headerRow = getSheetHeaderRow_('Ventes');
+  const dataStartRow = getSheetDataStartRow_('Ventes');
   const row = range.getRow();
   const col = range.getColumn();
   const lastColumn = sh.getLastColumn();
@@ -16,12 +18,14 @@ function handleVentesReturn(e) {
     sheet: sh && sh.getName && sh.getName(),
     row,
     col,
+    headerRow,
+    dataStartRow,
     value: newValue,
     oldValue: e && e.oldValue
   });
 
-  if (row <= 1) {
-    logDebug_('handleVentesReturn.skip', { reason: 'header row', row });
+  if (row < dataStartRow) {
+    logDebug_('handleVentesReturn.skip', { reason: 'header/data zone', row, dataStartRow });
     return;
   }
 
@@ -30,7 +34,7 @@ function handleVentesReturn(e) {
     return;
   }
 
-  const headers = sh.getRange(1, 1, 1, lastColumn).getValues()[0];
+  const headers = sh.getRange(headerRow, 1, 1, lastColumn).getValues()[0];
   const resolver = makeHeaderResolver_(headers);
   const colReturn = resolver.colExact(HEADERS.VENTES.RETOUR)
     || resolver.colWhere(header => header.includes('retour'));
@@ -461,16 +465,18 @@ function exportVente_(e, row, C_ID, C_LABEL, C_SKU, C_PRIX, C_DVENTE, C_STAMPV, 
   const sh = ss.getSheetByName("Stock");
   if (!sh) return;
 
+  const ventesHeaderRow = getSheetHeaderRow_('Ventes');
+  const ventesDataStartRow = getSheetDataStartRow_('Ventes');
   const opts = options || {};
   const shipping = opts.shipping || null;
 
   const ventes = ss.getSheetByName("Ventes") || ss.insertSheet("Ventes");
   if (ventes.getLastRow() === 0) {
-    ventes.getRange(1, 1, 1, DEFAULT_VENTES_HEADERS.length).setValues([DEFAULT_VENTES_HEADERS]);
+    ventes.getRange(ventesHeaderRow, 1, 1, DEFAULT_VENTES_HEADERS.length).setValues([DEFAULT_VENTES_HEADERS]);
   }
 
   const headerWidth = Math.max(DEFAULT_VENTES_HEADERS.length, ventes.getLastColumn());
-  const headerRange = ventes.getRange(1, 1, 1, headerWidth);
+  const headerRange = ventes.getRange(ventesHeaderRow, 1, 1, headerWidth);
   const ventesHeaders = headerRange.getValues()[0];
   let headerMutated = false;
   for (let i = 0; i < DEFAULT_VENTES_HEADERS.length; i++) {
@@ -661,12 +667,13 @@ function exportVente_(e, row, C_ID, C_LABEL, C_SKU, C_PRIX, C_DVENTE, C_STAMPV, 
       id: idVal,
       sku,
       headerRowStock: headerInfo.headerRow || getSheetHeaderRow_('Stock'),
+      headerRowVentes: ventesHeaderRow,
       prixAchat
     });
   }
 
   // Insert vente
-  const start = Math.max(2, ventes.getLastRow() + 1);
+  const start = Math.max(ventesDataStartRow, ventes.getLastRow() + 1);
   const newRow = Array(widthVentes).fill("");
 
   if (COL_ID_VENTE) newRow[COL_ID_VENTE - 1] = idVal;                 // <-- ID exact obligatoire
@@ -718,10 +725,11 @@ function exportVente_(e, row, C_ID, C_LABEL, C_SKU, C_PRIX, C_DVENTE, C_STAMPV, 
   }
 
   const lastV = ventes.getLastRow();
-  if (lastV > 2 && COL_DATE_VENTE) {
-    ventes.getRange(2, 1, lastV - 1, ventes.getLastColumn())
+  if (lastV >= ventesDataStartRow && COL_DATE_VENTE) {
+    const ventesHeight = lastV - ventesDataStartRow + 1;
+    ventes.getRange(ventesDataStartRow, 1, ventesHeight, ventes.getLastColumn())
       .sort([{ column: COL_DATE_VENTE, ascending: false }]);
-    ventes.getRange(2, COL_DATE_VENTE, lastV - 1, 1).setNumberFormat('dd/MM/yyyy');
+    ventes.getRange(ventesDataStartRow, COL_DATE_VENTE, ventesHeight, 1).setNumberFormat('dd/MM/yyyy');
   }
 
   if (shipping && Number.isFinite(shipping.fee)) {
