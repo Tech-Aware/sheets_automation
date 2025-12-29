@@ -127,8 +127,8 @@ const SHEET_LAYOUT = Object.freeze({
     DATA_START_ROW: 7
   }),
   VENTES: Object.freeze({
-    HEADER_ROW: 1,
-    DATA_START_ROW: 2
+    HEADER_ROW: 6,
+    DATA_START_ROW: 7
   }),
   ACHATS: Object.freeze({
     HEADER_ROW: 1,
