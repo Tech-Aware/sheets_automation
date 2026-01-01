@@ -426,7 +426,6 @@ function normalizeStockLayoutForCopy_(spreadsheet) {
   });
 
   insertIndex = Math.max(insertIndex, maxExistingIndex + 1);
-  const performed = [];
 
   for (let i = 0; i < statusColumns.length; i++) {
     headers = getSheetHeaders_(sheet, 'Stock');
