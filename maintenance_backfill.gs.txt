@@ -496,6 +496,64 @@ function normalizeStockLayoutForCopy_(spreadsheet) {
     HEADERS.STOCK.VENDU
   ]);
 
+  function normalizeDateColumn_(label, candidates) {
+    const currentHeaders = getSheetHeaders_(sheet, 'Stock');
+    const currentResolver = makeHeaderResolver_(currentHeaders);
+    let idx = 0;
+    for (let i = 0; i < candidates.length; i++) {
+      idx = currentResolver.colExact(candidates[i]);
+      if (idx) break;
+    }
+    if (!idx) {
+      idx = currentResolver.colWhere(h => h.includes(normText_(label)));
+    }
+    if (!idx) return;
+
+    const last = sheet.getLastRow();
+    if (last < dataStartRow) return;
+
+    const range = sheet.getRange(dataStartRow, idx, last - dataStartRow + 1, 1);
+    const values = range.getValues();
+    let converted = 0;
+    let cleared = 0;
+
+    for (let i = 0; i < values.length; i++) {
+      const v = values[i][0];
+      const date = getDateOrNull_(v);
+      if (date) {
+        values[i][0] = date;
+        converted++;
+      } else if (v !== null && v !== '') {
+        values[i][0] = '';
+        cleared++;
+      }
+    }
+
+    range.setValues(values);
+    range.setNumberFormat('dd/MM/yyyy');
+    performed.push(`Dates normalisées pour "${label}" (col ${idx}) : ${converted} converties, ${cleared} nettoyées.`);
+  }
+
+  normalizeDateColumn_(HEADERS.STOCK.DATE_MISE_EN_STOCK, [
+    HEADERS.STOCK.DATE_MISE_EN_STOCK,
+    HEADERS.STOCK.DATE_MISE_EN_STOCK_ALT2
+  ]);
+  normalizeDateColumn_(HEADERS.STOCK.DATE_MISE_EN_LIGNE, [
+    HEADERS.STOCK.DATE_MISE_EN_LIGNE,
+    HEADERS.STOCK.DATE_MISE_EN_LIGNE_ALT,
+    HEADERS.STOCK.MIS_EN_LIGNE
+  ]);
+  normalizeDateColumn_(HEADERS.STOCK.DATE_PUBLICATION, [
+    HEADERS.STOCK.DATE_PUBLICATION,
+    HEADERS.STOCK.DATE_PUBLICATION_ALT,
+    HEADERS.STOCK.PUBLIE
+  ]);
+  normalizeDateColumn_(HEADERS.STOCK.DATE_VENTE, [
+    HEADERS.STOCK.DATE_VENTE,
+    HEADERS.STOCK.DATE_VENTE_ALT,
+    HEADERS.STOCK.VENDU
+  ]);
+
   logDebug_('normalizeStockLayoutForCopy_', { performed, headerRow, dataStartRow, lastRow });
 
   return performed.length ? performed : ['Aucune modification nécessaire pour Stock.'];
