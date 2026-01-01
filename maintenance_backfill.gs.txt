@@ -404,7 +404,28 @@ function normalizeStockLayoutForCopy_(spreadsheet) {
     || resolver.colWhere(h => h.includes('mise en stock'))
     || headers.length;
 
-  let targetIndex = (anchorCol || headers.length) + 1;
+  let insertIndex = (anchorCol || headers.length) + 1;
+  const performed = [];
+  let maxExistingIndex = 0;
+
+  // 1) Ne touche pas aux colonnes déjà présentes : on conserve leur libellé et leur ordre.
+  statusColumns.forEach(colDef => {
+    const currentHeaders = getSheetHeaders_(sheet, 'Stock');
+    const normalized = currentHeaders.map(normText_);
+    const existingIndex = findHeaderIndex_(normalized, colDef.aliases);
+    if (existingIndex > 0) {
+      maxExistingIndex = Math.max(maxExistingIndex, existingIndex);
+      const targetRange = sheet.getRange(dataStartRow, existingIndex, Math.max(1, sheet.getMaxRows() - dataStartRow + 1), 1);
+      if (colDef.checkbox) {
+        const rule = SpreadsheetApp.newDataValidation().requireCheckbox().setAllowInvalid(true).build();
+        targetRange.setDataValidation(rule);
+      } else {
+        targetRange.clearDataValidations();
+      }
+    }
+  });
+
+  insertIndex = Math.max(insertIndex, maxExistingIndex + 1);
   const performed = [];
 
   for (let i = 0; i < statusColumns.length; i++) {
@@ -412,33 +433,24 @@ function normalizeStockLayoutForCopy_(spreadsheet) {
     const normalized = headers.map(normText_);
     const colDef = statusColumns[i];
 
-    let existingIndex = findHeaderIndex_(normalized, colDef.aliases);
-    if (existingIndex > 0 && headers[existingIndex - 1] !== colDef.label) {
-      sheet.getRange(headerRow, existingIndex, 1, 1).setValue(colDef.label);
-      performed.push(`Renommé "${headers[existingIndex - 1]}" en "${colDef.label}"`);
+    const existingIndex = findHeaderIndex_(normalized, colDef.aliases);
+    if (existingIndex > 0) {
+      performed.push(`Colonne "${headers[existingIndex - 1]}" conservée (position ${existingIndex}).`);
+      continue;
     }
 
-    if (existingIndex > 0 && existingIndex !== targetIndex) {
-      const rangeToMove = sheet.getRange(1, existingIndex, sheet.getMaxRows(), 1);
-      sheet.moveColumns(rangeToMove, targetIndex);
-      performed.push(`Déplacé "${colDef.label}" en colonne ${targetIndex}`);
-    } else if (existingIndex === 0) {
-      sheet.insertColumns(targetIndex, 1);
-      sheet.getRange(headerRow, targetIndex, 1, 1).setValue(colDef.label);
-      performed.push(`Ajouté "${colDef.label}" en colonne ${targetIndex}`);
-    }
-
-    headers = getSheetHeaders_(sheet, 'Stock');
-    const refreshed = makeHeaderResolver_(headers);
-    const finalIndex = refreshed.colExact(colDef.label) || targetIndex;
-
+    sheet.insertColumns(insertIndex, 1);
+    sheet.getRange(headerRow, insertIndex, 1, 1).setValue(colDef.label);
+    const range = sheet.getRange(dataStartRow, insertIndex, Math.max(1, sheet.getMaxRows() - dataStartRow + 1), 1);
     if (colDef.checkbox) {
-      const range = sheet.getRange(dataStartRow, finalIndex, Math.max(1, sheet.getMaxRows() - dataStartRow + 1), 1);
       const rule = SpreadsheetApp.newDataValidation().requireCheckbox().setAllowInvalid(true).build();
       range.setDataValidation(rule);
+    } else {
+      range.clearDataValidations();
     }
 
-    targetIndex = finalIndex + 1;
+    performed.push(`Ajouté "${colDef.label}" en colonne ${insertIndex}.`);
+    insertIndex += 1;
   }
 
   logDebug_('normalizeStockLayoutForCopy_', { performed, headerRow, dataStartRow, lastRow });
