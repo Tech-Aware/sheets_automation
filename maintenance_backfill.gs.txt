@@ -471,7 +471,21 @@ function normalizeVentesLayoutForCopy_(spreadsheet) {
 
   const headerRow = getSheetHeaderRow_('Ventes');
   const dataStartRow = getSheetDataStartRow_('Ventes');
-  const width = sheet.getLastColumn() || DEFAULT_VENTES_HEADERS.length;
+  const width = Math.max(sheet.getLastColumn(), DEFAULT_VENTES_HEADERS.length);
+  const headerRange = sheet.getRange(headerRow, 1, 1, width || DEFAULT_VENTES_HEADERS.length);
+  const headers = headerRange.getValues()[0];
+
+  let mutated = false;
+  for (let i = 0; i < DEFAULT_VENTES_HEADERS.length; i++) {
+    if (!headers[i]) {
+      headers[i] = DEFAULT_VENTES_HEADERS[i];
+      mutated = true;
+    }
+  }
+
+  if (mutated) {
+    headerRange.setValues([headers]);
+  }
 
   const lastRow = sheet.getLastRow();
   const dataClearStart = Math.max(dataStartRow, headerRow + 1);
@@ -480,9 +494,13 @@ function normalizeVentesLayoutForCopy_(spreadsheet) {
     sheet.getRange(dataClearStart, 1, dataHeight, sheet.getLastColumn()).clearContent();
   }
 
-  const performed = ['En-têtes conservés tels quels (aucune complétion automatique).', 'Données effacées à partir de la première ligne de données.'];
+  const performed = [
+    mutated ? 'En-têtes complétés à partir du modèle par défaut.' : 'En-têtes conservés tels quels (aucune complétion nécessaire).',
+    'Données effacées à partir de la première ligne de données.'
+  ];
 
   logDebug_('normalizeVentesLayoutForCopy_', {
+    mutated,
     headerRow,
     dataStartRow,
     lastRow,
