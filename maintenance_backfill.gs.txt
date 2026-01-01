@@ -303,11 +303,192 @@ function copySpreadsheetToNextAccountingYear() {
     }
   }
 
-  ss.toast(`Les données ont été copiées vers "${targetName}".\n${copy.getUrl()}`, 'Passage à l\'année suivante', 10);
+  const normalizationNotes = normalizeHeadersForAccountingCopy_(copy);
+  const notesSuffix = normalizationNotes.length > 0
+    ? `\n• ${normalizationNotes.join('\n• ')}`
+    : '';
+
+  ss.toast(
+    `Les données ont été copiées vers "${targetName}".${notesSuffix}\n${copy.getUrl()}`,
+    'Passage à l\'année suivante',
+    12
+  );
 }
 
 function getNextAccountingYear_() {
-  return new Date().getFullYear() + 1;
+  const currentYear = new Date().getFullYear();
+  const latestExisting = detectLatestAccountingYear_();
+  const nextYear = Math.max(currentYear + 1, latestExisting + 1);
+  logDebug_('getNextAccountingYear_', { currentYear, latestExisting, nextYear });
+  return nextYear;
+}
+
+function detectLatestAccountingYear_() {
+  const currentYear = new Date().getFullYear();
+  const startYear = Math.max(2020, currentYear - 1);
+  const endYear = currentYear + 5;
+  let latest = currentYear;
+
+  for (let year = startYear; year <= endYear; year++) {
+    const name = `comptabilité ${year}`;
+    try {
+      const matches = DriveApp.getFilesByName(name);
+      if (matches && matches.hasNext && matches.hasNext()) {
+        latest = Math.max(latest, year);
+        logDebug_('detectLatestAccountingYear_.found', { name, year });
+      }
+    } catch (err) {
+      const message = err && err.message ? err.message : String(err);
+      logDebug_('detectLatestAccountingYear_.error', { name, year, message });
+    }
+  }
+
+  return latest;
+}
+
+function normalizeHeadersForAccountingCopy_(spreadsheet) {
+  const notes = [];
+  if (!spreadsheet) return notes;
+
+  try {
+    const stockNotes = normalizeStockLayoutForCopy_(spreadsheet);
+    if (stockNotes.length) {
+      notes.push(...stockNotes.map(n => `Stock : ${n}`));
+    }
+  } catch (err) {
+    const message = err && err.message ? err.message : String(err);
+    notes.push(`Erreur lors de la normalisation de Stock : ${message}`);
+    logDebug_('normalizeHeadersForAccountingCopy_.stock.error', { message, stack: err && err.stack });
+  }
+
+  try {
+    const ventesNotes = normalizeVentesLayoutForCopy_(spreadsheet);
+    if (ventesNotes.length) {
+      notes.push(...ventesNotes.map(n => `Ventes : ${n}`));
+    }
+  } catch (err) {
+    const message = err && err.message ? err.message : String(err);
+    notes.push(`Erreur lors de la normalisation de Ventes : ${message}`);
+    logDebug_('normalizeHeadersForAccountingCopy_.ventes.error', { message, stack: err && err.stack });
+  }
+
+  return notes;
+}
+
+function normalizeStockLayoutForCopy_(spreadsheet) {
+  const sheet = spreadsheet && spreadsheet.getSheetByName('Stock');
+  if (!sheet) return ['Feuille introuvable (aucune action).'];
+
+  const headerRow = getSheetHeaderRow_('Stock');
+  const dataStartRow = getSheetDataStartRow_('Stock');
+  const lastRow = sheet.getLastRow();
+  const statusAliases = {};
+  statusAliases[HEADERS.STOCK.MIS_EN_LIGNE] = [HEADERS.STOCK.MIS_EN_LIGNE, HEADERS.STOCK.MIS_EN_LIGNE_ALT, HEADERS.STOCK.MIS_EN_LIGNE_ALT2];
+  statusAliases[HEADERS.STOCK.PUBLIE] = [HEADERS.STOCK.PUBLIE, HEADERS.STOCK.PUBLIE_ALT, HEADERS.STOCK.PUBLIE_ALT2];
+  statusAliases[HEADERS.STOCK.VENDU] = [HEADERS.STOCK.VENDU, HEADERS.STOCK.VENDU_ALT, HEADERS.STOCK.VENDU_ALT2];
+  statusAliases[HEADERS.STOCK.VENTE_EXPORTEE_LE] = [HEADERS.STOCK.VENTE_EXPORTEE_LE];
+  statusAliases[HEADERS.STOCK.VALIDER_SAISIE] = [HEADERS.STOCK.VALIDER_SAISIE, HEADERS.STOCK.VALIDER_SAISIE_ALT];
+  statusAliases[HEADERS.STOCK.REPUBLIE] = [HEADERS.STOCK.REPUBLIE, HEADERS.STOCK.REPUBLIE_ALT, HEADERS.STOCK.REPUBLIE_ALT2];
+  statusAliases[HEADERS.STOCK.BOOST] = [HEADERS.STOCK.BOOST, HEADERS.STOCK.BOOST_ALT];
+
+  const statusColumns = (DEFAULT_STOCK_STATUS_HEADERS || []).map(label => ({
+    label,
+    aliases: statusAliases[label] || [label],
+    checkbox: label !== HEADERS.STOCK.VENTE_EXPORTEE_LE
+  }));
+
+  let headers = getSheetHeaders_(sheet, 'Stock');
+  const resolver = makeHeaderResolver_(headers);
+  const anchorCol = resolver.colExact(HEADERS.STOCK.DATE_MISE_EN_STOCK)
+    || resolver.colExact(HEADERS.STOCK.DATE_MISE_EN_STOCK_ALT2)
+    || resolver.colWhere(h => h.includes('mise en stock'))
+    || headers.length;
+
+  let targetIndex = (anchorCol || headers.length) + 1;
+  const performed = [];
+
+  for (let i = 0; i < statusColumns.length; i++) {
+    headers = getSheetHeaders_(sheet, 'Stock');
+    const normalized = headers.map(normText_);
+    const colDef = statusColumns[i];
+
+    let existingIndex = findHeaderIndex_(normalized, colDef.aliases);
+    if (existingIndex > 0 && headers[existingIndex - 1] !== colDef.label) {
+      sheet.getRange(headerRow, existingIndex, 1, 1).setValue(colDef.label);
+      performed.push(`Renommé "${headers[existingIndex - 1]}" en "${colDef.label}"`);
+    }
+
+    if (existingIndex > 0 && existingIndex !== targetIndex) {
+      const rangeToMove = sheet.getRange(1, existingIndex, sheet.getMaxRows(), 1);
+      sheet.moveColumns(rangeToMove, targetIndex);
+      performed.push(`Déplacé "${colDef.label}" en colonne ${targetIndex}`);
+    } else if (existingIndex === 0) {
+      sheet.insertColumns(targetIndex, 1);
+      sheet.getRange(headerRow, targetIndex, 1, 1).setValue(colDef.label);
+      performed.push(`Ajouté "${colDef.label}" en colonne ${targetIndex}`);
+    }
+
+    headers = getSheetHeaders_(sheet, 'Stock');
+    const refreshed = makeHeaderResolver_(headers);
+    const finalIndex = refreshed.colExact(colDef.label) || targetIndex;
+
+    if (colDef.checkbox) {
+      const range = sheet.getRange(dataStartRow, finalIndex, Math.max(1, sheet.getMaxRows() - dataStartRow + 1), 1);
+      const rule = SpreadsheetApp.newDataValidation().requireCheckbox().setAllowInvalid(true).build();
+      range.setDataValidation(rule);
+    }
+
+    targetIndex = finalIndex + 1;
+  }
+
+  logDebug_('normalizeStockLayoutForCopy_', { performed, headerRow, dataStartRow, lastRow });
+
+  return performed.length ? performed : ['Aucune modification nécessaire pour Stock.'];
+}
+
+function findHeaderIndex_(normalizedHeaders, candidates) {
+  for (let i = 0; i < candidates.length; i++) {
+    const idx = normalizedHeaders.indexOf(normText_(candidates[i]));
+    if (idx >= 0) return idx + 1;
+  }
+  return 0;
+}
+
+function normalizeVentesLayoutForCopy_(spreadsheet) {
+  const sheet = spreadsheet && spreadsheet.getSheetByName('Ventes');
+  if (!sheet) return ['Feuille introuvable (aucune action).'];
+
+  const headerRow = getSheetHeaderRow_('Ventes');
+  const width = Math.max(DEFAULT_VENTES_HEADERS.length, sheet.getLastColumn());
+  const headerRange = sheet.getRange(headerRow, 1, 1, width || DEFAULT_VENTES_HEADERS.length);
+  const headers = headerRange.getValues()[0];
+
+  let mutated = false;
+  for (let i = 0; i < DEFAULT_VENTES_HEADERS.length; i++) {
+    if (!headers[i]) {
+      headers[i] = DEFAULT_VENTES_HEADERS[i];
+      mutated = true;
+    }
+  }
+
+  if (mutated) {
+    headerRange.setValues([headers]);
+  }
+
+  const lastRow = sheet.getLastRow();
+  if (lastRow > headerRow) {
+    sheet.getRange(headerRow + 1, 1, lastRow - headerRow, sheet.getLastColumn()).clearContent();
+  }
+
+  const performed = [];
+  if (mutated) {
+    performed.push('En-têtes complétés à partir du modèle par défaut.');
+  }
+  performed.push('Données effacées pour repartir sur un journal vide.');
+
+  logDebug_('normalizeVentesLayoutForCopy_', { mutated, headerRow, width });
+
+  return performed;
 }
 
 function noopBackfillMonthlyLedgerMenu() {
