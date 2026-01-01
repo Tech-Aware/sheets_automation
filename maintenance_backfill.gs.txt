@@ -470,6 +470,7 @@ function normalizeVentesLayoutForCopy_(spreadsheet) {
   if (!sheet) return ['Feuille introuvable (aucune action).'];
 
   const headerRow = getSheetHeaderRow_('Ventes');
+  const dataStartRow = getSheetDataStartRow_('Ventes');
   const width = Math.max(DEFAULT_VENTES_HEADERS.length, sheet.getLastColumn());
   const headerRange = sheet.getRange(headerRow, 1, 1, width || DEFAULT_VENTES_HEADERS.length);
   const headers = headerRange.getValues()[0];
@@ -487,17 +488,26 @@ function normalizeVentesLayoutForCopy_(spreadsheet) {
   }
 
   const lastRow = sheet.getLastRow();
-  if (lastRow > headerRow) {
-    sheet.getRange(headerRow + 1, 1, lastRow - headerRow, sheet.getLastColumn()).clearContent();
+  const dataClearStart = Math.max(dataStartRow, headerRow + 1);
+  if (lastRow >= dataClearStart) {
+    const dataHeight = lastRow - dataClearStart + 1;
+    sheet.getRange(dataClearStart, 1, dataHeight, sheet.getLastColumn()).clearContent();
   }
 
   const performed = [];
   if (mutated) {
     performed.push('En-têtes complétés à partir du modèle par défaut.');
   }
-  performed.push('Données effacées pour repartir sur un journal vide.');
+  performed.push('Données effacées à partir de la première ligne de données.');
 
-  logDebug_('normalizeVentesLayoutForCopy_', { mutated, headerRow, width });
+  logDebug_('normalizeVentesLayoutForCopy_', {
+    mutated,
+    headerRow,
+    dataStartRow,
+    lastRow,
+    width,
+    clearedFrom: dataClearStart
+  });
 
   return performed;
 }
