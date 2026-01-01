@@ -452,6 +452,50 @@ function normalizeStockLayoutForCopy_(spreadsheet) {
     insertIndex += 1;
   }
 
+  function applyDateValidation_(label, candidates) {
+    const currentHeaders = getSheetHeaders_(sheet, 'Stock');
+    const currentResolver = makeHeaderResolver_(currentHeaders);
+    let idx = 0;
+    for (let i = 0; i < candidates.length; i++) {
+      idx = currentResolver.colExact(candidates[i]);
+      if (idx) break;
+    }
+    if (!idx) {
+      idx = currentResolver.colWhere(h => h.includes(normText_(label)));
+    }
+    if (!idx) return;
+
+    const helpText = `Saisis une date valide pour "${label}" (jj/mm/aaaa).`;
+    const range = sheet.getRange(dataStartRow, idx, Math.max(1, sheet.getMaxRows() - dataStartRow + 1), 1);
+    const rule = SpreadsheetApp.newDataValidation()
+      .requireDate()
+      .setAllowInvalid(true)
+      .setHelpText(helpText)
+      .build();
+    range.setDataValidation(rule);
+    performed.push(`Validation date appliquée sur "${label}" (colonne ${idx}).`);
+  }
+
+  applyDateValidation_(HEADERS.STOCK.DATE_MISE_EN_STOCK, [
+    HEADERS.STOCK.DATE_MISE_EN_STOCK,
+    HEADERS.STOCK.DATE_MISE_EN_STOCK_ALT2
+  ]);
+  applyDateValidation_(HEADERS.STOCK.DATE_MISE_EN_LIGNE, [
+    HEADERS.STOCK.DATE_MISE_EN_LIGNE,
+    HEADERS.STOCK.DATE_MISE_EN_LIGNE_ALT,
+    HEADERS.STOCK.MIS_EN_LIGNE
+  ]);
+  applyDateValidation_(HEADERS.STOCK.DATE_PUBLICATION, [
+    HEADERS.STOCK.DATE_PUBLICATION,
+    HEADERS.STOCK.DATE_PUBLICATION_ALT,
+    HEADERS.STOCK.PUBLIE
+  ]);
+  applyDateValidation_(HEADERS.STOCK.DATE_VENTE, [
+    HEADERS.STOCK.DATE_VENTE,
+    HEADERS.STOCK.DATE_VENTE_ALT,
+    HEADERS.STOCK.VENDU
+  ]);
+
   logDebug_('normalizeStockLayoutForCopy_', { performed, headerRow, dataStartRow, lastRow });
 
   return performed.length ? performed : ['Aucune modification nécessaire pour Stock.'];
