@@ -472,6 +472,19 @@ function normalizeVentesLayoutForCopy_(spreadsheet) {
   const headerRow = getSheetHeaderRow_('Ventes');
   const dataStartRow = getSheetDataStartRow_('Ventes');
   const width = Math.max(sheet.getLastColumn(), DEFAULT_VENTES_HEADERS.length);
+
+  // Sauvegarde du bandeau supérieur (formules + valeurs) pour restauration après nettoyage
+  const bandRows = Math.max(headerRow - 1, 0);
+  const bandWidth = width || DEFAULT_VENTES_HEADERS.length;
+  let bandValues = [];
+  let bandFormulas = [];
+  let bandRange = null;
+  if (bandRows > 0) {
+    bandRange = sheet.getRange(1, 1, bandRows, bandWidth);
+    bandValues = bandRange.getValues();
+    bandFormulas = bandRange.getFormulas();
+  }
+
   const headerRange = sheet.getRange(headerRow, 1, 1, width || DEFAULT_VENTES_HEADERS.length);
   const headers = headerRange.getValues()[0];
 
@@ -516,8 +529,26 @@ function normalizeVentesLayoutForCopy_(spreadsheet) {
     dataStartRow,
     lastRow,
     width,
-    clearedFrom: dataClearStart
+    clearedFrom: dataClearStart,
+    bandRows
   });
+
+  // Restauration du bandeau (valeurs ou formules)
+  if (bandRange && bandValues.length) {
+    for (let r = 0; r < bandValues.length; r++) {
+      for (let c = 0; c < bandValues[r].length; c++) {
+        const cell = bandRange.getCell(r + 1, c + 1);
+        const f = (bandFormulas[r] && bandFormulas[r][c]) || '';
+        const v = bandValues[r][c];
+        if (f) {
+          cell.setFormula(f);
+        } else {
+          cell.setValue(v);
+        }
+      }
+    }
+    performed.push('Bandeau supérieur restauré (valeurs et formules).');
+  }
 
   return performed;
 }
