@@ -303,11 +303,356 @@ function copySpreadsheetToNextAccountingYear() {
     }
   }
 
-  ss.toast(`Les données ont été copiées vers "${targetName}".\n${copy.getUrl()}`, 'Passage à l\'année suivante', 10);
+  const normalizationNotes = normalizeHeadersForAccountingCopy_(copy);
+  const notesSuffix = normalizationNotes.length > 0
+    ? `\n• ${normalizationNotes.join('\n• ')}`
+    : '';
+
+  ss.toast(
+    `Les données ont été copiées vers "${targetName}".${notesSuffix}\n${copy.getUrl()}`,
+    'Passage à l\'année suivante',
+    12
+  );
 }
 
 function getNextAccountingYear_() {
-  return new Date().getFullYear() + 1;
+  const currentYear = new Date().getFullYear();
+  const latestExisting = detectLatestAccountingYear_();
+  const nextYear = Math.max(currentYear + 1, latestExisting + 1);
+  logDebug_('getNextAccountingYear_', { currentYear, latestExisting, nextYear });
+  return nextYear;
+}
+
+function detectLatestAccountingYear_() {
+  const currentYear = new Date().getFullYear();
+  const startYear = Math.max(2020, currentYear - 1);
+  const endYear = currentYear + 5;
+  let latest = currentYear;
+
+  for (let year = startYear; year <= endYear; year++) {
+    const name = `comptabilité ${year}`;
+    try {
+      const matches = DriveApp.getFilesByName(name);
+      if (matches && matches.hasNext && matches.hasNext()) {
+        latest = Math.max(latest, year);
+        logDebug_('detectLatestAccountingYear_.found', { name, year });
+      }
+    } catch (err) {
+      const message = err && err.message ? err.message : String(err);
+      logDebug_('detectLatestAccountingYear_.error', { name, year, message });
+    }
+  }
+
+  return latest;
+}
+
+function normalizeHeadersForAccountingCopy_(spreadsheet) {
+  const notes = [];
+  if (!spreadsheet) return notes;
+
+  try {
+    const stockNotes = normalizeStockLayoutForCopy_(spreadsheet);
+    if (stockNotes.length) {
+      notes.push(...stockNotes.map(n => `Stock : ${n}`));
+    }
+  } catch (err) {
+    const message = err && err.message ? err.message : String(err);
+    notes.push(`Erreur lors de la normalisation de Stock : ${message}`);
+    logDebug_('normalizeHeadersForAccountingCopy_.stock.error', { message, stack: err && err.stack });
+  }
+
+  try {
+    const ventesNotes = normalizeVentesLayoutForCopy_(spreadsheet);
+    if (ventesNotes.length) {
+      notes.push(...ventesNotes.map(n => `Ventes : ${n}`));
+    }
+  } catch (err) {
+    const message = err && err.message ? err.message : String(err);
+    notes.push(`Erreur lors de la normalisation de Ventes : ${message}`);
+    logDebug_('normalizeHeadersForAccountingCopy_.ventes.error', { message, stack: err && err.stack });
+  }
+
+  return notes;
+}
+
+function normalizeStockLayoutForCopy_(spreadsheet) {
+  const sheet = spreadsheet && spreadsheet.getSheetByName('Stock');
+  if (!sheet) return ['Feuille introuvable (aucune action).'];
+
+  const headerRow = getSheetHeaderRow_('Stock');
+  const dataStartRow = getSheetDataStartRow_('Stock');
+  const lastRow = sheet.getLastRow();
+  const statusAliases = {};
+  statusAliases[HEADERS.STOCK.MIS_EN_LIGNE] = [HEADERS.STOCK.MIS_EN_LIGNE, HEADERS.STOCK.MIS_EN_LIGNE_ALT, HEADERS.STOCK.MIS_EN_LIGNE_ALT2];
+  statusAliases[HEADERS.STOCK.PUBLIE] = [HEADERS.STOCK.PUBLIE, HEADERS.STOCK.PUBLIE_ALT, HEADERS.STOCK.PUBLIE_ALT2];
+  statusAliases[HEADERS.STOCK.VENDU] = [HEADERS.STOCK.VENDU, HEADERS.STOCK.VENDU_ALT, HEADERS.STOCK.VENDU_ALT2];
+  statusAliases[HEADERS.STOCK.VENTE_EXPORTEE_LE] = [HEADERS.STOCK.VENTE_EXPORTEE_LE];
+  statusAliases[HEADERS.STOCK.VALIDER_SAISIE] = [HEADERS.STOCK.VALIDER_SAISIE, HEADERS.STOCK.VALIDER_SAISIE_ALT];
+  statusAliases[HEADERS.STOCK.REPUBLIE] = [HEADERS.STOCK.REPUBLIE, HEADERS.STOCK.REPUBLIE_ALT, HEADERS.STOCK.REPUBLIE_ALT2];
+  statusAliases[HEADERS.STOCK.BOOST] = [HEADERS.STOCK.BOOST, HEADERS.STOCK.BOOST_ALT];
+
+  const statusColumns = (DEFAULT_STOCK_STATUS_HEADERS || []).map(label => ({
+    label,
+    aliases: statusAliases[label] || [label],
+    checkbox: label !== HEADERS.STOCK.VENTE_EXPORTEE_LE
+  }));
+
+  let headers = getSheetHeaders_(sheet, 'Stock');
+  const resolver = makeHeaderResolver_(headers);
+  const anchorCol = resolver.colExact(HEADERS.STOCK.DATE_MISE_EN_STOCK)
+    || resolver.colExact(HEADERS.STOCK.DATE_MISE_EN_STOCK_ALT2)
+    || resolver.colWhere(h => h.includes('mise en stock'))
+    || headers.length;
+
+  let insertIndex = (anchorCol || headers.length) + 1;
+  const performed = [];
+  let maxExistingIndex = 0;
+
+  // 1) Ne touche pas aux colonnes déjà présentes : on conserve leur libellé et leur ordre.
+  statusColumns.forEach(colDef => {
+    const currentHeaders = getSheetHeaders_(sheet, 'Stock');
+    const normalized = currentHeaders.map(normText_);
+    const existingIndex = findHeaderIndex_(normalized, colDef.aliases);
+    if (existingIndex > 0) {
+      maxExistingIndex = Math.max(maxExistingIndex, existingIndex);
+      const targetRange = sheet.getRange(dataStartRow, existingIndex, Math.max(1, sheet.getMaxRows() - dataStartRow + 1), 1);
+      if (colDef.checkbox) {
+        const rule = SpreadsheetApp.newDataValidation().requireCheckbox().setAllowInvalid(true).build();
+        targetRange.setDataValidation(rule);
+      } else {
+        targetRange.clearDataValidations();
+      }
+    }
+  });
+
+  insertIndex = Math.max(insertIndex, maxExistingIndex + 1);
+
+  for (let i = 0; i < statusColumns.length; i++) {
+    headers = getSheetHeaders_(sheet, 'Stock');
+    const normalized = headers.map(normText_);
+    const colDef = statusColumns[i];
+
+    const existingIndex = findHeaderIndex_(normalized, colDef.aliases);
+    if (existingIndex > 0) {
+      performed.push(`Colonne "${headers[existingIndex - 1]}" conservée (position ${existingIndex}).`);
+      continue;
+    }
+
+    sheet.insertColumns(insertIndex, 1);
+    sheet.getRange(headerRow, insertIndex, 1, 1).setValue(colDef.label);
+    const range = sheet.getRange(dataStartRow, insertIndex, Math.max(1, sheet.getMaxRows() - dataStartRow + 1), 1);
+    if (colDef.checkbox) {
+      const rule = SpreadsheetApp.newDataValidation().requireCheckbox().setAllowInvalid(true).build();
+      range.setDataValidation(rule);
+    } else {
+      range.clearDataValidations();
+    }
+
+    performed.push(`Ajouté "${colDef.label}" en colonne ${insertIndex}.`);
+    insertIndex += 1;
+  }
+
+  function applyDateValidation_(label, candidates) {
+    const currentHeaders = getSheetHeaders_(sheet, 'Stock');
+    const currentResolver = makeHeaderResolver_(currentHeaders);
+    let idx = 0;
+    for (let i = 0; i < candidates.length; i++) {
+      idx = currentResolver.colExact(candidates[i]);
+      if (idx) break;
+    }
+    if (!idx) {
+      idx = currentResolver.colWhere(h => h.includes(normText_(label)));
+    }
+    if (!idx) return;
+
+    const helpText = `Saisis une date valide pour "${label}" (jj/mm/aaaa).`;
+    const range = sheet.getRange(dataStartRow, idx, Math.max(1, sheet.getMaxRows() - dataStartRow + 1), 1);
+    const rule = SpreadsheetApp.newDataValidation()
+      .requireDate()
+      .setAllowInvalid(true)
+      .setHelpText(helpText)
+      .build();
+    range.setDataValidation(rule);
+    performed.push(`Validation date appliquée sur "${label}" (colonne ${idx}).`);
+  }
+
+  applyDateValidation_(HEADERS.STOCK.DATE_MISE_EN_STOCK, [
+    HEADERS.STOCK.DATE_MISE_EN_STOCK,
+    HEADERS.STOCK.DATE_MISE_EN_STOCK_ALT2
+  ]);
+  applyDateValidation_(HEADERS.STOCK.DATE_MISE_EN_LIGNE, [
+    HEADERS.STOCK.DATE_MISE_EN_LIGNE,
+    HEADERS.STOCK.DATE_MISE_EN_LIGNE_ALT,
+    HEADERS.STOCK.MIS_EN_LIGNE
+  ]);
+  applyDateValidation_(HEADERS.STOCK.DATE_PUBLICATION, [
+    HEADERS.STOCK.DATE_PUBLICATION,
+    HEADERS.STOCK.DATE_PUBLICATION_ALT,
+    HEADERS.STOCK.PUBLIE
+  ]);
+  applyDateValidation_(HEADERS.STOCK.DATE_VENTE, [
+    HEADERS.STOCK.DATE_VENTE,
+    HEADERS.STOCK.DATE_VENTE_ALT,
+    HEADERS.STOCK.VENDU
+  ]);
+
+  function normalizeDateColumn_(label, candidates) {
+    const currentHeaders = getSheetHeaders_(sheet, 'Stock');
+    const currentResolver = makeHeaderResolver_(currentHeaders);
+    let idx = 0;
+    for (let i = 0; i < candidates.length; i++) {
+      idx = currentResolver.colExact(candidates[i]);
+      if (idx) break;
+    }
+    if (!idx) {
+      idx = currentResolver.colWhere(h => h.includes(normText_(label)));
+    }
+    if (!idx) return;
+
+    const last = sheet.getLastRow();
+    if (last < dataStartRow) return;
+
+    const range = sheet.getRange(dataStartRow, idx, last - dataStartRow + 1, 1);
+    const values = range.getValues();
+    let converted = 0;
+    let cleared = 0;
+
+    for (let i = 0; i < values.length; i++) {
+      const v = values[i][0];
+      const date = getDateOrNull_(v);
+      if (date) {
+        values[i][0] = date;
+        converted++;
+      } else if (v !== null && v !== '') {
+        values[i][0] = '';
+        cleared++;
+      }
+    }
+
+    range.setValues(values);
+    range.setNumberFormat('dd/MM/yyyy');
+    performed.push(`Dates normalisées pour "${label}" (col ${idx}) : ${converted} converties, ${cleared} nettoyées.`);
+  }
+
+  normalizeDateColumn_(HEADERS.STOCK.DATE_MISE_EN_STOCK, [
+    HEADERS.STOCK.DATE_MISE_EN_STOCK,
+    HEADERS.STOCK.DATE_MISE_EN_STOCK_ALT2
+  ]);
+  normalizeDateColumn_(HEADERS.STOCK.DATE_MISE_EN_LIGNE, [
+    HEADERS.STOCK.DATE_MISE_EN_LIGNE,
+    HEADERS.STOCK.DATE_MISE_EN_LIGNE_ALT,
+    HEADERS.STOCK.MIS_EN_LIGNE
+  ]);
+  normalizeDateColumn_(HEADERS.STOCK.DATE_PUBLICATION, [
+    HEADERS.STOCK.DATE_PUBLICATION,
+    HEADERS.STOCK.DATE_PUBLICATION_ALT,
+    HEADERS.STOCK.PUBLIE
+  ]);
+  normalizeDateColumn_(HEADERS.STOCK.DATE_VENTE, [
+    HEADERS.STOCK.DATE_VENTE,
+    HEADERS.STOCK.DATE_VENTE_ALT,
+    HEADERS.STOCK.VENDU
+  ]);
+
+  logDebug_('normalizeStockLayoutForCopy_', { performed, headerRow, dataStartRow, lastRow });
+
+  return performed.length ? performed : ['Aucune modification nécessaire pour Stock.'];
+}
+
+function findHeaderIndex_(normalizedHeaders, candidates) {
+  for (let i = 0; i < candidates.length; i++) {
+    const idx = normalizedHeaders.indexOf(normText_(candidates[i]));
+    if (idx >= 0) return idx + 1;
+  }
+  return 0;
+}
+
+function normalizeVentesLayoutForCopy_(spreadsheet) {
+  const sheet = spreadsheet && spreadsheet.getSheetByName('Ventes');
+  if (!sheet) return ['Feuille introuvable (aucune action).'];
+
+  const headerRow = getSheetHeaderRow_('Ventes');
+  const dataStartRow = getSheetDataStartRow_('Ventes');
+  const width = Math.max(sheet.getLastColumn(), DEFAULT_VENTES_HEADERS.length);
+
+  // Sauvegarde du bandeau supérieur (formules + valeurs) pour restauration après nettoyage
+  const bandRows = Math.max(headerRow - 1, 0);
+  const bandWidth = width || DEFAULT_VENTES_HEADERS.length;
+  let bandValues = [];
+  let bandFormulas = [];
+  let bandRange = null;
+  if (bandRows > 0) {
+    bandRange = sheet.getRange(1, 1, bandRows, bandWidth);
+    bandValues = bandRange.getValues();
+    bandFormulas = bandRange.getFormulas();
+  }
+
+  const headerRange = sheet.getRange(headerRow, 1, 1, width || DEFAULT_VENTES_HEADERS.length);
+  const headers = headerRange.getValues()[0];
+
+  function isGenericColumnHeader_(value) {
+    if (!value) return true;
+    const normalized = normText_(value);
+    return /^colonne\s*\d+$/.test(normalized);
+  }
+
+  const allGeneric = headers.every(isGenericColumnHeader_);
+  let mutated = false;
+  if (allGeneric) {
+    headerRange.setValues([DEFAULT_VENTES_HEADERS]);
+    mutated = true;
+  } else {
+    for (let i = 0; i < DEFAULT_VENTES_HEADERS.length; i++) {
+      if (!headers[i] || isGenericColumnHeader_(headers[i])) {
+        headers[i] = DEFAULT_VENTES_HEADERS[i];
+        mutated = true;
+      }
+    }
+    if (mutated) {
+      headerRange.setValues([headers]);
+    }
+  }
+
+  const lastRow = sheet.getLastRow();
+  const dataClearStart = Math.max(dataStartRow, headerRow + 1);
+  if (lastRow >= dataClearStart) {
+    const dataHeight = lastRow - dataClearStart + 1;
+    sheet.getRange(dataClearStart, 1, dataHeight, sheet.getLastColumn()).clearContent();
+  }
+
+  const performed = [
+    mutated ? 'En-têtes complétés à partir du modèle par défaut.' : 'En-têtes conservés tels quels (aucune complétion nécessaire).',
+    'Données effacées à partir de la première ligne de données.'
+  ];
+
+  logDebug_('normalizeVentesLayoutForCopy_', {
+    mutated,
+    headerRow,
+    dataStartRow,
+    lastRow,
+    width,
+    clearedFrom: dataClearStart,
+    bandRows
+  });
+
+  // Restauration du bandeau (valeurs ou formules)
+  if (bandRange && bandValues.length) {
+    for (let r = 0; r < bandValues.length; r++) {
+      for (let c = 0; c < bandValues[r].length; c++) {
+        const cell = bandRange.getCell(r + 1, c + 1);
+        const f = (bandFormulas[r] && bandFormulas[r][c]) || '';
+        const v = bandValues[r][c];
+        if (f) {
+          cell.setFormula(f);
+        } else {
+          cell.setValue(v);
+        }
+      }
+    }
+    performed.push('Bandeau supérieur restauré (valeurs et formules).');
+  }
+
+  return performed;
 }
 
 function noopBackfillMonthlyLedgerMenu() {
