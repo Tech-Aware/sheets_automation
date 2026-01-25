@@ -897,7 +897,7 @@ function ensureValidPriceOrWarn_(sh, row, C_PRIX) {
   return false;
 }
 
-// Supprime l’alerte dans PRIX DE VENTE si c’est le message ⚠️
+// Supprime l'alerte dans PRIX DE VENTE si c'est le message ⚠️
 function clearPriceAlertIfAny_(sh, row, C_PRIX) {
   if (!C_PRIX) return;
   const cell = sh.getRange(row, C_PRIX);
@@ -906,4 +906,143 @@ function clearPriceAlertIfAny_(sh, row, C_PRIX) {
   if (disp && disp.indexOf('⚠️') === 0) {
     cell.clearContent();
   }
+}
+
+// --- Gestion de la colonne VINTED avec liste déroulante ---
+
+/**
+ * Applique une validation de liste déroulante sur la colonne VINTED de la feuille Stock.
+ * Cette fonction peut être appelée manuellement ou automatiquement.
+ */
+function applyVintedDropdownToStock() {
+  const ss = SpreadsheetApp.getActive();
+  const stock = ss.getSheetByName('Stock');
+  if (!stock) {
+    ss.toast('Feuille "Stock" introuvable.', 'Erreur', 5);
+    return;
+  }
+
+  const headerRow = getSheetHeaderRow_('Stock');
+  const dataStartRow = getSheetDataStartRow_('Stock');
+  const lastColumn = stock.getLastColumn();
+  const lastRow = stock.getLastRow();
+
+  if (!lastColumn) {
+    ss.toast('La feuille Stock est vide.', 'Erreur', 5);
+    return;
+  }
+
+  const headers = stock.getRange(headerRow, 1, 1, lastColumn).getValues()[0];
+  const resolver = makeHeaderResolver_(headers);
+  const colExact = resolver.colExact.bind(resolver);
+  const colWhere = resolver.colWhere.bind(resolver);
+
+  // Chercher la colonne VINTED existante
+  let C_VINTED = colExact(HEADERS.STOCK.VINTED)
+    || colExact(HEADERS.STOCK.VINTED_ALT)
+    || colWhere(h => h.includes('vinted'));
+
+  // Si la colonne n'existe pas, la créer après la colonne LOT
+  if (!C_VINTED) {
+    const C_LOT = colExact(HEADERS.STOCK.LOT)
+      || colExact(HEADERS.STOCK.LOT_ALT2)
+      || colExact(HEADERS.STOCK.LOT_ALT3)
+      || colWhere(h => h.includes('lot'));
+
+    const C_VALIDER = colExact(HEADERS.STOCK.VALIDER_SAISIE)
+      || colExact(HEADERS.STOCK.VALIDER_SAISIE_ALT)
+      || colWhere(h => h.includes('valider'));
+
+    // Insérer après LOT si existe, sinon avant VALIDER, sinon à la fin
+    if (C_LOT) {
+      stock.insertColumnAfter(C_LOT);
+      C_VINTED = C_LOT + 1;
+    } else if (C_VALIDER) {
+      stock.insertColumnBefore(C_VALIDER);
+      C_VINTED = C_VALIDER;
+    } else {
+      C_VINTED = lastColumn + 1;
+    }
+
+    // Ajouter le titre de la colonne
+    stock.getRange(headerRow, C_VINTED).setValue(HEADERS.STOCK.VINTED);
+  }
+
+  // Récupérer les comptes Vinted disponibles
+  const vintedAccounts = typeof VINTED_ACCOUNTS !== 'undefined' && Array.isArray(VINTED_ACCOUNTS)
+    ? VINTED_ACCOUNTS
+    : ['Vinted 1', 'Vinted 2', 'Vinted 3', 'Vinted 4', 'Vinted 5'];
+
+  // Créer la règle de validation avec liste déroulante
+  const rule = SpreadsheetApp.newDataValidation()
+    .requireValueInList(vintedAccounts, true)
+    .setAllowInvalid(false)
+    .setHelpText('Sélectionne le compte Vinted sur lequel cet article a été vendu.')
+    .build();
+
+  // Appliquer la validation sur toutes les lignes de données
+  if (lastRow >= dataStartRow) {
+    const numRows = lastRow - dataStartRow + 1;
+    stock.getRange(dataStartRow, C_VINTED, numRows, 1).setDataValidation(rule);
+  }
+
+  ss.toast(`Colonne VINTED configurée avec ${vintedAccounts.length} options.`, 'Stock', 5);
+}
+
+/**
+ * Applique la validation VINTED sur une nouvelle ligne dans Stock.
+ * À appeler lors de l'ajout d'une ligne dans Stock.
+ */
+function applyVintedDropdownToRow_(sheet, row) {
+  if (!sheet) return;
+
+  const headerRow = getSheetHeaderRow_('Stock');
+  const lastColumn = sheet.getLastColumn();
+  if (!lastColumn) return;
+
+  const headers = sheet.getRange(headerRow, 1, 1, lastColumn).getValues()[0];
+  const resolver = makeHeaderResolver_(headers);
+  const colExact = resolver.colExact.bind(resolver);
+  const colWhere = resolver.colWhere.bind(resolver);
+
+  const C_VINTED = colExact(HEADERS.STOCK.VINTED)
+    || colExact(HEADERS.STOCK.VINTED_ALT)
+    || colWhere(h => h.includes('vinted'));
+
+  if (!C_VINTED) return;
+
+  const vintedAccounts = typeof VINTED_ACCOUNTS !== 'undefined' && Array.isArray(VINTED_ACCOUNTS)
+    ? VINTED_ACCOUNTS
+    : ['Vinted 1', 'Vinted 2', 'Vinted 3', 'Vinted 4', 'Vinted 5'];
+
+  const rule = SpreadsheetApp.newDataValidation()
+    .requireValueInList(vintedAccounts, true)
+    .setAllowInvalid(false)
+    .setHelpText('Sélectionne le compte Vinted sur lequel cet article a été vendu.')
+    .build();
+
+  sheet.getRange(row, C_VINTED).setDataValidation(rule);
+}
+
+/**
+ * Recalcule les taxes et totaux pour toutes les feuilles Compta existantes.
+ */
+function recalculateAllLedgerTaxes() {
+  const ss = SpreadsheetApp.getActive();
+  const sheets = ss.getSheets();
+  const headersLen = MONTHLY_LEDGER_HEADERS.length;
+  let updatedCount = 0;
+
+  for (let i = 0; i < sheets.length; i++) {
+    const sheet = sheets[i];
+    const name = sheet.getName();
+
+    // Vérifier si c'est une feuille Compta (format: "Compta MM-YYYY")
+    if (name && name.match(/^Compta\s+\d{2}-\d{4}$/)) {
+      updateLedgerResultRow_(sheet, headersLen);
+      updatedCount++;
+    }
+  }
+
+  ss.toast(`${updatedCount} feuille(s) Compta mise(s) à jour avec les taxes.`, 'Calcul des taxes', 5);
 }

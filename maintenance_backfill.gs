@@ -187,7 +187,9 @@ function registerStockActionsMenu_(ui) {
     .addItem('Cocher "Mis en ligne" (sélection)', 'bulkSetStockStatusMisEnLigne')
     .addItem('Cocher "Publié" (sélection)', 'bulkSetStockStatusPublie')
     .addItem('Cocher "Vendu" (sélection)', 'bulkSetStockStatusVendu')
-    .addItem('Cocher "Valider" (sélection)', 'bulkValidateStockSelection');
+    .addItem('Cocher "Valider" (sélection)', 'bulkValidateStockSelection')
+    .addSeparator()
+    .addItem('Configurer la colonne VINTED', 'applyVintedDropdownToStock');
 
   stockMenu.addToUi();
 }
@@ -208,6 +210,7 @@ function registerAccountingActionsMenu_(ui) {
   const nextYearLabel = `Faire suivre sur année ${getNextAccountingYear_()}`;
   ui.createMenu('Actions compta')
     .addItem('Calculer les frais (feuille active)', 'recalculateActiveLedgerFees')
+    .addItem('Recalculer les taxes (toutes les feuilles)', 'recalculateAllLedgerTaxes')
     .addItem('Supprimer les doublons (feuille active)', 'purgeActiveLedgerDuplicates')
     .addItem(nextYearLabel, 'copySpreadsheetToNextAccountingYear')
     .addToUi();

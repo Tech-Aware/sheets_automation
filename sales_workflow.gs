@@ -1682,7 +1682,13 @@ function updateLedgerResultRow_(sheet, headersLen) {
 
   const totalFees = summary.sumFrais || 0;
   const totalCost = summary.sumPrixAchat + totalFees;
-  const net = summary.sumPrixVente - totalCost;
+
+  // Calcul des taxes sur le CA (12,3% pour micro-entreprise)
+  const taxRate = typeof TAX_RATE !== 'undefined' ? TAX_RATE : 0.123;
+  const taxes = summary.sumPrixVente * taxRate;
+
+  // Bénéfice net = CA - Coût de revient - Taxes
+  const net = summary.sumPrixVente - totalCost - taxes;
 
   if (MONTHLY_LEDGER_INDEX.PRIX_VENTE >= 0) {
     const revenueCell = sheet.getRange(resultRowNumber, MONTHLY_LEDGER_INDEX.PRIX_VENTE + 1);
@@ -1697,8 +1703,16 @@ function updateLedgerResultRow_(sheet, headersLen) {
   if (MONTHLY_LEDGER_INDEX.MARGE_BRUTE >= 0) {
     const profitCell = sheet.getRange(resultRowNumber, MONTHLY_LEDGER_INDEX.MARGE_BRUTE + 1);
     profitCell.setValue(`Bénéfice net : ${formatLedgerCurrencyLabel_(net)}`);
-    profitCell.setNote('Bénéfice net = Chiffre d\'affaire - Coût de revient (frais inclus).');
+    profitCell.setNote('Bénéfice net = Chiffre d\'affaire - Coût de revient - Taxes (' + (taxRate * 100).toFixed(1) + '%).');
   }
+
+  // Affichage des taxes dans la colonne COEFF MARGE (colonne 8)
+  if (MONTHLY_LEDGER_INDEX.COEFF_MARGE >= 0) {
+    const taxCell = sheet.getRange(resultRowNumber, MONTHLY_LEDGER_INDEX.COEFF_MARGE + 1);
+    taxCell.setValue(`Taxes (${(taxRate * 100).toFixed(1)}%) : ${formatLedgerCurrencyLabel_(taxes)}`);
+    taxCell.setNote('Taxes micro-entreprise = ' + (taxRate * 100).toFixed(1) + '% du chiffre d\'affaires.');
+  }
+
   if (LEDGER_FEES_COLUMNS.MONTANT > 0) {
     const feeCell = sheet.getRange(resultRowNumber, LEDGER_FEES_COLUMNS.MONTANT);
     feeCell.setValue(`Frais : ${formatLedgerCurrencyLabel_(totalFees)}`);

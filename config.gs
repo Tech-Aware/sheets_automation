@@ -99,6 +99,8 @@ const HEADERS = Object.freeze({
     REPUBLIE_ALT2: 'REPUBLIER',
     BOOST: 'BOOST',
     BOOST_ALT: 'BOOSTER',
+    VINTED: 'VINTED',
+    VINTED_ALT: 'COMPTE VINTED',
   }),
   VENTES: Object.freeze({
     ID: 'ID',
@@ -209,6 +211,18 @@ const LEDGER_FEE_TYPES = Object.freeze([
   'Publicité',
   'Communication',
   'Autres'
+]);
+
+// Taux de taxe appliqué sur le chiffre d'affaires (12,3% pour micro-entreprise)
+const TAX_RATE = 0.123;
+
+// Liste des comptes Vinted disponibles pour la sélection dans Stock
+const VINTED_ACCOUNTS = Object.freeze([
+  'Vinted 1',
+  'Vinted 2',
+  'Vinted 3',
+  'Vinted 4',
+  'Vinted 5'
 ]);
 
 const LEDGER_WEEK_RULE_DESCRIPTION = 'auto-ledger-week-highlight';
