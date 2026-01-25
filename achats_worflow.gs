@@ -467,8 +467,7 @@ function handleAchats(e) {
     for (let i = 0; i < rows.length; i++) {
       const suffix = maxSuffixForBase + i + 1;
       const rowValues = rows[i];
-      const rowIdValue = achatIdKey || `${base}-${suffix}`;
-      if (COL_ID_STOCK) rowValues[COL_ID_STOCK - 1] = rowIdValue;
+      if (COL_ID_STOCK) rowValues[COL_ID_STOCK - 1] = achatId;
       if (COL_LABEL_STOCK) rowValues[COL_LABEL_STOCK - 1] = label;
       if (COL_SKU_STOCK) rowValues[COL_SKU_STOCK - 1] = `${base}-${suffix}`;
       if (COL_DATE_STOCK) rowValues[COL_DATE_STOCK - 1] = dateLiv;
