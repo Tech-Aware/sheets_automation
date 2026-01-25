@@ -510,6 +510,9 @@ function exportVente_(e, row, C_ID, C_LABEL, C_SKU, C_PRIX, C_DVENTE, C_STAMPV, 
     || ventesWhere(isShippingSizeHeader_);
   const COL_LOT_VENTE    = ventesExact(HEADERS.VENTES.LOT)
     || ventesWhere(h => h.includes('lot'));
+  const COL_VINTED_VENTE = ventesExact(HEADERS.VENTES.VINTED)
+    || ventesExact(HEADERS.VENTES.VINTED_ALT)
+    || ventesWhere(h => h.includes('vinted'));
   const COL_COMPTA       = ventesExact(HEADERS.VENTES.COMPTABILISE)
     || ventesWhere(h => h.toLowerCase().includes('compt'));
   const COL_DELAI_IMM    = ventesExact(HEADERS.VENTES.DELAI_IMMOBILISATION)
@@ -533,6 +536,14 @@ function exportVente_(e, row, C_ID, C_LABEL, C_SKU, C_PRIX, C_DVENTE, C_STAMPV, 
   const label = C_LABEL ? sh.getRange(row, C_LABEL).getDisplayValue() : "";
   const sku   = C_SKU  ? sh.getRange(row, C_SKU).getDisplayValue() : "";
   const prix  = C_PRIX ? sh.getRange(row, C_PRIX).getValue() : "";
+
+  // Récupérer la colonne VINTED dans Stock
+  const stockHeaders = sh.getRange(getSheetHeaderRow_('Stock'), 1, 1, sh.getLastColumn()).getValues()[0];
+  const stockResolver = makeHeaderResolver_(stockHeaders);
+  const C_VINTED_STOCK = stockResolver.colExact(HEADERS.STOCK.VINTED)
+    || stockResolver.colExact(HEADERS.STOCK.VINTED_ALT)
+    || stockResolver.colWhere(h => h.includes('vinted'));
+  const vintedValue = C_VINTED_STOCK ? sh.getRange(row, C_VINTED_STOCK).getDisplayValue() : "";
 
   // Exigence: chaque ligne Ventes doit enregistrer l'ID exact
   if (!idVal) {
@@ -690,6 +701,9 @@ function exportVente_(e, row, C_ID, C_LABEL, C_SKU, C_PRIX, C_DVENTE, C_STAMPV, 
   }
   if (COL_LOT_VENTE && shipping && shipping.lot) {
     newRow[COL_LOT_VENTE - 1] = shipping.lot;
+  }
+  if (COL_VINTED_VENTE && vintedValue) {
+    newRow[COL_VINTED_VENTE - 1] = vintedValue;
   }
 
   if (COL_DELAI_IMM) newRow[COL_DELAI_IMM - 1] = delaiImm;

@@ -189,7 +189,7 @@ function registerStockActionsMenu_(ui) {
     .addItem('Cocher "Vendu" (sélection)', 'bulkSetStockStatusVendu')
     .addItem('Cocher "Valider" (sélection)', 'bulkValidateStockSelection')
     .addSeparator()
-    .addItem('Configurer la colonne VINTED', 'applyVintedDropdownToStock');
+    .addItem('Configurer la colonne VINTED (Stock + Ventes)', 'configureVintedColumns');
 
   stockMenu.addToUi();
 }

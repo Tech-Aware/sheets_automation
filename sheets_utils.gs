@@ -1025,6 +1025,86 @@ function applyVintedDropdownToRow_(sheet, row) {
 }
 
 /**
+ * Applique une validation de liste déroulante sur la colonne VINTED de la feuille Ventes.
+ * Cette fonction peut être appelée manuellement ou automatiquement.
+ */
+function applyVintedDropdownToVentes() {
+  const ss = SpreadsheetApp.getActive();
+  const ventes = ss.getSheetByName('Ventes');
+  if (!ventes) {
+    ss.toast('Feuille "Ventes" introuvable.', 'Erreur', 5);
+    return;
+  }
+
+  const headerRow = getSheetHeaderRow_('Ventes');
+  const dataStartRow = getSheetDataStartRow_('Ventes');
+  const lastColumn = ventes.getLastColumn();
+  const lastRow = ventes.getLastRow();
+
+  if (!lastColumn) {
+    ss.toast('La feuille Ventes est vide.', 'Erreur', 5);
+    return;
+  }
+
+  const headers = ventes.getRange(headerRow, 1, 1, lastColumn).getValues()[0];
+  const resolver = makeHeaderResolver_(headers);
+  const colExact = resolver.colExact.bind(resolver);
+  const colWhere = resolver.colWhere.bind(resolver);
+
+  // Chercher la colonne VINTED existante
+  let C_VINTED = colExact(HEADERS.VENTES.VINTED)
+    || colExact(HEADERS.VENTES.VINTED_ALT)
+    || colWhere(h => h.includes('vinted'));
+
+  // Si la colonne n'existe pas, la créer après LOT et avant COMPTABILISE
+  if (!C_VINTED) {
+    const C_LOT = colExact(HEADERS.VENTES.LOT) || colWhere(h => h.includes('lot'));
+    const C_COMPTA = colExact(HEADERS.VENTES.COMPTABILISE)
+      || colWhere(h => h.toLowerCase().includes('compt'));
+
+    if (C_LOT) {
+      ventes.insertColumnAfter(C_LOT);
+      C_VINTED = C_LOT + 1;
+    } else if (C_COMPTA) {
+      ventes.insertColumnBefore(C_COMPTA);
+      C_VINTED = C_COMPTA;
+    } else {
+      C_VINTED = lastColumn + 1;
+    }
+
+    ventes.getRange(headerRow, C_VINTED).setValue(HEADERS.VENTES.VINTED);
+  }
+
+  // Récupérer les comptes Vinted disponibles
+  const vintedAccounts = typeof VINTED_ACCOUNTS !== 'undefined' && Array.isArray(VINTED_ACCOUNTS)
+    ? VINTED_ACCOUNTS
+    : ['Vinted 1', 'Vinted 2', 'Vinted 3', 'Vinted 4', 'Vinted 5'];
+
+  // Créer la règle de validation avec liste déroulante
+  const rule = SpreadsheetApp.newDataValidation()
+    .requireValueInList(vintedAccounts, true)
+    .setAllowInvalid(true) // Dans Ventes, on autorise les valeurs invalides pour les anciennes lignes
+    .setHelpText('Compte Vinted sur lequel cet article a été vendu.')
+    .build();
+
+  // Appliquer la validation sur toutes les lignes de données
+  if (lastRow >= dataStartRow) {
+    const numRows = lastRow - dataStartRow + 1;
+    ventes.getRange(dataStartRow, C_VINTED, numRows, 1).setDataValidation(rule);
+  }
+
+  ss.toast(`Colonne VINTED configurée dans Ventes avec ${vintedAccounts.length} options.`, 'Ventes', 5);
+}
+
+/**
+ * Configure les colonnes VINTED dans Stock ET Ventes en une seule action.
+ */
+function configureVintedColumns() {
+  applyVintedDropdownToStock();
+  applyVintedDropdownToVentes();
+}
+
+/**
  * Recalcule les taxes et totaux pour toutes les feuilles Compta existantes.
  */
 function recalculateAllLedgerTaxes() {
