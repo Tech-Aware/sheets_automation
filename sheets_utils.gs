@@ -1264,3 +1264,94 @@ function recalculateAllLedgerTaxes() {
 
   ss.toast(`${updatedCount} feuille(s) Compta mise(s) à jour avec les taxes.`, 'Calcul des taxes', 5);
 }
+
+/**
+ * Migre les feuilles Compta existantes vers la nouvelle structure avec colonne TAXES.
+ * Ancienne structure: ID, SKU, LIBELLÉS, DATE DE VENTE, PRIX DE VENTE, PRIX D'ACHAT, MARGE BRUTE, COEFF MARGE, NBR PCS VENDU
+ * Nouvelle structure: ID, SKU, LIBELLÉS, DATE DE VENTE, PRIX DE VENTE, TAXES, COUT DE REVIENT, BENEFICE NET, NBR PCS VENDU
+ */
+function migrateAllLedgerSheets() {
+  const ss = SpreadsheetApp.getActive();
+  const sheets = ss.getSheets();
+  let migratedCount = 0;
+  let skippedCount = 0;
+
+  for (let i = 0; i < sheets.length; i++) {
+    const sheet = sheets[i];
+    const name = sheet.getName();
+
+    // Vérifier si c'est une feuille Compta (format: "Compta MM-YYYY")
+    if (name && name.match(/^Compta\s+\d{2}-\d{4}$/)) {
+      const result = migrateLedgerSheet_(sheet);
+      if (result.migrated) {
+        migratedCount++;
+      } else {
+        skippedCount++;
+      }
+    }
+  }
+
+  // Recalculer les totaux après migration
+  if (migratedCount > 0) {
+    recalculateAllLedgerTaxes();
+  }
+
+  ss.toast(`${migratedCount} feuille(s) migrée(s), ${skippedCount} déjà à jour.`, 'Migration Compta', 5);
+}
+
+/**
+ * Migre une feuille Compta vers la nouvelle structure.
+ * @param {Sheet} sheet - La feuille à migrer
+ * @returns {Object} - { migrated: boolean, reason: string }
+ */
+function migrateLedgerSheet_(sheet) {
+  if (!sheet) return { migrated: false, reason: 'no sheet' };
+
+  const lastCol = sheet.getLastColumn();
+  if (lastCol < 9) return { migrated: false, reason: 'not enough columns' };
+
+  // Lire les en-têtes actuels
+  const headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+
+  // Vérifier si c'est l'ancien format (colonne 6 = "PRIX D'ACHAT" au lieu de "TAXES")
+  const col6Header = String(headers[5] || '').trim().toUpperCase();
+
+  // Si la colonne 6 est déjà "TAXES", la feuille est déjà migrée
+  if (col6Header === 'TAXES') {
+    return { migrated: false, reason: 'already migrated' };
+  }
+
+  // Vérifier que c'est bien l'ancien format
+  const isOldFormat = col6Header === "PRIX D'ACHAT" || col6Header === 'PRIX D\'ACHAT';
+  if (!isOldFormat) {
+    return { migrated: false, reason: 'unknown format: ' + col6Header };
+  }
+
+  // 1. Insérer une nouvelle colonne après PRIX DE VENTE (colonne 5 -> nouvelle colonne 6)
+  sheet.insertColumnAfter(5);
+
+  // 2. Définir l'en-tête de la nouvelle colonne TAXES
+  sheet.getRange(1, 6).setValue('TAXES');
+
+  // 3. Renommer les colonnes décalées
+  // Colonne 7 (anciennement 6): PRIX D'ACHAT -> COUT DE REVIENT
+  sheet.getRange(1, 7).setValue('COUT DE REVIENT');
+
+  // Colonne 8 (anciennement 7): MARGE BRUTE -> BENEFICE NET
+  sheet.getRange(1, 8).setValue('BENEFICE NET');
+
+  // 4. Supprimer l'ancienne colonne COEFF MARGE (maintenant en position 9, anciennement 8)
+  // La colonne 9 après insertion est l'ancien COEFF MARGE
+  // On vérifie d'abord que c'est bien COEFF MARGE
+  const newHeaders = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  const col9Header = String(newHeaders[8] || '').trim().toUpperCase();
+  if (col9Header === 'COEFF MARGE') {
+    sheet.deleteColumn(9);
+  }
+
+  // 5. Formater la nouvelle colonne TAXES
+  const maxRows = sheet.getMaxRows();
+  sheet.getRange(1, 6, maxRows, 1).setNumberFormat('#,##0.00');
+
+  return { migrated: true, reason: 'success' };
+}

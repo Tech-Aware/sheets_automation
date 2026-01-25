@@ -209,6 +209,7 @@ function registerSalesActionsMenu_(ui, ss) {
 function registerAccountingActionsMenu_(ui) {
   const nextYearLabel = `Faire suivre sur année ${getNextAccountingYear_()}`;
   ui.createMenu('Actions compta')
+    .addItem('Migrer les feuilles Compta (nouvelle structure)', 'migrateAllLedgerSheets')
     .addItem('Calculer les frais (feuille active)', 'recalculateActiveLedgerFees')
     .addItem('Recalculer les taxes (toutes les feuilles)', 'recalculateAllLedgerTaxes')
     .addItem('Supprimer les doublons (feuille active)', 'purgeActiveLedgerDuplicates')
