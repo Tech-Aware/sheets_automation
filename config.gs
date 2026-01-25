@@ -221,11 +221,8 @@ const TAX_RATE = 0.123;
 
 // Liste des comptes Vinted disponibles pour la sélection dans Stock
 const VINTED_ACCOUNTS = Object.freeze([
-  'Vinted 1',
-  'Vinted 2',
-  'Vinted 3',
-  'Vinted 4',
-  'Vinted 5'
+  'Durin31',
+  'NivekDazar'
 ]);
 
 const LEDGER_WEEK_RULE_DESCRIPTION = 'auto-ledger-week-highlight';
