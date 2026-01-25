@@ -1204,6 +1204,31 @@ function applyVintedDropdownToVentes() {
   if (lastRow >= dataStartRow) {
     const numRows = lastRow - dataStartRow + 1;
     ventes.getRange(dataStartRow, C_VINTED, numRows, 1).setDataValidation(rule);
+
+    // Pré-remplir les valeurs VINTED vides en fonction du genre depuis Achats
+    const C_ID = colExact(HEADERS.VENTES.ID) || colWhere(h => h === 'id');
+    if (C_ID) {
+      const idToGenreMap = buildIdToGenreMap_(ss);
+      const idValues = ventes.getRange(dataStartRow, C_ID, numRows, 1).getValues();
+      const vintedValues = ventes.getRange(dataStartRow, C_VINTED, numRows, 1).getValues();
+
+      const updates = [];
+      for (let i = 0; i < numRows; i++) {
+        const currentVinted = String(vintedValues[i][0] || '').trim();
+        // Ne pré-remplir que si la cellule est vide
+        if (!currentVinted) {
+          const idValue = String(idValues[i][0] || '');
+          const genre = idToGenreMap[idValue];
+          const defaultVinted = getDefaultVintedFromGenre_(genre);
+          updates.push([defaultVinted]);
+        } else {
+          updates.push([currentVinted]);
+        }
+      }
+
+      // Appliquer les mises à jour en une seule opération
+      ventes.getRange(dataStartRow, C_VINTED, numRows, 1).setValues(updates);
+    }
   }
 
   ss.toast(`Colonne VINTED configurée dans Ventes avec ${vintedAccounts.length} options.`, 'Ventes', 5);
