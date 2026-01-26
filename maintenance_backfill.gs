@@ -187,7 +187,9 @@ function registerStockActionsMenu_(ui) {
     .addItem('Cocher "Mis en ligne" (sélection)', 'bulkSetStockStatusMisEnLigne')
     .addItem('Cocher "Publié" (sélection)', 'bulkSetStockStatusPublie')
     .addItem('Cocher "Vendu" (sélection)', 'bulkSetStockStatusVendu')
-    .addItem('Cocher "Valider" (sélection)', 'bulkValidateStockSelection');
+    .addItem('Cocher "Valider" (sélection)', 'bulkValidateStockSelection')
+    .addSeparator()
+    .addItem('Configurer la colonne VINTED (Stock + Ventes)', 'configureVintedColumns');
 
   stockMenu.addToUi();
 }
@@ -206,11 +208,76 @@ function registerSalesActionsMenu_(ui, ss) {
 
 function registerAccountingActionsMenu_(ui) {
   const nextYearLabel = `Faire suivre sur année ${getNextAccountingYear_()}`;
+
+  // Sous-menu pour recalculer les résultats
+  const recalcMenu = ui.createMenu('Recalculer les résultats')
+    .addItem('Avec taxes (toutes les feuilles)', 'recalculateWithTaxesAll')
+    .addItem('Avec taxes (feuille active)', 'recalculateWithTaxesActive')
+    .addSeparator()
+    .addItem('Sans taxes (toutes les feuilles)', 'recalculateWithoutTaxesAll')
+    .addItem('Sans taxes (feuille active)', 'recalculateWithoutTaxesActive');
+
   ui.createMenu('Actions compta')
+    .addSubMenu(recalcMenu)
     .addItem('Calculer les frais (feuille active)', 'recalculateActiveLedgerFees')
     .addItem('Supprimer les doublons (feuille active)', 'purgeActiveLedgerDuplicates')
     .addItem(nextYearLabel, 'copySpreadsheetToNextAccountingYear')
     .addToUi();
+}
+
+// === Fonctions de recalcul des résultats ===
+
+function recalculateWithTaxesAll() {
+  recalculateLedgerResults_(true, false);
+}
+
+function recalculateWithTaxesActive() {
+  recalculateLedgerResults_(true, true);
+}
+
+function recalculateWithoutTaxesAll() {
+  recalculateLedgerResults_(false, false);
+}
+
+function recalculateWithoutTaxesActive() {
+  recalculateLedgerResults_(false, true);
+}
+
+/**
+ * Recalcule les résultats des feuilles Compta.
+ * @param {boolean} includeTaxes - Si true, inclut les taxes dans le calcul
+ * @param {boolean} activeOnly - Si true, ne recalcule que la feuille active
+ */
+function recalculateLedgerResults_(includeTaxes, activeOnly) {
+  const ss = SpreadsheetApp.getActive();
+  const headersLen = MONTHLY_LEDGER_HEADERS.length;
+
+  if (activeOnly) {
+    const sheet = ss.getActiveSheet();
+    if (!sheet || !isMonthlyLedgerSheet_(sheet)) {
+      ss.toast('La feuille active n\'est pas une feuille Compta.', 'Erreur', 5);
+      return;
+    }
+    updateLedgerResultRow_(sheet, headersLen, includeTaxes);
+    const taxLabel = includeTaxes ? 'avec' : 'sans';
+    ss.toast(`Résultats recalculés ${taxLabel} taxes.`, 'Feuille active', 5);
+  } else {
+    const sheets = ss.getSheets();
+    let updatedCount = 0;
+
+    for (let i = 0; i < sheets.length; i++) {
+      const sheet = sheets[i];
+      const name = sheet.getName();
+
+      if (name && name.match(/^Compta\s+\d{2}-\d{4}$/)) {
+        updateLedgerResultRow_(sheet, headersLen, includeTaxes);
+        updatedCount++;
+      }
+    }
+
+    const taxLabel = includeTaxes ? 'avec' : 'sans';
+    ss.toast(`${updatedCount} feuille(s) recalculée(s) ${taxLabel} taxes.`, 'Toutes les feuilles', 5);
+  }
 }
 
 // === MENU ===

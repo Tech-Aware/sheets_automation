@@ -878,6 +878,80 @@ function buildIdToSkuBaseMap_(ss) {
   return map;
 }
 
+/**
+ * Construit un map ID -> GENRE(data) depuis la feuille Achats.
+ * Utilisé pour déterminer la valeur par défaut de VINTED dans Stock.
+ */
+function buildIdToGenreMap_(ss) {
+  const achats = ss && ss.getSheetByName('Achats');
+  if (!achats) return Object.create(null);
+
+  const last = achats.getLastRow();
+  if (last < 2) return Object.create(null);
+
+  const headers = achats.getRange(1, 1, 1, achats.getLastColumn()).getValues()[0];
+  const resolver = makeHeaderResolver_(headers);
+  const colExact = resolver.colExact.bind(resolver);
+  const colWhere = resolver.colWhere.bind(resolver);
+
+  const COL_ID = colExact(HEADERS.ACHATS.ID);
+  const COL_GENRE = colExact(HEADERS.ACHATS.GENRE_DATA)
+    || colExact(HEADERS.ACHATS.GENRE_DATA_ALT)
+    || colWhere(h => h.includes('genre') && h.includes('data'));
+
+  if (!COL_ID || !COL_GENRE) return Object.create(null);
+
+  const ids = achats.getRange(2, COL_ID, last - 1, 1).getValues();
+  const genres = achats.getRange(2, COL_GENRE, last - 1, 1).getValues();
+
+  const map = Object.create(null);
+  for (let i = 0; i < ids.length; i++) {
+    const idRaw = ids[i][0];
+    const genreRaw = genres[i][0];
+    if (idRaw === null || idRaw === undefined || idRaw === '') continue;
+
+    const key = String(idRaw);
+    const genre = String(genreRaw || '').trim();
+    if (genre) {
+      map[key] = genre;
+    }
+  }
+
+  return map;
+}
+
+/**
+ * Détermine la valeur VINTED par défaut en fonction du genre.
+ * - "Femme" uniquement -> "Durin31"
+ * - "Homme" uniquement -> "NivekDazar"
+ * - Mixte (Homme/Femme ou Homme/ Femme) -> vide
+ */
+function getDefaultVintedFromGenre_(genre) {
+  if (!genre) return '';
+
+  const normalized = String(genre).toLowerCase().trim();
+
+  // Vérifier si c'est mixte (contient les deux genres)
+  const hasHomme = normalized.includes('homme');
+  const hasFemme = normalized.includes('femme');
+
+  if (hasHomme && hasFemme) {
+    // Mixte -> laisser vide
+    return '';
+  }
+
+  if (hasFemme && !hasHomme) {
+    return 'Durin31';
+  }
+
+  if (hasHomme && !hasFemme) {
+    return 'NivekDazar';
+  }
+
+  // Valeur non reconnue -> laisser vide
+  return '';
+}
+
 // Vérifie le prix, colore la cellule si invalide, retourne true/false
 function ensureValidPriceOrWarn_(sh, row, C_PRIX) {
   if (!C_PRIX) return false;
@@ -897,7 +971,7 @@ function ensureValidPriceOrWarn_(sh, row, C_PRIX) {
   return false;
 }
 
-// Supprime l’alerte dans PRIX DE VENTE si c’est le message ⚠️
+// Supprime l'alerte dans PRIX DE VENTE si c'est le message ⚠️
 function clearPriceAlertIfAny_(sh, row, C_PRIX) {
   if (!C_PRIX) return;
   const cell = sh.getRange(row, C_PRIX);
@@ -907,3 +981,287 @@ function clearPriceAlertIfAny_(sh, row, C_PRIX) {
     cell.clearContent();
   }
 }
+
+// --- Gestion de la colonne VINTED avec liste déroulante ---
+
+/**
+ * Applique une validation de liste déroulante sur la colonne VINTED de la feuille Stock.
+ * Pré-remplit également les valeurs VINTED vides en fonction du genre depuis Achats.
+ * Cette fonction peut être appelée manuellement ou automatiquement.
+ */
+function applyVintedDropdownToStock() {
+  const ss = SpreadsheetApp.getActive();
+  const stock = ss.getSheetByName('Stock');
+  if (!stock) {
+    ss.toast('Feuille "Stock" introuvable.', 'Erreur', 5);
+    return;
+  }
+
+  const headerRow = getSheetHeaderRow_('Stock');
+  const dataStartRow = getSheetDataStartRow_('Stock');
+  const lastColumn = stock.getLastColumn();
+  const lastRow = stock.getLastRow();
+
+  if (!lastColumn) {
+    ss.toast('La feuille Stock est vide.', 'Erreur', 5);
+    return;
+  }
+
+  const headers = stock.getRange(headerRow, 1, 1, lastColumn).getValues()[0];
+  const resolver = makeHeaderResolver_(headers);
+  const colExact = resolver.colExact.bind(resolver);
+  const colWhere = resolver.colWhere.bind(resolver);
+
+  // Chercher la colonne VINTED existante
+  let C_VINTED = colExact(HEADERS.STOCK.VINTED)
+    || colExact(HEADERS.STOCK.VINTED_ALT)
+    || colWhere(h => h.includes('vinted'));
+
+  // Si la colonne n'existe pas, la créer après la colonne LOT
+  if (!C_VINTED) {
+    const C_LOT = colExact(HEADERS.STOCK.LOT)
+      || colExact(HEADERS.STOCK.LOT_ALT2)
+      || colExact(HEADERS.STOCK.LOT_ALT3)
+      || colWhere(h => h.includes('lot'));
+
+    const C_VALIDER = colExact(HEADERS.STOCK.VALIDER_SAISIE)
+      || colExact(HEADERS.STOCK.VALIDER_SAISIE_ALT)
+      || colWhere(h => h.includes('valider'));
+
+    // Insérer après LOT si existe, sinon avant VALIDER, sinon à la fin
+    if (C_LOT) {
+      stock.insertColumnAfter(C_LOT);
+      C_VINTED = C_LOT + 1;
+    } else if (C_VALIDER) {
+      stock.insertColumnBefore(C_VALIDER);
+      C_VINTED = C_VALIDER;
+    } else {
+      C_VINTED = lastColumn + 1;
+    }
+
+    // Ajouter le titre de la colonne
+    stock.getRange(headerRow, C_VINTED).setValue(HEADERS.STOCK.VINTED);
+  }
+
+  // Récupérer les comptes Vinted disponibles
+  const vintedAccounts = typeof VINTED_ACCOUNTS !== 'undefined' && Array.isArray(VINTED_ACCOUNTS)
+    ? VINTED_ACCOUNTS
+    : ['Durin31', 'NivekDazar'];
+
+  // Créer la règle de validation avec liste déroulante
+  const rule = SpreadsheetApp.newDataValidation()
+    .requireValueInList(vintedAccounts, true)
+    .setAllowInvalid(false)
+    .setHelpText('Sélectionne le compte Vinted sur lequel cet article a été vendu.')
+    .build();
+
+  // Appliquer la validation sur toutes les lignes de données
+  if (lastRow >= dataStartRow) {
+    const numRows = lastRow - dataStartRow + 1;
+    stock.getRange(dataStartRow, C_VINTED, numRows, 1).setDataValidation(rule);
+
+    // Pré-remplir les valeurs VINTED vides en fonction du genre depuis Achats
+    const C_ID = colExact(HEADERS.STOCK.ID);
+    if (C_ID) {
+      const idToGenreMap = buildIdToGenreMap_(ss);
+      const idValues = stock.getRange(dataStartRow, C_ID, numRows, 1).getValues();
+      const vintedValues = stock.getRange(dataStartRow, C_VINTED, numRows, 1).getValues();
+
+      const updates = [];
+      for (let i = 0; i < numRows; i++) {
+        const currentVinted = String(vintedValues[i][0] || '').trim();
+        // Ne pré-remplir que si la cellule est vide
+        if (!currentVinted) {
+          const idValue = String(idValues[i][0] || '');
+          const genre = idToGenreMap[idValue];
+          const defaultVinted = getDefaultVintedFromGenre_(genre);
+          updates.push([defaultVinted]);
+        } else {
+          updates.push([currentVinted]);
+        }
+      }
+
+      // Appliquer les mises à jour en une seule opération
+      stock.getRange(dataStartRow, C_VINTED, numRows, 1).setValues(updates);
+    }
+  }
+
+  ss.toast(`Colonne VINTED configurée avec ${vintedAccounts.length} options.`, 'Stock', 5);
+}
+
+/**
+ * Applique la validation VINTED sur une nouvelle ligne dans Stock.
+ * Pré-remplit également la valeur VINTED en fonction du genre depuis Achats.
+ * À appeler lors de l'ajout d'une ligne dans Stock.
+ */
+function applyVintedDropdownToRow_(sheet, row, idValue) {
+  if (!sheet) return;
+
+  const headerRow = getSheetHeaderRow_('Stock');
+  const lastColumn = sheet.getLastColumn();
+  if (!lastColumn) return;
+
+  const headers = sheet.getRange(headerRow, 1, 1, lastColumn).getValues()[0];
+  const resolver = makeHeaderResolver_(headers);
+  const colExact = resolver.colExact.bind(resolver);
+  const colWhere = resolver.colWhere.bind(resolver);
+
+  const C_VINTED = colExact(HEADERS.STOCK.VINTED)
+    || colExact(HEADERS.STOCK.VINTED_ALT)
+    || colWhere(h => h.includes('vinted'));
+
+  if (!C_VINTED) return;
+
+  const vintedAccounts = typeof VINTED_ACCOUNTS !== 'undefined' && Array.isArray(VINTED_ACCOUNTS)
+    ? VINTED_ACCOUNTS
+    : ['Durin31', 'NivekDazar'];
+
+  const rule = SpreadsheetApp.newDataValidation()
+    .requireValueInList(vintedAccounts, true)
+    .setAllowInvalid(false)
+    .setHelpText('Sélectionne le compte Vinted sur lequel cet article a été vendu.')
+    .build();
+
+  const cell = sheet.getRange(row, C_VINTED);
+  cell.setDataValidation(rule);
+
+  // Pré-remplir la valeur VINTED en fonction du genre si un ID est fourni
+  if (idValue) {
+    const ss = sheet.getParent();
+    const idToGenreMap = buildIdToGenreMap_(ss);
+    const genre = idToGenreMap[String(idValue)];
+    const defaultVinted = getDefaultVintedFromGenre_(genre);
+    if (defaultVinted) {
+      cell.setValue(defaultVinted);
+    }
+  }
+}
+
+/**
+ * Applique une validation de liste déroulante sur la colonne VINTED de la feuille Ventes.
+ * Cette fonction peut être appelée manuellement ou automatiquement.
+ */
+function applyVintedDropdownToVentes() {
+  const ss = SpreadsheetApp.getActive();
+  const ventes = ss.getSheetByName('Ventes');
+  if (!ventes) {
+    ss.toast('Feuille "Ventes" introuvable.', 'Erreur', 5);
+    return;
+  }
+
+  const headerRow = getSheetHeaderRow_('Ventes');
+  const dataStartRow = getSheetDataStartRow_('Ventes');
+  const lastColumn = ventes.getLastColumn();
+  const lastRow = ventes.getLastRow();
+
+  if (!lastColumn) {
+    ss.toast('La feuille Ventes est vide.', 'Erreur', 5);
+    return;
+  }
+
+  const headers = ventes.getRange(headerRow, 1, 1, lastColumn).getValues()[0];
+  const resolver = makeHeaderResolver_(headers);
+  const colExact = resolver.colExact.bind(resolver);
+  const colWhere = resolver.colWhere.bind(resolver);
+
+  // Chercher la colonne VINTED existante
+  let C_VINTED = colExact(HEADERS.VENTES.VINTED)
+    || colExact(HEADERS.VENTES.VINTED_ALT)
+    || colWhere(h => h.includes('vinted'));
+
+  // Si la colonne n'existe pas, la créer après LOT et avant COMPTABILISE
+  if (!C_VINTED) {
+    const C_LOT = colExact(HEADERS.VENTES.LOT) || colWhere(h => h.includes('lot'));
+    const C_COMPTA = colExact(HEADERS.VENTES.COMPTABILISE)
+      || colWhere(h => h.toLowerCase().includes('compt'));
+
+    if (C_LOT) {
+      ventes.insertColumnAfter(C_LOT);
+      C_VINTED = C_LOT + 1;
+    } else if (C_COMPTA) {
+      ventes.insertColumnBefore(C_COMPTA);
+      C_VINTED = C_COMPTA;
+    } else {
+      C_VINTED = lastColumn + 1;
+    }
+
+    ventes.getRange(headerRow, C_VINTED).setValue(HEADERS.VENTES.VINTED);
+  }
+
+  // Récupérer les comptes Vinted disponibles
+  const vintedAccounts = typeof VINTED_ACCOUNTS !== 'undefined' && Array.isArray(VINTED_ACCOUNTS)
+    ? VINTED_ACCOUNTS
+    : ['Durin31', 'NivekDazar'];
+
+  // Créer la règle de validation avec liste déroulante
+  const rule = SpreadsheetApp.newDataValidation()
+    .requireValueInList(vintedAccounts, true)
+    .setAllowInvalid(true) // Dans Ventes, on autorise les valeurs invalides pour les anciennes lignes
+    .setHelpText('Compte Vinted sur lequel cet article a été vendu.')
+    .build();
+
+  // Appliquer la validation sur toutes les lignes de données
+  if (lastRow >= dataStartRow) {
+    const numRows = lastRow - dataStartRow + 1;
+    ventes.getRange(dataStartRow, C_VINTED, numRows, 1).setDataValidation(rule);
+
+    // Pré-remplir les valeurs VINTED vides en fonction du genre depuis Achats
+    const C_ID = colExact(HEADERS.VENTES.ID) || colWhere(h => h === 'id');
+    if (C_ID) {
+      const idToGenreMap = buildIdToGenreMap_(ss);
+      const idValues = ventes.getRange(dataStartRow, C_ID, numRows, 1).getValues();
+      const vintedValues = ventes.getRange(dataStartRow, C_VINTED, numRows, 1).getValues();
+
+      const updates = [];
+      for (let i = 0; i < numRows; i++) {
+        const currentVinted = String(vintedValues[i][0] || '').trim();
+        // Ne pré-remplir que si la cellule est vide
+        if (!currentVinted) {
+          const idValue = String(idValues[i][0] || '');
+          const genre = idToGenreMap[idValue];
+          const defaultVinted = getDefaultVintedFromGenre_(genre);
+          updates.push([defaultVinted]);
+        } else {
+          updates.push([currentVinted]);
+        }
+      }
+
+      // Appliquer les mises à jour en une seule opération
+      ventes.getRange(dataStartRow, C_VINTED, numRows, 1).setValues(updates);
+    }
+  }
+
+  ss.toast(`Colonne VINTED configurée dans Ventes avec ${vintedAccounts.length} options.`, 'Ventes', 5);
+}
+
+/**
+ * Configure les colonnes VINTED dans Stock ET Ventes en une seule action.
+ */
+function configureVintedColumns() {
+  applyVintedDropdownToStock();
+  applyVintedDropdownToVentes();
+}
+
+/**
+ * Recalcule les taxes et totaux pour toutes les feuilles Compta existantes.
+ */
+function recalculateAllLedgerTaxes() {
+  const ss = SpreadsheetApp.getActive();
+  const sheets = ss.getSheets();
+  const headersLen = MONTHLY_LEDGER_HEADERS.length;
+  let updatedCount = 0;
+
+  for (let i = 0; i < sheets.length; i++) {
+    const sheet = sheets[i];
+    const name = sheet.getName();
+
+    // Vérifier si c'est une feuille Compta (format: "Compta MM-YYYY")
+    if (name && name.match(/^Compta\s+\d{2}-\d{4}$/)) {
+      updateLedgerResultRow_(sheet, headersLen);
+      updatedCount++;
+    }
+  }
+
+  ss.toast(`${updatedCount} feuille(s) Compta mise(s) à jour avec les taxes.`, 'Calcul des taxes', 5);
+}
+

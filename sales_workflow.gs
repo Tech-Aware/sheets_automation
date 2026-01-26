@@ -510,6 +510,9 @@ function exportVente_(e, row, C_ID, C_LABEL, C_SKU, C_PRIX, C_DVENTE, C_STAMPV, 
     || ventesWhere(isShippingSizeHeader_);
   const COL_LOT_VENTE    = ventesExact(HEADERS.VENTES.LOT)
     || ventesWhere(h => h.includes('lot'));
+  const COL_VINTED_VENTE = ventesExact(HEADERS.VENTES.VINTED)
+    || ventesExact(HEADERS.VENTES.VINTED_ALT)
+    || ventesWhere(h => h.includes('vinted'));
   const COL_COMPTA       = ventesExact(HEADERS.VENTES.COMPTABILISE)
     || ventesWhere(h => h.toLowerCase().includes('compt'));
   const COL_DELAI_IMM    = ventesExact(HEADERS.VENTES.DELAI_IMMOBILISATION)
@@ -533,6 +536,14 @@ function exportVente_(e, row, C_ID, C_LABEL, C_SKU, C_PRIX, C_DVENTE, C_STAMPV, 
   const label = C_LABEL ? sh.getRange(row, C_LABEL).getDisplayValue() : "";
   const sku   = C_SKU  ? sh.getRange(row, C_SKU).getDisplayValue() : "";
   const prix  = C_PRIX ? sh.getRange(row, C_PRIX).getValue() : "";
+
+  // Récupérer la colonne VINTED dans Stock
+  const stockHeaders = sh.getRange(getSheetHeaderRow_('Stock'), 1, 1, sh.getLastColumn()).getValues()[0];
+  const stockResolver = makeHeaderResolver_(stockHeaders);
+  const C_VINTED_STOCK = stockResolver.colExact(HEADERS.STOCK.VINTED)
+    || stockResolver.colExact(HEADERS.STOCK.VINTED_ALT)
+    || stockResolver.colWhere(h => h.includes('vinted'));
+  const vintedValue = C_VINTED_STOCK ? sh.getRange(row, C_VINTED_STOCK).getDisplayValue() : "";
 
   // Exigence: chaque ligne Ventes doit enregistrer l'ID exact
   if (!idVal) {
@@ -690,6 +701,9 @@ function exportVente_(e, row, C_ID, C_LABEL, C_SKU, C_PRIX, C_DVENTE, C_STAMPV, 
   }
   if (COL_LOT_VENTE && shipping && shipping.lot) {
     newRow[COL_LOT_VENTE - 1] = shipping.lot;
+  }
+  if (COL_VINTED_VENTE && vintedValue) {
+    newRow[COL_VINTED_VENTE - 1] = vintedValue;
   }
 
   if (COL_DELAI_IMM) newRow[COL_DELAI_IMM - 1] = delaiImm;
@@ -1274,7 +1288,7 @@ function applyMonthlySheetFormats_(sheet) {
     sheet.getRange(1, MONTHLY_LEDGER_INDEX.MARGE_BRUTE + 1, maxRows, 1).setNumberFormat('#,##0.00');
   }
   if (MONTHLY_LEDGER_INDEX.COEFF_MARGE >= 0) {
-    sheet.getRange(1, MONTHLY_LEDGER_INDEX.COEFF_MARGE + 1, maxRows, 1).setNumberFormat('0.00');
+    sheet.getRange(1, MONTHLY_LEDGER_INDEX.COEFF_MARGE + 1, maxRows, 1).setNumberFormat('#,##0.00');
   }
   if (MONTHLY_LEDGER_INDEX.NB_PIECES >= 0) {
     sheet.getRange(1, MONTHLY_LEDGER_INDEX.NB_PIECES + 1, maxRows, 1).setNumberFormat('0');
@@ -1673,7 +1687,13 @@ function updateMonthlyTotals_(sheet, headersLen) {
 
 const LEDGER_RESULT_LABEL = 'RESULTAT';
 
-function updateLedgerResultRow_(sheet, headersLen) {
+/**
+ * Met à jour la ligne RESULTAT d'une feuille Compta.
+ * @param {Sheet} sheet - La feuille à mettre à jour
+ * @param {number} headersLen - Nombre de colonnes d'en-têtes
+ * @param {boolean} [includeTaxes=true] - Si true, inclut les taxes dans le calcul
+ */
+function updateLedgerResultRow_(sheet, headersLen, includeTaxes) {
   const summary = summarizeMonthlyLedgerData_(sheet, headersLen);
   if (!summary) return;
 
@@ -1681,28 +1701,92 @@ function updateLedgerResultRow_(sheet, headersLen) {
   if (!resultRowNumber) return;
 
   const totalFees = summary.sumFrais || 0;
-  const totalCost = summary.sumPrixAchat + totalFees;
-  const net = summary.sumPrixVente - totalCost;
 
-  if (MONTHLY_LEDGER_INDEX.PRIX_VENTE >= 0) {
-    const revenueCell = sheet.getRange(resultRowNumber, MONTHLY_LEDGER_INDEX.PRIX_VENTE + 1);
-    revenueCell.setValue(`Chiffre d'affaire : ${formatLedgerCurrencyLabel_(summary.sumPrixVente)}`);
-    revenueCell.setNote('Somme des prix de vente du mois.');
-  }
-  if (MONTHLY_LEDGER_INDEX.PRIX_ACHAT >= 0) {
-    const costCell = sheet.getRange(resultRowNumber, MONTHLY_LEDGER_INDEX.PRIX_ACHAT + 1);
-    costCell.setValue(`Coût de revient : ${formatLedgerCurrencyLabel_(totalCost)}`);
-    costCell.setNote('Coût de revient = somme des prix d\'achat + total des frais saisis (colonnes K à M).');
-  }
-  if (MONTHLY_LEDGER_INDEX.MARGE_BRUTE >= 0) {
-    const profitCell = sheet.getRange(resultRowNumber, MONTHLY_LEDGER_INDEX.MARGE_BRUTE + 1);
-    profitCell.setValue(`Bénéfice net : ${formatLedgerCurrencyLabel_(net)}`);
-    profitCell.setNote('Bénéfice net = Chiffre d\'affaire - Coût de revient (frais inclus).');
-  }
-  if (LEDGER_FEES_COLUMNS.MONTANT > 0) {
-    const feeCell = sheet.getRange(resultRowNumber, LEDGER_FEES_COLUMNS.MONTANT);
-    feeCell.setValue(`Frais : ${formatLedgerCurrencyLabel_(totalFees)}`);
-    feeCell.setNote('Total cumulé des montants de frais saisis dans le tableau des colonnes K à M.');
+  // Par défaut, inclure les taxes
+  const withTaxes = includeTaxes !== false;
+
+  // Calcul des taxes sur le CA (12,3% pour micro-entreprise)
+  const taxRate = typeof TAX_RATE !== 'undefined' ? TAX_RATE : 0.123;
+  const taxes = withTaxes ? (summary.sumPrixVente * taxRate) : 0;
+
+  // Coût de revient = seulement les prix d'achat (sans les frais)
+  const coutRevient = summary.sumPrixAchat;
+
+  // Résultat net = CA - Taxes - Coût de revient - Frais
+  const resultatNet = summary.sumPrixVente - taxes - coutRevient - totalFees;
+
+  if (withTaxes) {
+    // === MODE AVEC TAXES ===
+    // Colonne E: CA
+    if (MONTHLY_LEDGER_INDEX.PRIX_VENTE >= 0) {
+      const caCell = sheet.getRange(resultRowNumber, MONTHLY_LEDGER_INDEX.PRIX_VENTE + 1);
+      caCell.setValue(`CA : ${formatLedgerCurrencyLabel_(summary.sumPrixVente)}`);
+      caCell.setNote('Chiffre d\'affaires = somme des prix de vente du mois.');
+    }
+
+    // Colonne F: Taxes
+    if (MONTHLY_LEDGER_INDEX.PRIX_ACHAT >= 0) {
+      const taxCell = sheet.getRange(resultRowNumber, MONTHLY_LEDGER_INDEX.PRIX_ACHAT + 1);
+      taxCell.setValue(`Taxes : ${formatLedgerCurrencyLabel_(taxes)}`);
+      taxCell.setNote('Taxes micro-entreprise = ' + (taxRate * 100).toFixed(1) + '% du CA.');
+    }
+
+    // Colonne G: Coût de revient
+    if (MONTHLY_LEDGER_INDEX.MARGE_BRUTE >= 0) {
+      const coutCell = sheet.getRange(resultRowNumber, MONTHLY_LEDGER_INDEX.MARGE_BRUTE + 1);
+      coutCell.setValue(`Coût : ${formatLedgerCurrencyLabel_(coutRevient)}`);
+      coutCell.setNote('Coût de revient = somme des prix d\'achat (hors frais).');
+    }
+
+    // Colonne H: Frais
+    if (MONTHLY_LEDGER_INDEX.COEFF_MARGE >= 0) {
+      const fraisCell = sheet.getRange(resultRowNumber, MONTHLY_LEDGER_INDEX.COEFF_MARGE + 1);
+      fraisCell.setValue(`Frais : ${formatLedgerCurrencyLabel_(totalFees)}`);
+      fraisCell.setNote('Total des frais saisis dans les colonnes K à M.');
+    }
+
+    // Colonne I: Résultat net
+    if (MONTHLY_LEDGER_INDEX.NB_PIECES >= 0) {
+      const resultCell = sheet.getRange(resultRowNumber, MONTHLY_LEDGER_INDEX.NB_PIECES + 1);
+      resultCell.setValue(`Résultat : ${formatLedgerCurrencyLabel_(resultatNet)}`);
+      resultCell.setNote('Résultat net = CA - Taxes - Coût - Frais.');
+    }
+  } else {
+    // === MODE SANS TAXES ===
+    // Colonne E: CA
+    if (MONTHLY_LEDGER_INDEX.PRIX_VENTE >= 0) {
+      const caCell = sheet.getRange(resultRowNumber, MONTHLY_LEDGER_INDEX.PRIX_VENTE + 1);
+      caCell.setValue(`CA : ${formatLedgerCurrencyLabel_(summary.sumPrixVente)}`);
+      caCell.setNote('Chiffre d\'affaires = somme des prix de vente du mois.');
+    }
+
+    // Colonne F: Coût de revient (pas de taxes)
+    if (MONTHLY_LEDGER_INDEX.PRIX_ACHAT >= 0) {
+      const coutCell = sheet.getRange(resultRowNumber, MONTHLY_LEDGER_INDEX.PRIX_ACHAT + 1);
+      coutCell.setValue(`Coût : ${formatLedgerCurrencyLabel_(coutRevient)}`);
+      coutCell.setNote('Coût de revient = somme des prix d\'achat (hors frais).');
+    }
+
+    // Colonne G: Frais
+    if (MONTHLY_LEDGER_INDEX.MARGE_BRUTE >= 0) {
+      const fraisCell = sheet.getRange(resultRowNumber, MONTHLY_LEDGER_INDEX.MARGE_BRUTE + 1);
+      fraisCell.setValue(`Frais : ${formatLedgerCurrencyLabel_(totalFees)}`);
+      fraisCell.setNote('Total des frais saisis dans les colonnes K à M.');
+    }
+
+    // Colonne H: Résultat net (décalé car pas de taxes)
+    if (MONTHLY_LEDGER_INDEX.COEFF_MARGE >= 0) {
+      const resultCell = sheet.getRange(resultRowNumber, MONTHLY_LEDGER_INDEX.COEFF_MARGE + 1);
+      resultCell.setValue(`Résultat : ${formatLedgerCurrencyLabel_(resultatNet)}`);
+      resultCell.setNote('Résultat net = CA - Coût - Frais (sans taxes).');
+    }
+
+    // Colonne I: Vide (pas utilisée en mode sans taxes)
+    if (MONTHLY_LEDGER_INDEX.NB_PIECES >= 0) {
+      const emptyCell = sheet.getRange(resultRowNumber, MONTHLY_LEDGER_INDEX.NB_PIECES + 1);
+      emptyCell.clearContent();
+      emptyCell.clearNote();
+    }
   }
 }
 
