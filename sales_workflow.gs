@@ -1687,7 +1687,13 @@ function updateMonthlyTotals_(sheet, headersLen) {
 
 const LEDGER_RESULT_LABEL = 'RESULTAT';
 
-function updateLedgerResultRow_(sheet, headersLen) {
+/**
+ * Met à jour la ligne RESULTAT d'une feuille Compta.
+ * @param {Sheet} sheet - La feuille à mettre à jour
+ * @param {number} headersLen - Nombre de colonnes d'en-têtes
+ * @param {boolean} [includeTaxes=true] - Si true, inclut les taxes dans le calcul
+ */
+function updateLedgerResultRow_(sheet, headersLen, includeTaxes) {
   const summary = summarizeMonthlyLedgerData_(sheet, headersLen);
   if (!summary) return;
 
@@ -1696,9 +1702,12 @@ function updateLedgerResultRow_(sheet, headersLen) {
 
   const totalFees = summary.sumFrais || 0;
 
+  // Par défaut, inclure les taxes
+  const withTaxes = includeTaxes !== false;
+
   // Calcul des taxes sur le CA (12,3% pour micro-entreprise)
   const taxRate = typeof TAX_RATE !== 'undefined' ? TAX_RATE : 0.123;
-  const taxes = summary.sumPrixVente * taxRate;
+  const taxes = withTaxes ? (summary.sumPrixVente * taxRate) : 0;
 
   // Coût de revient = seulement les prix d'achat (sans les frais)
   const coutRevient = summary.sumPrixAchat;
@@ -1713,11 +1722,16 @@ function updateLedgerResultRow_(sheet, headersLen) {
     caCell.setNote('Chiffre d\'affaires = somme des prix de vente du mois.');
   }
 
-  // Colonne F (PRIX D'ACHAT): Taxes
+  // Colonne F (PRIX D'ACHAT): Taxes ou vide si sans taxes
   if (MONTHLY_LEDGER_INDEX.PRIX_ACHAT >= 0) {
     const taxCell = sheet.getRange(resultRowNumber, MONTHLY_LEDGER_INDEX.PRIX_ACHAT + 1);
-    taxCell.setValue(`Taxes : ${formatLedgerCurrencyLabel_(taxes)}`);
-    taxCell.setNote('Taxes micro-entreprise = ' + (taxRate * 100).toFixed(1) + '% du CA.');
+    if (withTaxes) {
+      taxCell.setValue(`Taxes : ${formatLedgerCurrencyLabel_(taxes)}`);
+      taxCell.setNote('Taxes micro-entreprise = ' + (taxRate * 100).toFixed(1) + '% du CA.');
+    } else {
+      taxCell.setValue('Taxes : N/A');
+      taxCell.setNote('Calcul sans taxes.');
+    }
   }
 
   // Colonne G (MARGE BRUTE): Coût de revient (prix d'achat seulement)
@@ -1738,7 +1752,11 @@ function updateLedgerResultRow_(sheet, headersLen) {
   if (MONTHLY_LEDGER_INDEX.NB_PIECES >= 0) {
     const resultCell = sheet.getRange(resultRowNumber, MONTHLY_LEDGER_INDEX.NB_PIECES + 1);
     resultCell.setValue(`Résultat : ${formatLedgerCurrencyLabel_(resultatNet)}`);
-    resultCell.setNote('Résultat net = CA - Taxes - Coût - Frais.');
+    if (withTaxes) {
+      resultCell.setNote('Résultat net = CA - Taxes - Coût - Frais.');
+    } else {
+      resultCell.setNote('Résultat net = CA - Coût - Frais (sans taxes).');
+    }
   }
 }
 
