@@ -1266,45 +1266,27 @@ function recalculateAllLedgerTaxes() {
 }
 
 /**
- * Harmonise les SKU du Stock avec les REFERENCES des Achats.
+ * Harmonise les SKU dans toutes les feuilles (Stock, Ventes, Compta) avec les REFERENCES des Achats.
  *
  * La colonne REFERENCE dans Achats contient la nouvelle base SKU (ex: "4JLF")
  * composée de l'ID du lot + les lettres de la base.
  *
- * Transformation: ancien format (Stock) BASE-NUMERO → nouveau format NOUVELLE_BASE+NUMERO
+ * Transformation: ancien format BASE-NUMERO → nouveau format NOUVELLE_BASE+NUMERO
  * Exemple: JLF-324 → 4JLF324 (où "4JLF" vient de la REFERENCE Achats)
  *
- * Le matching se fait en comparant les lettres de la REFERENCE Achats avec la BASE du SKU Stock.
+ * Le matching se fait en comparant les lettres de la REFERENCE Achats avec la BASE du SKU.
  */
 function harmonizeStockSkus() {
   const ss = SpreadsheetApp.getActive();
-  const stock = ss.getSheetByName('Stock');
   const achats = ss.getSheetByName('Achats');
 
-  if (!stock) {
-    ss.toast('Feuille "Stock" introuvable.', 'Erreur', 5);
-    return;
-  }
   if (!achats) {
     ss.toast('Feuille "Achats" introuvable.', 'Erreur', 5);
     return;
   }
 
-  const STOCK_HEADER_ROW = getSheetHeaderRow_('STOCK');
-  const STOCK_DATA_START_ROW = getSheetDataStartRow_('STOCK');
   const ACHATS_HEADER_ROW = getSheetHeaderRow_('ACHATS');
   const ACHATS_DATA_START_ROW = getSheetDataStartRow_('ACHATS');
-
-  // Résolution des colonnes Stock
-  const stockHeaders = stock.getRange(STOCK_HEADER_ROW, 1, 1, stock.getLastColumn()).getValues()[0];
-  const stockResolver = makeHeaderResolver_(stockHeaders);
-  const C_SKU_STOCK = stockResolver.colExact(HEADERS.STOCK.SKU)
-    || stockResolver.colExact(HEADERS.STOCK.REFERENCE);
-
-  if (!C_SKU_STOCK) {
-    ss.toast('Colonne SKU introuvable dans Stock.', 'Erreur', 5);
-    return;
-  }
 
   // Résolution des colonnes Achats
   const achatsHeaders = achats.getRange(ACHATS_HEADER_ROW, 1, 1, achats.getLastColumn()).getValues()[0];
@@ -1348,23 +1330,108 @@ function harmonizeStockSkus() {
     return;
   }
 
-  // Lire les SKU du Stock
-  const lastStock = stock.getLastRow();
-  if (lastStock < STOCK_DATA_START_ROW) {
-    ss.toast('Aucune donnée dans la feuille Stock.', 'Erreur', 5);
-    return;
+  // Compteurs globaux
+  let totalUpdated = 0;
+  let totalSkipped = 0;
+  const results = [];
+
+  // 1. Harmoniser les SKU du Stock
+  const stock = ss.getSheetByName('Stock');
+  if (stock) {
+    const stockResult = harmonizeSkusInSheet_(stock, oldBaseToNewBaseMap, {
+      headerRow: getSheetHeaderRow_('STOCK'),
+      dataStartRow: getSheetDataStartRow_('STOCK'),
+      skuColumnResolver: (resolver) => resolver.colExact(HEADERS.STOCK.SKU) || resolver.colExact(HEADERS.STOCK.REFERENCE)
+    });
+    totalUpdated += stockResult.updated;
+    totalSkipped += stockResult.skipped;
+    results.push(`Stock: ${stockResult.updated}`);
   }
 
-  const numStockRows = lastStock - STOCK_DATA_START_ROW + 1;
-  const stockSkuValues = stock.getRange(STOCK_DATA_START_ROW, C_SKU_STOCK, numStockRows, 1).getValues();
+  // 2. Harmoniser les SKU des Ventes (colonne D, ligne 7)
+  const ventes = ss.getSheetByName('Ventes');
+  if (ventes) {
+    const ventesResult = harmonizeSkusInSheet_(ventes, oldBaseToNewBaseMap, {
+      headerRow: 6,
+      dataStartRow: 7,
+      skuColumn: 4  // Colonne D
+    });
+    totalUpdated += ventesResult.updated;
+    totalSkipped += ventesResult.skipped;
+    results.push(`Ventes: ${ventesResult.updated}`);
+  }
 
-  // Parcourir et mettre à jour les SKU du Stock
-  let updatedCount = 0;
-  let skippedCount = 0;
+  // 3. Harmoniser les SKU des feuilles Compta (colonne B)
+  const sheets = ss.getSheets();
+  let comptaUpdated = 0;
+  let comptaSkipped = 0;
+
+  for (let i = 0; i < sheets.length; i++) {
+    const sheet = sheets[i];
+    const name = sheet.getName();
+
+    // Vérifier si c'est une feuille Compta (format: "Compta MM-YYYY")
+    if (name && name.match(/^Compta\s+\d{2}-\d{4}$/)) {
+      const comptaResult = harmonizeSkusInSheet_(sheet, oldBaseToNewBaseMap, {
+        headerRow: 1,
+        dataStartRow: 2,
+        skuColumn: 2  // Colonne B
+      });
+      comptaUpdated += comptaResult.updated;
+      comptaSkipped += comptaResult.skipped;
+    }
+  }
+
+  totalUpdated += comptaUpdated;
+  totalSkipped += comptaSkipped;
+  if (comptaUpdated > 0 || comptaSkipped > 0) {
+    results.push(`Compta: ${comptaUpdated}`);
+  }
+
+  const message = `${totalUpdated} SKU harmonisé(s), ${totalSkipped} inchangé(s). (${results.join(', ')})`;
+  ss.toast(message, 'Harmonisation SKU', 5);
+  logDebug_('harmonizeStockSkus', { totalUpdated, totalSkipped, results, mapping: oldBaseToNewBaseMap });
+}
+
+/**
+ * Harmonise les SKU dans une feuille donnée.
+ *
+ * @param {Sheet} sheet - La feuille à traiter
+ * @param {Object} oldBaseToNewBaseMap - Le mapping ancienne base → nouvelle base
+ * @param {Object} options - Options de configuration
+ * @param {number} options.headerRow - Ligne de l'en-tête
+ * @param {number} options.dataStartRow - Ligne de début des données
+ * @param {number} [options.skuColumn] - Colonne SKU (si fixe)
+ * @param {Function} [options.skuColumnResolver] - Fonction pour résoudre la colonne SKU via resolver
+ * @returns {Object} - { updated: number, skipped: number }
+ */
+function harmonizeSkusInSheet_(sheet, oldBaseToNewBaseMap, options) {
+  const result = { updated: 0, skipped: 0 };
+
+  const lastRow = sheet.getLastRow();
+  if (lastRow < options.dataStartRow) {
+    return result;
+  }
+
+  // Déterminer la colonne SKU
+  let skuColumn = options.skuColumn;
+
+  if (!skuColumn && options.skuColumnResolver) {
+    const headers = sheet.getRange(options.headerRow, 1, 1, sheet.getLastColumn()).getValues()[0];
+    const resolver = makeHeaderResolver_(headers);
+    skuColumn = options.skuColumnResolver(resolver);
+  }
+
+  if (!skuColumn) {
+    return result;
+  }
+
+  const numRows = lastRow - options.dataStartRow + 1;
+  const skuValues = sheet.getRange(options.dataStartRow, skuColumn, numRows, 1).getValues();
   const updatedSkus = [];
 
-  for (let i = 0; i < stockSkuValues.length; i++) {
-    const currentSku = String(stockSkuValues[i][0] || '').trim();
+  for (let i = 0; i < skuValues.length; i++) {
+    const currentSku = String(skuValues[i][0] || '').trim();
 
     if (!currentSku) {
       updatedSkus.push([currentSku]);
@@ -1374,7 +1441,7 @@ function harmonizeStockSkus() {
     // Vérifier si déjà au nouveau format (commence par un chiffre)
     if (/^\d/.test(currentSku)) {
       updatedSkus.push([currentSku]);
-      skippedCount++;
+      result.skipped++;
       continue;
     }
 
@@ -1382,7 +1449,7 @@ function harmonizeStockSkus() {
     const parsed = parseOldSkuFormat_(currentSku);
     if (!parsed) {
       updatedSkus.push([currentSku]);
-      skippedCount++;
+      result.skipped++;
       continue;
     }
 
@@ -1393,19 +1460,17 @@ function harmonizeStockSkus() {
       // Construire le nouveau SKU: nouvelle base + numéro (sans trait d'union)
       const newSku = newBase + parsed.numero;
       updatedSkus.push([newSku]);
-      updatedCount++;
+      result.updated++;
     } else {
       updatedSkus.push([currentSku]);
-      skippedCount++;
+      result.skipped++;
     }
   }
 
   // Appliquer les mises à jour
-  stock.getRange(STOCK_DATA_START_ROW, C_SKU_STOCK, numStockRows, 1).setValues(updatedSkus);
+  sheet.getRange(options.dataStartRow, skuColumn, numRows, 1).setValues(updatedSkus);
 
-  const message = `${updatedCount} SKU harmonisé(s), ${skippedCount} inchangé(s).`;
-  ss.toast(message, 'Harmonisation SKU', 5);
-  logDebug_('harmonizeStockSkus', { updated: updatedCount, skipped: skippedCount, mapping: oldBaseToNewBaseMap });
+  return result;
 }
 
 /**
