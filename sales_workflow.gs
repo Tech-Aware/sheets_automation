@@ -1281,24 +1281,14 @@ function applyMonthlySheetFormats_(sheet) {
   if (MONTHLY_LEDGER_INDEX.PRIX_VENTE >= 0) {
     sheet.getRange(1, MONTHLY_LEDGER_INDEX.PRIX_VENTE + 1, maxRows, 1).setNumberFormat('#,##0.00');
   }
-  // Colonne TAXES (format monétaire)
-  const taxColIndex = typeof MONTHLY_LEDGER_INDEX.TAXES !== 'undefined' ? MONTHLY_LEDGER_INDEX.TAXES : -1;
-  if (taxColIndex >= 0) {
-    sheet.getRange(1, taxColIndex + 1, maxRows, 1).setNumberFormat('#,##0.00');
+  if (MONTHLY_LEDGER_INDEX.PRIX_ACHAT >= 0) {
+    sheet.getRange(1, MONTHLY_LEDGER_INDEX.PRIX_ACHAT + 1, maxRows, 1).setNumberFormat('#,##0.00');
   }
-  // Colonne COUT DE REVIENT (anciennement PRIX D'ACHAT)
-  const costColIndex = typeof MONTHLY_LEDGER_INDEX.COUT_REVIENT !== 'undefined'
-    ? MONTHLY_LEDGER_INDEX.COUT_REVIENT
-    : MONTHLY_LEDGER_INDEX.PRIX_ACHAT;
-  if (costColIndex >= 0) {
-    sheet.getRange(1, costColIndex + 1, maxRows, 1).setNumberFormat('#,##0.00');
+  if (MONTHLY_LEDGER_INDEX.MARGE_BRUTE >= 0) {
+    sheet.getRange(1, MONTHLY_LEDGER_INDEX.MARGE_BRUTE + 1, maxRows, 1).setNumberFormat('#,##0.00');
   }
-  // Colonne BENEFICE NET (anciennement MARGE BRUTE)
-  const profitColIndex = typeof MONTHLY_LEDGER_INDEX.BENEFICE_NET !== 'undefined'
-    ? MONTHLY_LEDGER_INDEX.BENEFICE_NET
-    : MONTHLY_LEDGER_INDEX.MARGE_BRUTE;
-  if (profitColIndex >= 0) {
-    sheet.getRange(1, profitColIndex + 1, maxRows, 1).setNumberFormat('#,##0.00');
+  if (MONTHLY_LEDGER_INDEX.COEFF_MARGE >= 0) {
+    sheet.getRange(1, MONTHLY_LEDGER_INDEX.COEFF_MARGE + 1, maxRows, 1).setNumberFormat('#,##0.00');
   }
   if (MONTHLY_LEDGER_INDEX.NB_PIECES >= 0) {
     sheet.getRange(1, MONTHLY_LEDGER_INDEX.NB_PIECES + 1, maxRows, 1).setNumberFormat('0');
@@ -1714,45 +1704,38 @@ function updateLedgerResultRow_(sheet, headersLen) {
   // Bénéfice net = CA - Coût de revient - Taxes
   const net = summary.sumPrixVente - totalCost - taxes;
 
-  // Colonne E: Chiffre d'affaires (PRIX DE VENTE)
+  // Colonne E (PRIX DE VENTE): Chiffre d'affaires
   if (MONTHLY_LEDGER_INDEX.PRIX_VENTE >= 0) {
     const revenueCell = sheet.getRange(resultRowNumber, MONTHLY_LEDGER_INDEX.PRIX_VENTE + 1);
-    revenueCell.setValue(`Chiffre d'affaire : ${formatLedgerCurrencyLabel_(summary.sumPrixVente)}`);
-    revenueCell.setNote('Somme des prix de vente du mois.');
+    revenueCell.setValue(`CA : ${formatLedgerCurrencyLabel_(summary.sumPrixVente)}`);
+    revenueCell.setNote('Chiffre d\'affaires = somme des prix de vente du mois.');
   }
 
-  // Colonne F: Taxes (nouvelle colonne TAXES)
-  const taxColIndex = typeof MONTHLY_LEDGER_INDEX.TAXES !== 'undefined' ? MONTHLY_LEDGER_INDEX.TAXES : -1;
-  if (taxColIndex >= 0) {
-    const taxCell = sheet.getRange(resultRowNumber, taxColIndex + 1);
-    taxCell.setValue(`Taxes (${(taxRate * 100).toFixed(1)}%) : ${formatLedgerCurrencyLabel_(taxes)}`);
-    taxCell.setNote('Taxes micro-entreprise = ' + (taxRate * 100).toFixed(1) + '% du chiffre d\'affaires.');
+  // Colonne F (PRIX D'ACHAT): Coût de revient
+  if (MONTHLY_LEDGER_INDEX.PRIX_ACHAT >= 0) {
+    const costCell = sheet.getRange(resultRowNumber, MONTHLY_LEDGER_INDEX.PRIX_ACHAT + 1);
+    costCell.setValue(`Coût : ${formatLedgerCurrencyLabel_(totalCost)}`);
+    costCell.setNote('Coût de revient = somme des prix d\'achat + total des frais (colonnes K à M).');
   }
 
-  // Colonne G: Coût de revient (anciennement PRIX D'ACHAT, maintenant COUT DE REVIENT)
-  const costColIndex = typeof MONTHLY_LEDGER_INDEX.COUT_REVIENT !== 'undefined'
-    ? MONTHLY_LEDGER_INDEX.COUT_REVIENT
-    : MONTHLY_LEDGER_INDEX.PRIX_ACHAT;
-  if (costColIndex >= 0) {
-    const costCell = sheet.getRange(resultRowNumber, costColIndex + 1);
-    costCell.setValue(`Coût de revient : ${formatLedgerCurrencyLabel_(totalCost)}`);
-    costCell.setNote('Coût de revient = somme des prix d\'achat + total des frais saisis (colonnes L à N).');
+  // Colonne G (MARGE BRUTE): Bénéfice net
+  if (MONTHLY_LEDGER_INDEX.MARGE_BRUTE >= 0) {
+    const profitCell = sheet.getRange(resultRowNumber, MONTHLY_LEDGER_INDEX.MARGE_BRUTE + 1);
+    profitCell.setValue(`Bénéf : ${formatLedgerCurrencyLabel_(net)}`);
+    profitCell.setNote('Bénéfice net = CA - Coût de revient - Taxes (' + (taxRate * 100).toFixed(1) + '%).');
   }
 
-  // Colonne H: Bénéfice net (anciennement MARGE BRUTE, maintenant BENEFICE NET)
-  const profitColIndex = typeof MONTHLY_LEDGER_INDEX.BENEFICE_NET !== 'undefined'
-    ? MONTHLY_LEDGER_INDEX.BENEFICE_NET
-    : MONTHLY_LEDGER_INDEX.MARGE_BRUTE;
-  if (profitColIndex >= 0) {
-    const profitCell = sheet.getRange(resultRowNumber, profitColIndex + 1);
-    profitCell.setValue(`Bénéfice net : ${formatLedgerCurrencyLabel_(net)}`);
-    profitCell.setNote('Bénéfice net = Chiffre d\'affaire - Coût de revient - Taxes (' + (taxRate * 100).toFixed(1) + '%).');
+  // Colonne H (COEFF MARGE): Taxes
+  if (MONTHLY_LEDGER_INDEX.COEFF_MARGE >= 0) {
+    const taxCell = sheet.getRange(resultRowNumber, MONTHLY_LEDGER_INDEX.COEFF_MARGE + 1);
+    taxCell.setValue(`Taxes : ${formatLedgerCurrencyLabel_(taxes)}`);
+    taxCell.setNote('Taxes micro-entreprise = ' + (taxRate * 100).toFixed(1) + '% du CA.');
   }
 
   if (LEDGER_FEES_COLUMNS.MONTANT > 0) {
     const feeCell = sheet.getRange(resultRowNumber, LEDGER_FEES_COLUMNS.MONTANT);
     feeCell.setValue(`Frais : ${formatLedgerCurrencyLabel_(totalFees)}`);
-    feeCell.setNote('Total cumulé des montants de frais saisis dans le tableau des colonnes L à N.');
+    feeCell.setNote('Total cumulé des montants de frais saisis dans le tableau des colonnes K à M.');
   }
 }
 
