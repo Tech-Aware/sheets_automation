@@ -1416,27 +1416,28 @@ function harmonizeSkusInSheetById_(sheet, idToNewBaseMap, options) {
       continue;
     }
 
-    // Vérifier si déjà au nouveau format (commence par un chiffre)
-    if (/^\d/.test(currentSku)) {
+    // Chercher la nouvelle base via l'ID
+    const newBase = id ? idToNewBaseMap[id] : null;
+
+    if (!newBase) {
       updatedSkus.push([currentSku]);
       result.skipped++;
       continue;
     }
 
-    // Parser le SKU actuel: ex. "JLF-324" → base=JLF, numero=324
-    const parsed = parseOldSkuFormat_(currentSku);
+    // Parser le SKU actuel (deux formats possibles)
+    const parsed = parseSkuFormat_(currentSku);
     if (!parsed) {
       updatedSkus.push([currentSku]);
       result.skipped++;
       continue;
     }
 
-    // Chercher la nouvelle base via l'ID
-    const newBase = id ? idToNewBaseMap[id] : null;
+    // Construire le nouveau SKU: nouvelle base + numéro
+    const newSku = newBase + parsed.numero;
 
-    if (newBase) {
-      // Construire le nouveau SKU: nouvelle base + numéro (sans trait d'union)
-      const newSku = newBase + parsed.numero;
+    // Vérifier si le SKU a changé
+    if (newSku !== currentSku) {
       updatedSkus.push([newSku]);
       result.updated++;
     } else {
@@ -1449,6 +1450,40 @@ function harmonizeSkusInSheetById_(sheet, idToNewBaseMap, options) {
   sheet.getRange(options.dataStartRow, options.skuColumn, numRows, 1).setValues(updatedSkus);
 
   return result;
+}
+
+/**
+ * Parse un SKU dans différents formats possibles:
+ * - Format ancien: "JLF-324" → { letters: "JLF", numero: "324" }
+ * - Format actuel (potentiellement incorrect): "22JLF16" → { letters: "JLF", numero: "16" }
+ *
+ * @param {string} sku - Le SKU à parser
+ * @returns {Object|null} - Les composants parsés ou null si format invalide
+ */
+function parseSkuFormat_(sku) {
+  if (!sku) return null;
+
+  // Format 1: CHIFFRES + LETTRES + CHIFFRES (ex: "22JLF16")
+  const matchNew = sku.match(/^(\d+)([A-Za-z]+)(\d+)$/);
+  if (matchNew) {
+    return {
+      currentLotId: matchNew[1],
+      letters: matchNew[2].toUpperCase(),
+      numero: matchNew[3]
+    };
+  }
+
+  // Format 2: LETTRES + TRAIT D'UNION + CHIFFRES (ex: "JLF-324")
+  const matchOld = sku.match(/^([A-Za-z]+)-(\d+)$/);
+  if (matchOld) {
+    return {
+      currentLotId: null,
+      letters: matchOld[1].toUpperCase(),
+      numero: matchOld[2]
+    };
+  }
+
+  return null;
 }
 
 /**
