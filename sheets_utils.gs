@@ -1265,3 +1265,244 @@ function recalculateAllLedgerTaxes() {
   ss.toast(`${updatedCount} feuille(s) Compta mise(s) à jour avec les taxes.`, 'Calcul des taxes', 5);
 }
 
+/**
+ * Harmonise les SKU dans toutes les feuilles (Stock, Ventes, Compta) avec les REFERENCES des Achats.
+ *
+ * Le lien entre les feuilles se fait via l'ID (colonne A dans toutes les feuilles).
+ * La colonne REFERENCE (G) dans Achats contient la nouvelle base SKU (ex: "16JLF").
+ *
+ * Transformation: ancien format BASE-NUMERO → nouveau format NOUVELLE_BASE+NUMERO
+ * Exemple: ID "16" + SKU "JLF-324" → "16JLF324" (où "16JLF" vient de la REFERENCE Achats pour l'ID 16)
+ */
+function harmonizeStockSkus() {
+  const ss = SpreadsheetApp.getActive();
+  const achats = ss.getSheetByName('Achats');
+
+  if (!achats) {
+    ss.toast('Feuille "Achats" introuvable.', 'Erreur', 5);
+    return;
+  }
+
+  // Colonnes Achats : ID en A (1), REFERENCE en G (7)
+  const ACHATS_ID_COL = 1;
+  const ACHATS_REF_COL = 7;
+  const ACHATS_DATA_START_ROW = 2;
+
+  // Lire les données Achats pour construire le mapping ID → nouvelle base
+  const lastAchats = achats.getLastRow();
+  if (lastAchats < ACHATS_DATA_START_ROW) {
+    ss.toast('Aucune donnée dans la feuille Achats.', 'Erreur', 5);
+    return;
+  }
+
+  const numAchatsRows = lastAchats - ACHATS_DATA_START_ROW + 1;
+  const achatsIdValues = achats.getRange(ACHATS_DATA_START_ROW, ACHATS_ID_COL, numAchatsRows, 1).getValues();
+  const achatsRefValues = achats.getRange(ACHATS_DATA_START_ROW, ACHATS_REF_COL, numAchatsRows, 1).getValues();
+
+  // Construire le mapping: ID → nouvelle base
+  // Ex: "16" → "16JLF"
+  const idToNewBaseMap = Object.create(null);
+
+  for (let i = 0; i < achatsIdValues.length; i++) {
+    const id = String(achatsIdValues[i][0] || '').trim();
+    const newBase = String(achatsRefValues[i][0] || '').trim().toUpperCase();
+
+    if (!id || !newBase) continue;
+
+    // Vérifier que la nouvelle base est au bon format (chiffres + lettres)
+    if (!/^\d+[A-Z]+$/.test(newBase)) continue;
+
+    idToNewBaseMap[id] = newBase;
+  }
+
+  if (Object.keys(idToNewBaseMap).length === 0) {
+    ss.toast('Aucune REFERENCE valide trouvée dans Achats (format attendu: chiffres+lettres, ex: 16JLF).', 'Erreur', 5);
+    return;
+  }
+
+  // Compteurs globaux
+  let totalUpdated = 0;
+  let totalSkipped = 0;
+  const results = [];
+
+  // 1. Harmoniser les SKU du Stock (ID en A, SKU en C)
+  const stock = ss.getSheetByName('Stock');
+  if (stock) {
+    const stockResult = harmonizeSkusInSheetById_(stock, idToNewBaseMap, {
+      dataStartRow: 7,
+      idColumn: 1,    // Colonne A
+      skuColumn: 3    // Colonne C
+    });
+    totalUpdated += stockResult.updated;
+    totalSkipped += stockResult.skipped;
+    results.push(`Stock: ${stockResult.updated}`);
+  }
+
+  // 2. Harmoniser les SKU des Ventes (ID en A, SKU en D)
+  const ventes = ss.getSheetByName('Ventes');
+  if (ventes) {
+    const ventesResult = harmonizeSkusInSheetById_(ventes, idToNewBaseMap, {
+      dataStartRow: 7,
+      idColumn: 1,    // Colonne A
+      skuColumn: 4    // Colonne D
+    });
+    totalUpdated += ventesResult.updated;
+    totalSkipped += ventesResult.skipped;
+    results.push(`Ventes: ${ventesResult.updated}`);
+  }
+
+  // 3. Harmoniser les SKU des feuilles Compta (ID en A, SKU en B)
+  const sheets = ss.getSheets();
+  let comptaUpdated = 0;
+  let comptaSkipped = 0;
+
+  for (let i = 0; i < sheets.length; i++) {
+    const sheet = sheets[i];
+    const name = sheet.getName();
+
+    // Vérifier si c'est une feuille Compta (format: "Compta MM-YYYY")
+    if (name && name.match(/^Compta\s+\d{2}-\d{4}$/)) {
+      const comptaResult = harmonizeSkusInSheetById_(sheet, idToNewBaseMap, {
+        dataStartRow: 2,
+        idColumn: 1,    // Colonne A
+        skuColumn: 2    // Colonne B
+      });
+      comptaUpdated += comptaResult.updated;
+      comptaSkipped += comptaResult.skipped;
+    }
+  }
+
+  totalUpdated += comptaUpdated;
+  totalSkipped += comptaSkipped;
+  if (comptaUpdated > 0 || comptaSkipped > 0) {
+    results.push(`Compta: ${comptaUpdated}`);
+  }
+
+  const message = `${totalUpdated} SKU harmonisé(s), ${totalSkipped} inchangé(s). (${results.join(', ')})`;
+  ss.toast(message, 'Harmonisation SKU', 5);
+  logDebug_('harmonizeStockSkus', { totalUpdated, totalSkipped, results });
+}
+
+/**
+ * Harmonise les SKU dans une feuille en utilisant l'ID comme lien.
+ *
+ * @param {Sheet} sheet - La feuille à traiter
+ * @param {Object} idToNewBaseMap - Le mapping ID → nouvelle base
+ * @param {Object} options - Options de configuration
+ * @param {number} options.dataStartRow - Ligne de début des données
+ * @param {number} options.idColumn - Colonne contenant l'ID
+ * @param {number} options.skuColumn - Colonne contenant le SKU
+ * @returns {Object} - { updated: number, skipped: number }
+ */
+function harmonizeSkusInSheetById_(sheet, idToNewBaseMap, options) {
+  const result = { updated: 0, skipped: 0 };
+
+  const lastRow = sheet.getLastRow();
+  if (lastRow < options.dataStartRow) {
+    return result;
+  }
+
+  const numRows = lastRow - options.dataStartRow + 1;
+  const idValues = sheet.getRange(options.dataStartRow, options.idColumn, numRows, 1).getValues();
+  const skuValues = sheet.getRange(options.dataStartRow, options.skuColumn, numRows, 1).getValues();
+  const updatedSkus = [];
+
+  for (let i = 0; i < skuValues.length; i++) {
+    const id = String(idValues[i][0] || '').trim();
+    const currentSku = String(skuValues[i][0] || '').trim();
+
+    if (!currentSku) {
+      updatedSkus.push([currentSku]);
+      continue;
+    }
+
+    // Chercher la nouvelle base via l'ID
+    const newBase = id ? idToNewBaseMap[id] : null;
+
+    if (!newBase) {
+      updatedSkus.push([currentSku]);
+      result.skipped++;
+      continue;
+    }
+
+    // Parser le SKU actuel (deux formats possibles)
+    const parsed = parseSkuFormat_(currentSku);
+    if (!parsed) {
+      updatedSkus.push([currentSku]);
+      result.skipped++;
+      continue;
+    }
+
+    // Construire le nouveau SKU: nouvelle base + numéro
+    const newSku = newBase + parsed.numero;
+
+    // Vérifier si le SKU a changé
+    if (newSku !== currentSku) {
+      updatedSkus.push([newSku]);
+      result.updated++;
+    } else {
+      updatedSkus.push([currentSku]);
+      result.skipped++;
+    }
+  }
+
+  // Appliquer les mises à jour
+  sheet.getRange(options.dataStartRow, options.skuColumn, numRows, 1).setValues(updatedSkus);
+
+  return result;
+}
+
+/**
+ * Parse un SKU dans différents formats possibles:
+ * - Format ancien: "JLF-324" → { letters: "JLF", numero: "324" }
+ * - Format actuel (potentiellement incorrect): "22JLF16" → { letters: "JLF", numero: "16" }
+ *
+ * @param {string} sku - Le SKU à parser
+ * @returns {Object|null} - Les composants parsés ou null si format invalide
+ */
+function parseSkuFormat_(sku) {
+  if (!sku) return null;
+
+  // Format 1: CHIFFRES + LETTRES + CHIFFRES (ex: "22JLF16")
+  const matchNew = sku.match(/^(\d+)([A-Za-z]+)(\d+)$/);
+  if (matchNew) {
+    return {
+      currentLotId: matchNew[1],
+      letters: matchNew[2].toUpperCase(),
+      numero: matchNew[3]
+    };
+  }
+
+  // Format 2: LETTRES + TRAIT D'UNION + CHIFFRES (ex: "JLF-324")
+  const matchOld = sku.match(/^([A-Za-z]+)-(\d+)$/);
+  if (matchOld) {
+    return {
+      currentLotId: null,
+      letters: matchOld[1].toUpperCase(),
+      numero: matchOld[2]
+    };
+  }
+
+  return null;
+}
+
+/**
+ * Parse un SKU Stock au format ancien: BASE-NUMERO
+ * Exemple: "JLF-324" → { base: "JLF", numero: "324" }
+ *
+ * @param {string} sku - Le SKU au format ancien
+ * @returns {Object|null} - Les composants parsés ou null si format invalide
+ */
+function parseOldSkuFormat_(sku) {
+  if (!sku) return null;
+
+  // Regex pour capturer: lettres (base) + trait d'union + chiffres (numero)
+  const match = sku.match(/^([A-Za-z]+)-(\d+)$/);
+  if (!match) return null;
+
+  return {
+    base: match[1].toUpperCase(),
+    numero: match[2]
+  };
+}
+
