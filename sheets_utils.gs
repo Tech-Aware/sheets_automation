@@ -1266,12 +1266,15 @@ function recalculateAllLedgerTaxes() {
 }
 
 /**
- * Harmonise les SKU du Stock avec ceux des Achats.
+ * Harmonise les SKU du Stock avec les REFERENCES des Achats.
  *
- * Transformation: ancien format (Stock) BASE-NUMERO → nouveau format (Achats) ID_LOT+BASE+NUMERO
- * Exemple: JLF-324 → 4JLF324
+ * La colonne REFERENCE dans Achats contient la nouvelle base SKU (ex: "4JLF")
+ * composée de l'ID du lot + les lettres de la base.
  *
- * L'action parcourt les Achats pour construire un mapping puis met à jour les SKU du Stock.
+ * Transformation: ancien format (Stock) BASE-NUMERO → nouveau format NOUVELLE_BASE+NUMERO
+ * Exemple: JLF-324 → 4JLF324 (où "4JLF" vient de la REFERENCE Achats)
+ *
+ * Le matching se fait en comparant les lettres de la REFERENCE Achats avec la BASE du SKU Stock.
  */
 function harmonizeStockSkus() {
   const ss = SpreadsheetApp.getActive();
@@ -1297,7 +1300,6 @@ function harmonizeStockSkus() {
   const stockResolver = makeHeaderResolver_(stockHeaders);
   const C_SKU_STOCK = stockResolver.colExact(HEADERS.STOCK.SKU)
     || stockResolver.colExact(HEADERS.STOCK.REFERENCE);
-  const C_ID_STOCK = stockResolver.colExact(HEADERS.STOCK.ID);
 
   if (!C_SKU_STOCK) {
     ss.toast('Colonne SKU introuvable dans Stock.', 'Erreur', 5);
@@ -1309,7 +1311,6 @@ function harmonizeStockSkus() {
   const achatsResolver = makeHeaderResolver_(achatsHeaders);
   const C_REF_ACHATS = achatsResolver.colExact(HEADERS.ACHATS.REFERENCE)
     || achatsResolver.colWhere(h => h.includes('reference'));
-  const C_ID_ACHATS = achatsResolver.colExact(HEADERS.ACHATS.ID);
 
   if (!C_REF_ACHATS) {
     ss.toast('Colonne REFERENCE introuvable dans Achats.', 'Erreur', 5);
@@ -1324,34 +1325,27 @@ function harmonizeStockSkus() {
   }
 
   const achatsRefValues = achats.getRange(ACHATS_DATA_START_ROW, C_REF_ACHATS, lastAchats - ACHATS_DATA_START_ROW + 1, 1).getValues();
-  const achatsIdValues = C_ID_ACHATS
-    ? achats.getRange(ACHATS_DATA_START_ROW, C_ID_ACHATS, lastAchats - ACHATS_DATA_START_ROW + 1, 1).getValues()
-    : null;
 
-  // Construire le mapping: ancien SKU (BASE-NUMERO) → nouveau SKU (ID_LOT+BASE+NUMERO)
-  // et aussi: ID → nouveau SKU (pour les articles avec ID correspondant)
-  const oldToNewMap = Object.create(null);
-  const idToNewSkuMap = Object.create(null);
+  // Construire le mapping: ancienne base (lettres) → nouvelle base (ID_LOT + lettres)
+  // Ex: "JLF" → "4JLF"
+  const oldBaseToNewBaseMap = Object.create(null);
 
   for (let i = 0; i < achatsRefValues.length; i++) {
-    const newSku = String(achatsRefValues[i][0] || '').trim();
-    if (!newSku) continue;
+    const newBase = String(achatsRefValues[i][0] || '').trim().toUpperCase();
+    if (!newBase) continue;
 
-    // Parser le nouveau SKU: ex. "4JLF324" → lotId=4, base=JLF, numero=324
-    const parsed = parseNewSkuFormat_(newSku);
+    // Parser la nouvelle base: ex. "4JLF" → lotId=4, letters=JLF
+    const parsed = parseNewBaseFormat_(newBase);
     if (!parsed) continue;
 
-    // Construire l'ancien format: "JLF-324"
-    const oldFormat = parsed.base + '-' + parsed.numero;
-    oldToNewMap[oldFormat.toUpperCase()] = newSku;
+    // Mapping: ancienne base (lettres seules) → nouvelle base complète
+    // Ex: "JLF" → "4JLF"
+    oldBaseToNewBaseMap[parsed.letters] = newBase;
+  }
 
-    // Associer l'ID si disponible
-    if (achatsIdValues) {
-      const achatId = String(achatsIdValues[i][0] || '').trim();
-      if (achatId) {
-        idToNewSkuMap[achatId] = newSku;
-      }
-    }
+  if (Object.keys(oldBaseToNewBaseMap).length === 0) {
+    ss.toast('Aucune REFERENCE valide trouvée dans Achats (format attendu: chiffres+lettres, ex: 4JLF).', 'Erreur', 5);
+    return;
   }
 
   // Lire les SKU du Stock
@@ -1363,9 +1357,6 @@ function harmonizeStockSkus() {
 
   const numStockRows = lastStock - STOCK_DATA_START_ROW + 1;
   const stockSkuValues = stock.getRange(STOCK_DATA_START_ROW, C_SKU_STOCK, numStockRows, 1).getValues();
-  const stockIdValues = C_ID_STOCK
-    ? stock.getRange(STOCK_DATA_START_ROW, C_ID_STOCK, numStockRows, 1).getValues()
-    : null;
 
   // Parcourir et mettre à jour les SKU du Stock
   let updatedCount = 0;
@@ -1387,19 +1378,20 @@ function harmonizeStockSkus() {
       continue;
     }
 
-    // Chercher dans le mapping par SKU ancien format
-    const upperSku = currentSku.toUpperCase();
-    let newSku = oldToNewMap[upperSku];
-
-    // Si non trouvé par SKU, essayer par ID
-    if (!newSku && stockIdValues) {
-      const stockId = String(stockIdValues[i][0] || '').trim();
-      if (stockId) {
-        newSku = idToNewSkuMap[stockId];
-      }
+    // Parser le SKU actuel: ex. "JLF-324" → base=JLF, numero=324
+    const parsed = parseOldSkuFormat_(currentSku);
+    if (!parsed) {
+      updatedSkus.push([currentSku]);
+      skippedCount++;
+      continue;
     }
 
-    if (newSku) {
+    // Chercher la nouvelle base dans le mapping
+    const newBase = oldBaseToNewBaseMap[parsed.base];
+
+    if (newBase) {
+      // Construire le nouveau SKU: nouvelle base + numéro (sans trait d'union)
+      const newSku = newBase + parsed.numero;
       updatedSkus.push([newSku]);
       updatedCount++;
     } else {
@@ -1413,27 +1405,46 @@ function harmonizeStockSkus() {
 
   const message = `${updatedCount} SKU harmonisé(s), ${skippedCount} inchangé(s).`;
   ss.toast(message, 'Harmonisation SKU', 5);
-  logDebug_('harmonizeStockSkus', { updated: updatedCount, skipped: skippedCount });
+  logDebug_('harmonizeStockSkus', { updated: updatedCount, skipped: skippedCount, mapping: oldBaseToNewBaseMap });
 }
 
 /**
- * Parse un SKU au nouveau format: ID_LOT + BASE + NUMERO
- * Exemple: "4JLF324" → { lotId: "4", base: "JLF", numero: "324" }
+ * Parse une REFERENCE Achats au nouveau format: ID_LOT + LETTRES
+ * Exemple: "4JLF" → { lotId: "4", letters: "JLF" }
  *
- * @param {string} sku - Le SKU au nouveau format
+ * @param {string} ref - La REFERENCE au nouveau format
  * @returns {Object|null} - Les composants parsés ou null si format invalide
  */
-function parseNewSkuFormat_(sku) {
-  if (!sku) return null;
+function parseNewBaseFormat_(ref) {
+  if (!ref) return null;
 
-  // Regex pour capturer: chiffres initiaux (lot) + lettres (base) + chiffres finaux (numero)
-  const match = sku.match(/^(\d+)([A-Za-z]+)(\d+)$/);
+  // Regex pour capturer: chiffres initiaux (lot) + lettres (base)
+  const match = ref.match(/^(\d+)([A-Za-z]+)$/);
   if (!match) return null;
 
   return {
     lotId: match[1],
-    base: match[2].toUpperCase(),
-    numero: match[3]
+    letters: match[2].toUpperCase()
+  };
+}
+
+/**
+ * Parse un SKU Stock au format ancien: BASE-NUMERO
+ * Exemple: "JLF-324" → { base: "JLF", numero: "324" }
+ *
+ * @param {string} sku - Le SKU au format ancien
+ * @returns {Object|null} - Les composants parsés ou null si format invalide
+ */
+function parseOldSkuFormat_(sku) {
+  if (!sku) return null;
+
+  // Regex pour capturer: lettres (base) + trait d'union + chiffres (numero)
+  const match = sku.match(/^([A-Za-z]+)-(\d+)$/);
+  if (!match) return null;
+
+  return {
+    base: match[1].toUpperCase(),
+    numero: match[2]
   };
 }
 
